@@ -1370,7 +1370,9 @@ export class EventService {
       });
       return { message: 'User removed from event successfully' };
     } catch (error) {
-      throw new InternalServerErrorException(error.message);
+      throw new InternalServerErrorException(
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
@@ -1401,7 +1403,8 @@ export class EventService {
       await this.prisma.event.delete({ where: { id } });
       return { message: `Event ${id} deleted successfully` };
     } catch (error) {
-      throw new InternalServerErrorException(error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(message);
     }
   }
 
