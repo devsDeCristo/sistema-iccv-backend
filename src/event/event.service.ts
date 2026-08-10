@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -870,6 +872,29 @@ export class EventService {
   //   return { coverUrl, logoUrl };
   // }
 
+  /**
+   * Garante que não exista outro evento com o mesmo nome (ignorando
+   * maiúsculas/minúsculas e espaços nas pontas).
+   */
+  private async ensureEventNameIsAvailable(
+    name: string,
+    options: { ignoreEventId?: string; tx?: Prisma.TransactionClient } = {},
+  ) {
+    const client = options.tx ?? this.prisma;
+
+    const existing = await client.event.findFirst({
+      where: {
+        name: { equals: name, mode: 'insensitive' },
+        ...(options.ignoreEventId ? { id: { not: options.ignoreEventId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new ConflictException('Já existe um evento com esse nome!');
+    }
+  }
+
   async create(data: EventDto) {
     // valida os arquivos antes de criar qualquer registro
     const coverExtension = data.coverFile
@@ -879,34 +904,49 @@ export class EventService {
       ? this.resolveImageExtension(data.logoFile)
       : null;
 
+    const name = data.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException('O nome do evento é obrigatório');
+    }
+
     try {
       data.endDate = new Date(data.endDate);
       data.startDate = new Date(data.startDate);
 
-      // 1. Cria o evento primeiro (sem upload)
-      const event = await this.prisma.event.create({
-        data: {
-          type: data.type,
-          endDate: data.endDate,
-          startDate: data.startDate,
-          name: data.name,
-          data: data.data as Prisma.JsonObject,
-          groupRoles: {
-            create: data.groupRoles?.map((gr) => ({
-              name: gr.name,
-              capacity: gr.capacity,
-              roles: {
-                create: gr.roles.map((r) => ({
-                  price: r.price,
-                  description: r.description,
+      // 1. Cria o evento primeiro (sem upload).
+      // A verificação de nome duplicado roda dentro da transaction em modo
+      // Serializable para que dois cliques seguidos não criem eventos repetidos.
+      const event = await this.prisma.$transaction(
+        async (tx) => {
+          await this.ensureEventNameIsAvailable(name, { tx });
+
+          return tx.event.create({
+            data: {
+              type: data.type,
+              endDate: data.endDate,
+              startDate: data.startDate,
+              name,
+              data: data.data as Prisma.JsonObject,
+              groupRoles: {
+                create: data.groupRoles?.map((gr) => ({
+                  name: gr.name,
+                  capacity: gr.capacity,
+                  roles: {
+                    create: gr.roles.map((r) => ({
+                      price: r.price,
+                      description: r.description,
+                    })),
+                  },
                 })),
               },
-            })),
-          },
-          groupLink: data.groupLink,
-          isActive: true,
+              groupLink: data.groupLink,
+              isActive: true,
+            },
+          });
         },
-      });
+        { isolationLevel: 'Serializable' },
+      );
 
       // 2. Uploads fora da transaction
 
@@ -945,6 +985,21 @@ export class EventService {
 
       return updatedEvent;
     } catch (error) {
+      // erros de negócio (ex.: nome duplicado) devem chegar ao front como estão
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // duas criações simultâneas com o mesmo nome: o Postgres aborta uma delas
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      ) {
+        throw new ConflictException(
+          'Outro evento com esse nome está sendo criado neste momento. Tente novamente.',
+        );
+      }
+
       this.logger.error(
         'Falha ao criar evento',
         error instanceof Error ? error.stack : String(error),
