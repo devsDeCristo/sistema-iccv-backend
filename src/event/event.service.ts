@@ -1201,6 +1201,15 @@ export class EventService {
 
     if (!event) throw new NotFoundException('Event does not exist');
 
+    const name = updateEvent.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException('O nome do evento é obrigatório');
+    }
+
+    // valida o nome antes dos uploads para não subir imagem de update que vai falhar
+    await this.ensureEventNameIsAvailable(name, { ignoreEventId: id });
+
     // ================= UPLOADS (FORA DA TRANSACTION) =================
     let coverUrl = event.data?.['coverUrl'] ?? null;
     let logoUrl = event.data?.['logoUrl'] ?? null;
@@ -1273,7 +1282,7 @@ export class EventService {
         where: { id },
         data: {
           type: updateEvent.type,
-          name: updateEvent.name,
+          name,
           startDate,
           endDate,
           isActive: updateEvent.isActive,
