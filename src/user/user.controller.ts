@@ -19,8 +19,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { UserDTO } from './dto/user.dto';
-import * as admin from 'firebase-admin';
 import { UserService } from './user.service';
+import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
@@ -113,19 +113,10 @@ export class UserController {
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    const bucket = admin.storage().bucket();
-    const photoPath = file.originalname;
+    // reaproveita o util para não duplicar o cacheControl e o versionamento da URL
+    const { url } = await uploadImageFirebase(file, file.originalname);
 
-    const bucketName = admin.storage().bucket().name;
-
-    const fileBucket = bucket.file(photoPath);
-    await fileBucket.save(file.buffer, {
-      contentType: file.mimetype,
-    });
-
-    const publicPath = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${photoPath}?alt=media`;
-
-    await this.userService.setProfilePhoto(id, publicPath);
+    await this.userService.setProfilePhoto(id, url);
     return { message: 'Foto de perfil atualizada com sucesso' };
   }
 }
