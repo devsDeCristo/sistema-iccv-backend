@@ -49,7 +49,7 @@ model Event {
   createdAt  DateTime       @default(now())
   updateAt   DateTime       @updatedAt
   isActive   Boolean        @default(false)
-  groupLink  String?
+  groupLink  String? // link do grupo do evento (Inativo)
   type       EventType      @default(CURSILHO)
   data       Json?
   users      EventOnUsers[]
@@ -93,6 +93,7 @@ model GroupRoles {
   eventId  String
   event    Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
   roles    RolesRegistration[]
+  link     String?
 
   @@map("group_roles")
 }
@@ -215,12 +216,12 @@ model TeamOnUsers {
 
 model Log {
   id        String   @id @default(uuid())
-  model     String   // nome da tabela (ex: User, Order, Map)
-  action    String   // create | update | delete
-  entityId  String?  // id do registro afetado
-  before    Json?    // estado anterior
-  after     Json?    // estado posterior
-  userId    String?  // se quiser relacionar ao usuário
+  model     String // nome da tabela (ex: User, Order, Map)
+  action    String // create | update | delete
+  entityId  String? // id do registro afetado
+  before    Json? // estado anterior
+  after     Json? // estado posterior
+  userId    String? // se quiser relacionar ao usuário
   createdAt DateTime @default(now())
 
   @@map("logs")

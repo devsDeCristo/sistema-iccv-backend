@@ -872,6 +872,11 @@ export class EventService {
   //   return { coverUrl, logoUrl };
   // }
 
+  /** Link do grupo é opcional: string vazia vira null no banco */
+  private normalizeGroupLink(link?: string | null) {
+    return link?.trim() || null;
+  }
+
   /**
    * Garante que não exista outro evento com o mesmo nome (ignorando
    * maiúsculas/minúsculas e espaços nas pontas).
@@ -932,6 +937,7 @@ export class EventService {
                 create: data.groupRoles?.map((gr) => ({
                   name: gr.name,
                   capacity: gr.capacity,
+                  link: this.normalizeGroupLink(gr.link),
                   roles: {
                     create: gr.roles.map((r) => ({
                       price: r.price,
@@ -1320,12 +1326,21 @@ export class EventService {
           ops.push(
             this.prisma.groupRoles.update({
               where: { id: groupId },
-              data: { name: group.name, capacity: group.capacity },
+              data: {
+                name: group.name,
+                capacity: group.capacity,
+                link: this.normalizeGroupLink(group.link),
+              },
             }),
           );
         } else {
           const created = await this.prisma.groupRoles.create({
-            data: { name: group.name, capacity: group.capacity, eventId: id },
+            data: {
+              name: group.name,
+              capacity: group.capacity,
+              link: this.normalizeGroupLink(group.link),
+              eventId: id,
+            },
           });
           groupId = created.id;
         }

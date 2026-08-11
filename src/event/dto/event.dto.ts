@@ -44,6 +44,15 @@ class GroupRoleDto {
   @IsInt()
   capacity: number;
 
+  @ApiProperty({
+    example: 'https://chat.whatsapp.com/xxxxxxxxxxxxxxxxxxxx',
+    description: 'Link do grupo de whatsapp deste grupo (opcional)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  link?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RoleDto)
