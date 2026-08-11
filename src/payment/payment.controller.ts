@@ -20,6 +20,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
+import { RolesGuard } from 'src/decorators/roles.guard';
+import { Roles } from 'src/decorators/roles.decorator';
+import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import {
   CreatePaymentCheckoutDto,
   payloadCreatePaymentCheckoutDto,
@@ -29,7 +32,7 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('payments')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
@@ -55,6 +58,7 @@ export class PaymentController {
   // Pagamentos por evento
   // ===============================
   @ApiOperation({ summary: 'Get payments by event' })
+  @Roles(...ADMIN_AREA_ROLES)
   @Get('events/:idEvent/payments')
   findByEvent(@Param('idEvent') eventId: string) {
     return this.paymentService.findPaymentsByEvent(eventId);
@@ -83,12 +87,12 @@ export class PaymentController {
   // ===============================
 
   @ApiOperation({ summary: 'Update payment' })
+  @Roles(...ADMIN_AREA_ROLES)
   @Put('payments/:paymentId')
   @UseInterceptors(
     FileFieldsInterceptor([{ name: 'receiptFile', maxCount: 1 }]),
   )
   @ApiConsumes('multipart/form-data')
-  @UseGuards(JwtAuthGuard)
   update(
     @Param('paymentId') paymentId: string,
     @UploadedFiles()
@@ -107,6 +111,7 @@ export class PaymentController {
   // Reembolso
   // ===============================
   @ApiOperation({ summary: 'Refund payment' })
+  @Roles(...ADMIN_AREA_ROLES)
   @Patch('payments/:paymentId/refund')
   refund(@Param('paymentId') paymentId: string) {
     return this.paymentService.refundPayment(paymentId);

@@ -6,6 +6,7 @@ import {
   Query,
   Post,
   Put,
+  Req,
   UploadedFile,
   UseInterceptors,
   UseGuards,
@@ -22,6 +23,9 @@ import * as admin from 'firebase-admin';
 import { UserService } from './user.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
+import { RolesGuard } from 'src/decorators/roles.guard';
+import { Roles } from 'src/decorators/roles.decorator';
+import { ADMIN_ROLES } from 'src/auth/roles';
 import { EventService } from 'src/event/event.service';
 
 @ApiTags('users')
@@ -55,7 +59,8 @@ export class UserController {
   // }
 
   @ApiOperation({ summary: 'All users' })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
   @Get()
   async findAll(@Query() filters: Partial<UserDTO>) {
     const users = await this.userService.findAll(filters);
@@ -63,7 +68,8 @@ export class UserController {
   }
 
   @ApiOperation({ summary: 'Get insights users' })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
   @Get('insights')
   async findInsightsEvents() {
     return this.userService.findInsightsEvents();
@@ -86,8 +92,12 @@ export class UserController {
   @ApiOperation({ summary: 'Edit user' })
   @UseGuards(JwtAuthGuard)
   @Put(':id')
-  async update(@Param('id') id: string, @Body() data: UserDTO) {
-    return this.userService.update(id, data);
+  async update(
+    @Param('id') id: string,
+    @Body() data: UserDTO,
+    @Req() req: any,
+  ) {
+    return this.userService.update(id, data, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Edit user' })

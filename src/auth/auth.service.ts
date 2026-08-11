@@ -6,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UserService } from 'src/user/user.service';
+import { ADMIN_AREA_ROLES } from './roles';
 
 @Injectable()
 export class AuthService {
@@ -19,7 +20,8 @@ export class AuthService {
     if (!userConsult) {
       throw new NotFoundException('Usuário não encontrado');
     }
-    if (test === 'admin' && userConsult.role !== 1) {
+    // o financeiro também entra no painel, mas com abas restritas no front
+    if (test === 'admin' && !ADMIN_AREA_ROLES.includes(userConsult.role)) {
       throw new UnauthorizedException('Usuário não é administrador');
     }
     return {

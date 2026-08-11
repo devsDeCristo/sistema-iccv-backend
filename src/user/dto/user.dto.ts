@@ -2,12 +2,14 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEmail,
+  IsIn,
   IsInt,
   IsString,
   IsOptional,
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { ASSIGNABLE_ROLES } from 'src/auth/roles';
 
 export class UserDTO {
   @ApiProperty({
@@ -68,10 +70,13 @@ export class UserDTO {
   birthday: Date;
 
   @ApiProperty({
-    example: 1,
-    description: 'Papel - 1 - Admin',
+    example: 5,
+    description:
+      'Permissão - 1: Super Admin, 2: Admin, 3: Financeiro, 5: Usuário',
+    enum: ASSIGNABLE_ROLES,
   })
   @IsInt()
+  @IsIn(ASSIGNABLE_ROLES)
   @IsOptional()
   role?: number;
 

@@ -19,6 +19,7 @@ import {
   PrismaService,
 } from '../prisma';
 import { EventDto } from './dto/event.dto';
+import { isAdminRole } from 'src/auth/roles';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
@@ -1491,7 +1492,7 @@ export class EventService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    if (requester.role !== 1) {
+    if (!isAdminRole(requester.role)) {
       throw new UnauthorizedException('Usuário não é administrador');
     }
 

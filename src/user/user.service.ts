@@ -1,12 +1,19 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma';
 import { UserDTO } from './dto/user.dto';
+import {
+  ADMIN_ROLES,
+  ASSIGNABLE_ROLES,
+  Role,
+  isAdminRole,
+} from 'src/auth/roles';
 import { enviarEmailConfirmacao } from 'src/nodeMailer/sendEmail';
 import { JwtService } from '@nestjs/jwt';
 
@@ -33,6 +40,9 @@ export class UserService {
       const user = await this.prisma.user.create({
         data: {
           ...data,
+          // o cadastro é público: a permissão nunca vem do corpo da requisição.
+          // Promoção de perfil só acontece pelo painel (PUT /users/:id por admin).
+          role: Role.USER,
           password:
             '$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW',
         },
@@ -161,7 +171,11 @@ export class UserService {
     return this.prisma.user.findFirst({ where: { id } });
   }
 
-  async update(id: string, data: UserDTO) {
+  /**
+   * @param requesterId usuário autenticado que disparou a edição. Quando ausente
+   * (chamada interna), nenhuma restrição de permissão é aplicada.
+   */
+  async update(id: string, data: UserDTO, requesterId?: string) {
     const userExists = await this.prisma.user.findUnique({
       where: {
         id,
@@ -170,6 +184,31 @@ export class UserService {
 
     if (!userExists) {
       throw new NotFoundException('User does not exists!');
+    }
+
+    if (requesterId) {
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: { role: true },
+      });
+
+      const requesterIsAdmin = isAdminRole(requester?.role);
+
+      // usuário comum só edita o próprio cadastro
+      if (!requesterIsAdmin && requesterId !== id) {
+        throw new ForbiddenException('Você só pode editar o seu cadastro');
+      }
+
+      // só admin altera permissão — para os demais o campo é ignorado,
+      // já que o formulário de perfil devolve o usuário inteiro no payload
+      if (!requesterIsAdmin) {
+        delete data.role;
+      } else if (
+        data.role !== undefined &&
+        !ASSIGNABLE_ROLES.includes(data.role)
+      ) {
+        throw new BadRequestException('Permissão inválida');
+      }
     }
 
     // const existEventRelation = await this.prisma.eventOnUsers.findFirst({
@@ -228,7 +267,8 @@ export class UserService {
 
     return {
       totalUsers: users.length,
-      totalUsersAdmin: users.filter((user) => user.role === 1).length,
+      totalUsersAdmin: users.filter((user) => ADMIN_ROLES.includes(user.role))
+        .length,
       usersWithEvents,
     };
   }

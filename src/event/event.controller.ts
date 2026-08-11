@@ -21,14 +21,19 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
+import { RolesGuard } from 'src/decorators/roles.guard';
+import { Roles } from 'src/decorators/roles.decorator';
+import { ADMIN_AREA_ROLES, ADMIN_ROLES } from 'src/auth/roles';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('events')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('events')
 export class EventController {
   constructor(private readonly eventService: EventService) {}
 
+  @Roles(...ADMIN_ROLES)
   @Post()
   @UseInterceptors(
     FileFieldsInterceptor([
@@ -37,7 +42,6 @@ export class EventController {
     ]),
   )
   @ApiConsumes('multipart/form-data')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Create event' })
   create(
     @UploadedFiles()
@@ -55,21 +59,19 @@ export class EventController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'All events' })
   async findAll(@Query() filters: Partial<EventDto>) {
     const events = await this.eventService.findAll(filters);
     return events;
   }
   @ApiOperation({ summary: 'Get insights events' })
+  @Roles(...ADMIN_AREA_ROLES)
   @Get('insights')
-  @UseGuards(JwtAuthGuard)
   findInsightsEvents() {
     return this.eventService.findInsightsEvents();
   }
 
   @ApiOperation({ summary: 'Event by id' })
-  @UseGuards(JwtAuthGuard)
   @ApiConsumes('multipart/form-data')
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -77,7 +79,7 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Edit event' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Put(':id')
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -110,14 +112,14 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Get users by event' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_AREA_ROLES)
   @Get(':idEvent/users')
   async findUsers(@Param('idEvent') idEvent: string) {
     return this.eventService.findUsers(idEvent);
   }
 
   @ApiOperation({ summary: 'Remove user to event' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Delete(':idEvent/users/:idUser/rule/:roleRegistrationId')
   removeUserFromEvent(
     @Param('idEvent') idEvent: string,
@@ -132,7 +134,7 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Edit user in event' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Put(':idEvent/users/:idUser')
   updateUserFromEvent(
     @Param('idEvent') idEvent: string,
@@ -147,21 +149,21 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Delete event' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Delete(':id')
   remove(@Param('id') id: string, @Req() req: any) {
     return this.eventService.remove(id, req.user.userId);
   }
 
   @ApiOperation({ summary: 'Find users in waitlist' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Get(':idEvent/waitlist/users')
   findUsersInWaitlist(@Param('idEvent') idEvent: string) {
     return this.eventService.findUsersInWaitlist(idEvent);
   }
 
   @ApiOperation({ summary: 'Remove user from waitlist' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Delete(':idEvent/waitlist/users/:idUser/rule/:roleRegistrationId')
   removeUserFromWaitlist(
     @Param('idEvent') idEvent: string,
@@ -176,7 +178,7 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Move user from waitlist to event' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Put(':eventId/waitlist/move')
   moveUserFromWaitlistToEvent(
     @Param('eventId') eventId: string,
@@ -197,7 +199,6 @@ export class EventController {
 
   @ApiOperation({ summary: 'Register user in event' })
   @Post(':idEvent/users/:idUser')
-  @UseGuards(JwtAuthGuard)
   async createRelationEvent(
     @Param('idUser') idUser: string,
     @Param('idEvent') idEvent: string,
@@ -211,7 +212,7 @@ export class EventController {
   }
   //remove o usuario do waitlist
   @ApiOperation({ summary: 'Remove user from waitlist' })
-  @UseGuards(JwtAuthGuard)
+  @Roles(...ADMIN_ROLES)
   @Delete(':idEvent/waitlist/users/:idUser/rule/:roleRegistrationId')
   removeUserFromEventWaitlist(
     @Param('idEvent') idEvent: string,
