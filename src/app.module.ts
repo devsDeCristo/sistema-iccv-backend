@@ -10,6 +10,7 @@ import { PagbankModule } from './gateways/pagbank/pagbank.module';
 import { PaymentModule } from './payment/payment.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
+import { CheckinModule } from './checkin/checkin.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestContextInterceptor } from './middleware/request-context.middleware';
 
@@ -25,6 +26,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     PaymentModule,
     WebhooksModule,
     CronModule,
+    CheckinModule,
   ],
   controllers: [AuthController],
   providers: [

@@ -37,6 +37,7 @@ model User {
   events             EventOnUsers[]
   TeamOnUsers        TeamOnUsers[]
   waitlists          Waitlist[]
+  checkins           Checkin[]
 
   @@map("users")
 }
@@ -57,6 +58,7 @@ model Event {
   groupRoles GroupRoles[]
   Team       Team[]
   waitlist   Waitlist[]
+  checkins   Checkin[]
 
   @@map("events")
 }
@@ -228,6 +230,39 @@ model TeamOnUsers {
   @@index([teamId])
 }
 
+/// Check-in presencial do evento, em tabela própria para não alterar `EventOnUsers`.
+/// Uma linha por participante/evento, criada quando ele chega na recepção.
+/// A ausência de linha equivale a `PENDING` (ainda não chegou).
+model Checkin {
+  id      String        @id @default(uuid())
+  userId  String
+  eventId String
+  status  CheckinStatus @default(PENDING)
+
+  /// Etapa 1 — recepção reconheceu o participante e entregou o crachá
+  badgeDeliveredAt   DateTime?
+  badgeDeliveredById String?
+  /// Etapa 2 — operador do posto de foto chamou este participante da fila
+  calledAt           DateTime?
+  calledById         String?
+  /// Etapa 3 — foto tirada e dados conferidos
+  doneAt             DateTime?
+  doneById           String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  /// Impede duas linhas de check-in para a mesma inscrição
+  @@unique([userId, eventId])
+  /// Atende a fila (status QUEUED/IN_PROGRESS) e os contadores por status
+  @@index([eventId, status])
+  @@map("checkins")
+}
+
 model Log {
   id        String   @id @default(uuid())
   model     String // nome da tabela (ex: User, Order, Map)
@@ -244,6 +279,18 @@ model Log {
 enum TeamRole {
   MEMBER
   LEADER
+}
+
+/// Etapas do check-in presencial. Ver os campos `checkin*` em `EventOnUsers`.
+enum CheckinStatus {
+  /// Inscrito que ainda não chegou ao evento
+  PENDING
+  /// Crachá entregue na recepção; aguardando na fila da foto
+  QUEUED
+  /// Chamado por um operador do posto de foto/conferência
+  IN_PROGRESS
+  /// Foto tirada e dados conferidos
+  DONE
 }
 
 enum EventType {
