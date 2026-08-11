@@ -1,7 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -14,10 +17,8 @@ import {
   PaymentStatus,
   Prisma,
   PrismaService,
-  User,
 } from '../prisma';
 import { EventDto } from './dto/event.dto';
-import * as admin from 'firebase-admin';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
@@ -35,12 +36,83 @@ type EventWithGroupRole = Prisma.EventGetPayload<{
     };
   };
 }>;
+
+/** Dados mínimos usados para montar o e-mail de confirmação */
+type EmailUser = { id: string; fullName: string; email: string };
+type EmailEvent = {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  data: Prisma.JsonValue;
+};
+
+/** Escapa texto antes de interpolar em HTML (e-mails) */
+function escapeHtml(value: unknown): string {
+  if (value === null || value === undefined) return '';
+
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Mime types aceitos em upload de logo/capa -> extensão segura no storage */
+const ALLOWED_IMAGE_MIME_TYPES: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/svg+xml': 'svg',
+};
+
+/** Hosts autorizados para download de imagens do evento (anti-SSRF) */
+const DEFAULT_IMAGE_HOSTS = [
+  'firebasestorage.googleapis.com',
+  'storage.googleapis.com',
+  'lh3.googleusercontent.com',
+];
+
+const IMAGE_FETCH_TIMEOUT_MS = 8000;
+const IMAGE_FETCH_MAX_BYTES = 8 * 1024 * 1024;
+const IMAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const IMAGE_CACHE_MAX_ENTRIES = 50;
+
 @Injectable()
 export class EventService {
+  private readonly logger = new Logger(EventService.name);
+
+  /** Cache em memória (url -> dataURI) para evitar rebaixar a mesma imagem a cada request */
+  private readonly imageCache = new Map<
+    string,
+    { value: string | null; expiresAt: number }
+  >();
+
   constructor(
     private prisma: PrismaService,
     private emailService: MailService,
   ) {}
+
+  /**
+   * Valida o mime type do arquivo e devolve a extensão a ser usada no storage.
+   * Evita que o mime type (controlado pelo cliente) entre cru no path do bucket
+   * e que arquivos não-imagem sejam servidos pelo domínio do storage.
+   */
+  private resolveImageExtension(file: { mimetype?: string }): string {
+    const mimetype = (file?.mimetype ?? '').toLowerCase().trim();
+    const extension = ALLOWED_IMAGE_MIME_TYPES[mimetype];
+
+    if (!extension) {
+      throw new BadRequestException(
+        `Tipo de imagem não suportado: ${mimetype || 'desconhecido'}`,
+      );
+    }
+
+    return extension;
+  }
 
   async registerUserInEvent(
     userId: string,
@@ -55,6 +127,21 @@ export class EventService {
     const MAX_RETRIES = 5;
     const tx = options?.tx;
     const attempt = options?.attempt ?? 1;
+
+    if (!userId || !eventId) {
+      throw new BadRequestException('Usuário e evento devem ser informados');
+    }
+
+    const uniqueRoleIds = Array.from(new Set(registrationRoleIds ?? []));
+
+    if (!uniqueRoleIds.length) {
+      throw new BadRequestException('Nenhuma regra de inscrição foi informada');
+    }
+
+    if (uniqueRoleIds.length !== (registrationRoleIds ?? []).length) {
+      // mesma resposta de antes: ids repetidos nunca casam com o findMany de roles
+      throw new BadRequestException('Role(s) inválido(s)');
+    }
 
     try {
       const result = tx
@@ -81,19 +168,31 @@ export class EventService {
       ) {
         return result.results;
       }
+      // fire-and-forget: falha de e-mail não deve derrubar o processo
       this.sendEmailConfirmation({
         user: result.user,
         event: result.event,
         tickets: result.results,
-      });
+      }).catch((error) =>
+        this.logger.error(
+          `Falha ao enviar e-mail de confirmação (user=${userId}, event=${eventId})`,
+          error instanceof Error ? error.stack : String(error),
+        ),
+      );
 
       return result.results;
     } catch (error: any) {
       //  retry apenas para conflito de serialização
-      if (error?.code === '40001' && attempt <= MAX_RETRIES) {
+      // Prisma reporta conflito serializable como P2034 (write conflict/deadlock);
+      // '40001' é o SQLSTATE cru, mantido para o caso de erro não encapsulado.
+      const isSerializationConflict =
+        error?.code === '40001' || error?.code === 'P2034';
+
+      // Se a transaction é do chamador, ela já foi abortada: retry aqui não resolve.
+      if (isSerializationConflict && !tx && attempt <= MAX_RETRIES) {
         return this.registerUserInEvent(userId, eventId, registrationRoleIds, {
+          ...options,
           attempt: attempt + 1,
-          tx,
         });
       }
       throw error;
@@ -108,9 +207,22 @@ export class EventService {
   ) {
     //-------------------------- verificações iniciais --------------------------//
     // 1️⃣ Verifica usuário e evento (em paralelo)
+    // seleciona apenas o necessário: evita carregar hash de senha do usuário
     const [user, event] = await Promise.all([
-      tx.user.findUnique({ where: { id: userId } }),
-      tx.event.findUnique({ where: { id: eventId } }),
+      tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, fullName: true, email: true },
+      }),
+      tx.event.findUnique({
+        where: { id: eventId },
+        select: {
+          id: true,
+          name: true,
+          startDate: true,
+          endDate: true,
+          data: true,
+        },
+      }),
     ]);
 
     if (!user) throw new NotFoundException('Usuario não encontrado');
@@ -187,18 +299,30 @@ export class EventService {
 
     //-------------------------- realiza inscrição --------------------------//
 
-    const results = [];
+    const results: {
+      roleId: string;
+      type: 'WAITLIST' | 'REGISTERED';
+      data: unknown;
+    }[] = [];
+
+    // contagem de vagas de todos os grupos antes do loop
+    // (regra 3 garante 1 role por grupo, então a contagem não muda a cada iteração)
+    const counts = await Promise.all(
+      groupIds.map((groupId) =>
+        tx.eventOnUsersRolesRegistration.count({
+          where: { eventId, role: { groupId } },
+        }),
+      ),
+    );
+
+    const countByGroupId = new Map(
+      groupIds.map((groupId, index) => [groupId, counts[index]]),
+    );
+
     //Processa role por role */;
     for (const role of roles) {
       //verifica capacidade do grupo */
-      const count = await tx.eventOnUsersRolesRegistration.count({
-        where: {
-          role: {
-            groupId: role.groupId,
-          },
-          eventId,
-        },
-      });
+      const count = countByGroupId.get(role.groupId) ?? 0;
 
       if (role.group.capacity !== null && count >= role.group.capacity) {
         // caso esteja cheio, coloca na waitlist
@@ -254,9 +378,14 @@ export class EventService {
 
     const rolesRegistrations = await this.prisma.rolesRegistration.findMany({
       where: { id: { in: roleIds } },
-      include: {
-        group: true,
+      select: {
+        id: true,
+        description: true,
+        group: { select: { name: true } },
+        // todas as inscrições da role pertencem ao mesmo evento,
+        // então basta 1 registro para obter os dados do evento
         EventOnUsers: {
+          take: 1,
           select: {
             eventOnUsers: { select: { event: { select: { data: true } } } },
           },
@@ -278,10 +407,12 @@ export class EventService {
       .map((ticket) => {
         const role = rolesRegistrations.find((r) => r.id === ticket.roleId);
 
-        const roleName = role?.description ?? 'N/A';
-        const groupName = role?.group?.name ?? 'N/A';
-        const local =
-          role?.EventOnUsers[0]?.eventOnUsers?.event?.data?.['localName'] ?? '';
+        const roleName = escapeHtml(role?.description ?? 'N/A');
+        const groupName = escapeHtml(role?.group?.name ?? 'N/A');
+        const local = escapeHtml(
+          role?.EventOnUsers[0]?.eventOnUsers?.event?.data?.['localName'] ?? '',
+        );
+        const statusLabel = escapeHtml(statusMap[ticket.type] ?? ticket.type);
 
         return `
         <li class="ticket-item">
@@ -298,7 +429,7 @@ export class EventService {
             <div style="font-weight: 700; color: ${
               statusColors[ticket.type] ?? '#0f1724'
             }">
-              ${statusMap[ticket.type] ?? ticket.type}
+              ${statusLabel}
             </div>
 
             <div class="ticket-meta">
@@ -322,11 +453,11 @@ export class EventService {
     event,
     tickets = [],
   }: {
-    user: User;
-    event: Event;
+    user: EmailUser;
+    event: EmailEvent;
     tickets?: any[];
   }) {
-    const data = event.data as any;
+    const data = (event.data ?? {}) as any;
 
     const LOCAL = [
       data?.localName,
@@ -339,19 +470,20 @@ export class EventService {
       .concat(data?.zipCode ? ` - CEP: ${data.zipCode}` : '')
       .concat(data?.number ? ` - ${data.number}` : '');
 
+    // valores vão direto para dentro do HTML do template -> precisam ser escapados
     const emailData = {
-      eventTitle: event.name,
-      eventDescription: data?.description ?? '',
-      userName: user.fullName,
+      eventTitle: escapeHtml(event.name),
+      eventDescription: escapeHtml(data?.description ?? ''),
+      userName: escapeHtml(user.fullName),
       eventDate: `${new Date(
         event.startDate,
       ).toLocaleDateString()} a ${new Date(
         event.endDate,
       ).toLocaleDateString()}`,
       INSERT_TICKETS: await this.renderTickets(tickets),
-      IMG_CAPA_URL: data?.coverUrl ?? '',
-      IMG_LOGO_URL: data?.logoUrlInverted ?? '',
-      LOCAL,
+      IMG_CAPA_URL: escapeHtml(this.safeImageUrl(data?.coverUrl)),
+      IMG_LOGO_URL: escapeHtml(this.safeImageUrl(data?.logoUrlInverted)),
+      LOCAL: escapeHtml(LOCAL),
     };
 
     const html = this.emailService.loadTemplate(
@@ -392,6 +524,10 @@ export class EventService {
         where: { userId_eventId: { userId: idUser, eventId: idEvent } },
       })
       .catch((err) => {
+        this.logger.error(
+          `Falha ao remover relação usuário/evento (user=${idUser}, event=${idEvent})`,
+          err instanceof Error ? err.stack : String(err),
+        );
         throw new InternalServerErrorException();
       });
   }
@@ -494,8 +630,12 @@ export class EventService {
         capacity: t.team.capacity,
       }));
 
+      /** 🔹 Nunca expor o hash da senha na listagem de inscritos */
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...user } = item.user;
+
       return {
-        ...item.user,
+        ...user,
         /** 🔹 Data/hora da inscrição no evento (não confundir com createdAt da conta) */
         registeredAt: item.createdAt,
         groupsRegistration: Array.from(groupsMap.values()),
@@ -536,22 +676,138 @@ export class EventService {
       };
     });
   }
+  /** Hosts liberados para download de imagem (override via IMAGE_FETCH_ALLOWED_HOSTS) */
+  private get allowedImageHosts(): string[] {
+    const fromEnv = (process.env.IMAGE_FETCH_ALLOWED_HOSTS ?? '')
+      .split(',')
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean);
+
+    return fromEnv.length ? fromEnv : DEFAULT_IMAGE_HOSTS;
+  }
+
+  /**
+   * Só devolve a URL se for http(s) — impede que valores gravados em `event.data`
+   * (ex.: `javascript:...`) virem atributo de link/imagem no e-mail.
+   */
+  private safeImageUrl(url: unknown): string {
+    if (typeof url !== 'string' || !url) return '';
+
+    try {
+      const parsed = new URL(url);
+
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+        ? url
+        : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Valida a URL antes do fetch: apenas https e hosts conhecidos do storage.
+   * `event.data` é JSON livre gravado via API, então um valor arbitrário aqui
+   * transformaria o servidor em proxy para a rede interna (SSRF).
+   */
+  private isFetchableImageUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+
+      if (parsed.protocol !== 'https:') return false;
+
+      const hostname = parsed.hostname.toLowerCase();
+
+      return this.allowedImageHosts.some(
+        (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private getCachedImage(url: string): string | null | undefined {
+    const cached = this.imageCache.get(url);
+
+    if (!cached) return undefined;
+
+    if (cached.expiresAt <= Date.now()) {
+      this.imageCache.delete(url);
+      return undefined;
+    }
+
+    return cached.value;
+  }
+
+  private setCachedImage(url: string, value: string | null) {
+    if (this.imageCache.size >= IMAGE_CACHE_MAX_ENTRIES) {
+      const oldestKey = this.imageCache.keys().next().value;
+      if (oldestKey) this.imageCache.delete(oldestKey);
+    }
+
+    this.imageCache.set(url, {
+      value,
+      expiresAt: Date.now() + IMAGE_CACHE_TTL_MS,
+    });
+  }
+
   private async getLogoImgFromUrl(logoUrl?: string): Promise<string | null> {
     if (!logoUrl) return null;
 
+    const cached = this.getCachedImage(logoUrl);
+    if (cached !== undefined) return cached;
+
+    if (!this.isFetchableImageUrl(logoUrl)) {
+      this.logger.warn(`URL de imagem bloqueada: ${logoUrl}`);
+      this.setCachedImage(logoUrl, null);
+      return null;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      IMAGE_FETCH_TIMEOUT_MS,
+    );
+
     try {
-      const response = await fetch(logoUrl);
+      const response = await fetch(logoUrl, { signal: controller.signal });
 
       if (!response.ok) {
+        this.setCachedImage(logoUrl, null);
+        return null;
+      }
+
+      // um redirect não pode levar o download para fora dos hosts autorizados
+      if (response.url && !this.isFetchableImageUrl(response.url)) {
+        this.logger.warn(`Redirect de imagem bloqueado: ${response.url}`);
+        this.setCachedImage(logoUrl, null);
         return null;
       }
 
       const contentType = response.headers.get('content-type') ?? 'image/png';
+
+      if (!contentType.toLowerCase().startsWith('image/')) {
+        this.setCachedImage(logoUrl, null);
+        return null;
+      }
+
       const buffer = Buffer.from(await response.arrayBuffer());
 
-      return `data:${contentType};base64,${buffer.toString('base64')}`;
+      if (buffer.byteLength > IMAGE_FETCH_MAX_BYTES) {
+        this.logger.warn(
+          `Imagem acima do limite (${buffer.byteLength} bytes): ${logoUrl}`,
+        );
+        this.setCachedImage(logoUrl, null);
+        return null;
+      }
+
+      const dataUri = `data:${contentType};base64,${buffer.toString('base64')}`;
+      this.setCachedImage(logoUrl, dataUri);
+
+      return dataUri;
     } catch {
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -561,8 +817,10 @@ export class EventService {
       typeof eventData.logoUrl === 'string' ? eventData.logoUrl : undefined;
     const coverUrl =
       typeof eventData.coverUrl === 'string' ? eventData.coverUrl : undefined;
-    const logoBase64 = await this.getLogoImgFromUrl(logoUrl);
-    const coverBase64 = await this.getLogoImgFromUrl(coverUrl);
+    const [logoBase64, coverBase64] = await Promise.all([
+      this.getLogoImgFromUrl(logoUrl),
+      this.getLogoImgFromUrl(coverUrl),
+    ]);
 
     return {
       ...event,
@@ -627,35 +885,89 @@ export class EventService {
   //   return { coverUrl, logoUrl };
   // }
 
+  /** Link do grupo é opcional: string vazia vira null no banco */
+  private normalizeGroupLink(link?: string | null) {
+    return link?.trim() || null;
+  }
+
+  /**
+   * Garante que não exista outro evento com o mesmo nome (ignorando
+   * maiúsculas/minúsculas e espaços nas pontas).
+   */
+  private async ensureEventNameIsAvailable(
+    name: string,
+    options: { ignoreEventId?: string; tx?: Prisma.TransactionClient } = {},
+  ) {
+    const client = options.tx ?? this.prisma;
+
+    const existing = await client.event.findFirst({
+      where: {
+        name: { equals: name, mode: 'insensitive' },
+        ...(options.ignoreEventId
+          ? { id: { not: options.ignoreEventId } }
+          : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new ConflictException('Já existe um evento com esse nome!');
+    }
+  }
+
   async create(data: EventDto) {
+    // valida os arquivos antes de criar qualquer registro
+    const coverExtension = data.coverFile
+      ? this.resolveImageExtension(data.coverFile)
+      : null;
+    const logoExtension = data.logoFile
+      ? this.resolveImageExtension(data.logoFile)
+      : null;
+
+    const name = data.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException('O nome do evento é obrigatório');
+    }
+
     try {
       data.endDate = new Date(data.endDate);
       data.startDate = new Date(data.startDate);
 
-      // 1. Cria o evento primeiro (sem upload)
-      const event = await this.prisma.event.create({
-        data: {
-          type: data.type,
-          endDate: data.endDate,
-          startDate: data.startDate,
-          name: data.name,
-          data: data.data as Prisma.JsonObject,
-          groupRoles: {
-            create: data.groupRoles?.map((gr) => ({
-              name: gr.name,
-              capacity: gr.capacity,
-              roles: {
-                create: gr.roles.map((r) => ({
-                  price: r.price,
-                  description: r.description,
+      // 1. Cria o evento primeiro (sem upload).
+      // A verificação de nome duplicado roda dentro da transaction em modo
+      // Serializable para que dois cliques seguidos não criem eventos repetidos.
+      const event = await this.prisma.$transaction(
+        async (tx) => {
+          await this.ensureEventNameIsAvailable(name, { tx });
+
+          return tx.event.create({
+            data: {
+              type: data.type,
+              endDate: data.endDate,
+              startDate: data.startDate,
+              name,
+              data: data.data as Prisma.JsonObject,
+              groupRoles: {
+                create: data.groupRoles?.map((gr) => ({
+                  name: gr.name,
+                  capacity: gr.capacity,
+                  link: this.normalizeGroupLink(gr.link),
+                  roles: {
+                    create: gr.roles.map((r) => ({
+                      price: r.price,
+                      description: r.description,
+                    })),
+                  },
                 })),
               },
-            })),
-          },
-          groupLink: data.groupLink,
-          isActive: true,
+              groupLink: data.groupLink,
+              isActive: true,
+            },
+          });
         },
-      });
+        { isolationLevel: 'Serializable' },
+      );
 
       // 2. Uploads fora da transaction
 
@@ -663,18 +975,14 @@ export class EventService {
         data.coverFile
           ? uploadImageFirebase(
               data.coverFile,
-              `events/${event.id}/cover/cover.${
-                data.coverFile.mimetype.split('/')[1]
-              }`,
+              `events/${event.id}/cover/cover.${coverExtension}`,
             )
           : null,
 
         data.logoFile
           ? uploadImageFirebase(
               data.logoFile,
-              `events/${event.id}/logo/logo.${
-                data.logoFile.mimetype.split('/')[1]
-              }`,
+              `events/${event.id}/logo/logo.${logoExtension}`,
             )
           : null,
       ]);
@@ -698,7 +1006,25 @@ export class EventService {
 
       return updatedEvent;
     } catch (error) {
-      console.error(error);
+      // erros de negócio (ex.: nome duplicado) devem chegar ao front como estão
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // duas criações simultâneas com o mesmo nome: o Postgres aborta uma delas
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      ) {
+        throw new ConflictException(
+          'Outro evento com esse nome está sendo criado neste momento. Tente novamente.',
+        );
+      }
+
+      this.logger.error(
+        'Falha ao criar evento',
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new InternalServerErrorException();
     }
   }
@@ -875,6 +1201,14 @@ export class EventService {
   }
 
   async update(id: string, updateEvent: EventDto) {
+    // valida os arquivos antes de qualquer escrita
+    const coverExtension = updateEvent.coverFile
+      ? this.resolveImageExtension(updateEvent.coverFile)
+      : null;
+    const logoExtension = updateEvent.logoFile
+      ? this.resolveImageExtension(updateEvent.logoFile)
+      : null;
+
     const event = await this.prisma.event.findUnique({
       where: { id },
       include: {
@@ -888,6 +1222,15 @@ export class EventService {
 
     if (!event) throw new NotFoundException('Event does not exist');
 
+    const name = updateEvent.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException('O nome do evento é obrigatório');
+    }
+
+    // valida o nome antes dos uploads para não subir imagem de update que vai falhar
+    await this.ensureEventNameIsAvailable(name, { ignoreEventId: id });
+
     // ================= UPLOADS (FORA DA TRANSACTION) =================
     let coverUrl = event.data?.['coverUrl'] ?? null;
     let logoUrl = event.data?.['logoUrl'] ?? null;
@@ -897,23 +1240,23 @@ export class EventService {
       updateEvent.coverFile
         ? uploadImageFirebase(
             updateEvent.coverFile,
-            `events/${event.id}/cover/cover.${
-              updateEvent.coverFile.mimetype.split('/')[1]
-            }`,
+            `events/${event.id}/cover/cover.${coverExtension}`,
           )
         : null,
       updateEvent.logoFile
         ? uploadImageFirebase(
             updateEvent.logoFile,
-            `events/${event.id}/logo/logo.${
-              updateEvent.logoFile.mimetype.split('/')[1]
-            }`,
+            `events/${event.id}/logo/logo.${logoExtension}`,
           )
         : null,
     ]);
 
     if (coverResult) coverUrl = coverResult.url;
     if (logoResult) logoUrl = logoResult.url;
+
+    // a URL do storage é estável: invalida o cache para não servir a imagem antiga
+    if (coverResult) this.imageCache.delete(coverResult.url);
+    if (logoResult) this.imageCache.delete(logoResult.url);
 
     if (updateEvent.logoFile) {
       const blackBuffer = await sharp(updateEvent.logoFile.buffer)
@@ -960,7 +1303,7 @@ export class EventService {
         where: { id },
         data: {
           type: updateEvent.type,
-          name: updateEvent.name,
+          name,
           startDate,
           endDate,
           isActive: updateEvent.isActive,
@@ -998,12 +1341,21 @@ export class EventService {
           ops.push(
             this.prisma.groupRoles.update({
               where: { id: groupId },
-              data: { name: group.name, capacity: group.capacity },
+              data: {
+                name: group.name,
+                capacity: group.capacity,
+                link: this.normalizeGroupLink(group.link),
+              },
             }),
           );
         } else {
           const created = await this.prisma.groupRoles.create({
-            data: { name: group.name, capacity: group.capacity, eventId: id },
+            data: {
+              name: group.name,
+              capacity: group.capacity,
+              link: this.normalizeGroupLink(group.link),
+              eventId: id,
+            },
           });
           groupId = created.id;
         }
@@ -1323,7 +1675,11 @@ export class EventService {
       .delete({
         where: { id: waitlistEntry.id },
       })
-      .catch(() => {
+      .catch((err) => {
+        this.logger.error(
+          `Falha ao remover usuário da waitlist (user=${idUser}, event=${idEvent})`,
+          err instanceof Error ? err.stack : String(err),
+        );
         throw new InternalServerErrorException();
       });
   }
