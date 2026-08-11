@@ -1645,6 +1645,7 @@ export class EventService {
               birthday: true,
               city: true,
               neighborhood: true,
+              profilePhotoUrl: true,
             },
           },
           rolesRegistration: {

@@ -542,6 +542,7 @@ export class PaymentService {
               fullName: true,
               email: true,
               cpf: true,
+              profilePhotoUrl: true,
             },
           }, // se não tiver eventid, traz os dados do evento tb
           event: eventId
