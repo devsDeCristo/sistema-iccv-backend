@@ -71,6 +71,7 @@ model EventOnUsers {
   rolesRegistration EventOnUsersRolesRegistration[] @relation("EventOnUsersRoles")
 
   @@id([userId, eventId])
+  @@index([eventId])
 }
 
 model EventOnUsersRolesRegistration {
@@ -84,6 +85,9 @@ model EventOnUsersRolesRegistration {
   payment            Payment?
 
   @@id([userId, eventId, roleRegistrationId])
+  @@index([eventId])
+  @@index([roleRegistrationId])
+  @@index([discountId])
 }
 
 model GroupRoles {
@@ -95,6 +99,7 @@ model GroupRoles {
   roles    RolesRegistration[]
   link     String?
 
+  @@index([eventId])
   @@map("group_roles")
 }
 
@@ -107,6 +112,7 @@ model RolesRegistration {
   group        GroupRoles                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
   Waitlist     Waitlist[]
 
+  @@index([groupId])
   @@map("roles_registration_types")
 }
 
@@ -137,6 +143,7 @@ model Payment {
   eventUserRole      EventOnUsersRolesRegistration? @relation(fields: [userId, eventId, roleRegistrationId], references: [userId, eventId, roleRegistrationId], onDelete: Cascade)
 
   @@unique([userId, eventId, roleRegistrationId])
+  @@index([eventId])
   @@map("payments")
 }
 
@@ -152,6 +159,7 @@ model PaymentCheckout {
   updatedAt   DateTime       @updatedAt
   payment     Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
+  @@index([paymentId])
   @@map("payment_checkouts")
 }
 
@@ -167,6 +175,8 @@ model Waitlist {
   user               User               @relation(fields: [userId], references: [id])
 
   @@unique([userId, eventId, roleRegistrationId])
+  @@index([eventId])
+  @@index([roleRegistrationId])
   @@map("waitlist")
 }
 
@@ -180,6 +190,7 @@ model Bedrooms {
   users    BedroomsOnUsers[]
   event    Event             @relation(fields: [eventId], references: [id])
 
+  @@index([eventId])
   @@map("bedrooms")
 }
 
@@ -190,6 +201,7 @@ model BedroomsOnUsers {
   user       User     @relation(fields: [userId], references: [id])
 
   @@id([userId, bedroomsId])
+  @@index([bedroomsId])
 }
 
 model Team {
@@ -201,6 +213,7 @@ model Team {
   users    TeamOnUsers[]
   event    Event         @relation(fields: [eventId], references: [id])
 
+  @@index([eventId])
   @@map("teams")
 }
 
@@ -212,6 +225,7 @@ model TeamOnUsers {
   user   User     @relation(fields: [userId], references: [id])
 
   @@id([userId, teamId])
+  @@index([teamId])
 }
 
 model Log {
