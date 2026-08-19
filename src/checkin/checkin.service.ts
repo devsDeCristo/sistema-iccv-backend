@@ -168,8 +168,9 @@ export class CheckinService {
   }
 
   /**
-   * Busca da recepção: nome, CPF ou número de inscrição, sempre restrita aos
-   * inscritos do evento.
+   * Lista da recepção: sem termo devolve todos os inscritos do evento, porque a
+   * tela mostra a lista inteira e filtra no cliente. Com termo, filtra por
+   * nome, CPF ou número de inscrição — sempre restrita aos inscritos do evento.
    */
   async search(eventId: string, query?: string) {
     const termo = (query || '').trim();
@@ -194,7 +195,6 @@ export class CheckinService {
       },
       select: this.registrationSelect,
       orderBy: { user: { fullName: 'asc' } },
-      take: 25,
     });
 
     const checkins = await this.prisma.checkin.findMany({
