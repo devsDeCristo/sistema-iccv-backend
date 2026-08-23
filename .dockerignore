@@ -1,6 +1,33 @@
-/.git
-/node_modules
-.dockerignore
+# Build context enxuto: menos upload pro daemon e nenhum artefato do host
+# vazando pra dentro da imagem.
+.git
+.gitignore
+
+# node_modules do host é macOS/arm64 — os binários nativos (bcrypt, sharp)
+# não servem no Linux. O yarn install do Dockerfile refaz tudo.
+node_modules
+
+# dist é recompilado no stage de build
+dist
+*.tsbuildinfo
+
+# segredos nunca entram na imagem: passe em runtime (--env-file / env do stack)
 .env
+.env.*
+!.env.example
+
+*.log
+backup.sql
+coverage
+.nyc_output
+test
+.DS_Store
+.vscode
+.idea
+
 Dockerfile
+.dockerignore
+docker-compose.yml
 fly.toml
+app.json
+README.md

@@ -1,57 +1,80 @@
-# syntax = docker/dockerfile:1
+# syntax=docker/dockerfile:1
 
-# Adjust NODE_VERSION as desired
+# Mesma versão de Node em todos os stages: ABI diferente entre build e runtime
+# quebra módulos nativos (bcrypt, sharp).
 ARG NODE_VERSION=20.18.0
-FROM node:${NODE_VERSION}-slim AS base
 
-LABEL fly_launch_runtime="NestJS/Prisma"
-
-# NestJS/Prisma app lives here
+# --------------------------------------------------------------- deps (prod)
+# node_modules apenas de produção, compilado com o toolchain disponível.
+FROM node:${NODE_VERSION}-slim AS deps
 WORKDIR /app
 
-# Set production environment
-ENV NODE_ENV="production"
-ARG YARN_VERSION=1.22.21
-RUN npm install -g yarn@$YARN_VERSION --force
+RUN apt-get update -qq \
+    && apt-get install --no-install-recommends -y \
+       build-essential node-gyp openssl pkg-config python-is-python3 \
+    && rm -rf /var/lib/apt/lists/*
 
-
-# Throw-away build stage to reduce size of final image
-FROM base AS build
-
-# Install packages needed to build node modules
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential node-gyp openssl pkg-config python-is-python3
-
-# Install node modules
+# Copiado antes do código: a camada só é invalidada quando o lockfile muda.
 COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile --production=false
+RUN yarn install --frozen-lockfile --production && yarn cache clean
 
-# Generate Prisma Client
-COPY prisma .
+# O Prisma Client tem que ser gerado dentro do node_modules que vai pra imagem
+# final — gerar no stage de build e não copiar deixaria o client faltando.
+COPY prisma ./prisma
 RUN npx prisma generate
 
-# Copy application code
+# -------------------------------------------------------------------- build
+# Stage descartável: precisa das devDependencies (@nestjs/cli, typescript).
+FROM node:${NODE_VERSION}-slim AS build
+WORKDIR /app
+
+RUN apt-get update -qq \
+    && apt-get install --no-install-recommends -y \
+       build-essential node-gyp openssl pkg-config python-is-python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+COPY prisma ./prisma
+RUN npx prisma generate
+
 COPY . .
+RUN yarn build
 
-# Build application
-RUN yarn run build
+# ------------------------------------------------------------------ runtime
+FROM node:${NODE_VERSION}-slim AS runtime
+WORKDIR /app
 
+ENV NODE_ENV=production
+ENV PORT=5000
 
-# Final stage for app image
-FROM base
+# openssl é exigido pelo query engine do Prisma.
+RUN apt-get update -qq \
+    && apt-get install --no-install-recommends -y openssl \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 
-# Install packages needed for deployment
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y openssl && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+COPY --from=deps  /app/node_modules ./node_modules
+COPY --from=build /app/dist         ./dist
+COPY package.json yarn.lock ./
 
-# Copy built application
-COPY --from=build /app /app
+# prisma/ precisa existir em runtime: o start.sh roda `prisma migrate deploy`.
+COPY prisma ./prisma
 
-# Copy start script
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+# mail.service.ts monta o path dos templates com process.cwd()/src/mail/templates,
+# então a pasta de origem tem que existir na imagem — não só o dist.
+COPY src/mail/templates ./src/mail/templates
 
-# Start the server by default, this can be overwritten at runtime
-EXPOSE 3000
-CMD [ "/app/start.sh" ]
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh
+
+ARG COMMIT_HASH
+ARG COMMIT_DATE
+ENV COMMIT_HASH=$COMMIT_HASH
+ENV COMMIT_DATE=$COMMIT_DATE
+
+# Usuário sem privilégio já existe na imagem oficial do Node.
+USER node
+
+EXPOSE 5000
+CMD ["./start.sh"]

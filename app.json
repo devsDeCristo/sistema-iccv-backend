@@ -2,11 +2,11 @@
   "apps": [
     {
       "name": "api",
-      "script": "dist/main.js",
+      "script": "dist/src/main.js",
       "instances": 1,
       "exec_mode": "fork_mode",
       "env": {
-        "NODE_ENV": "prod",
+        "NODE_ENV": "production",
         "PORT": 5000
       }
     }
