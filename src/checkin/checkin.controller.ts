@@ -91,4 +91,15 @@ export class CheckinController {
   undo(@Param('eventId') eventId: string, @Param('userId') userId: string) {
     return this.checkinService.undo(eventId, userId);
   }
+
+  @Post(':userId/undo-badge')
+  @ApiOperation({
+    summary: 'Reverte a entrega do crachá; o participante volta a não chegou',
+  })
+  undoBadge(
+    @Param('eventId') eventId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.checkinService.undoBadgeDelivery(eventId, userId);
+  }
 }
