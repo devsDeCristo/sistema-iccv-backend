@@ -62,5 +62,21 @@ jobs:
           build-args: |
             COMMIT_HASH=${{ env.COMMIT_HASH }}
             COMMIT_DATE=${{ env.COMMIT_DATE }}
+          # provenance/sbom desligados de propósito: eles criam manifests
+          # "untagged" extras no package, que confundem a limpeza por retenção
+          # (e não agregam nada num build de plataforma única).
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Cada push cria uma versão nova de imagem (tag type=sha). Sem limpeza o
+      # storage do package cresce indefinidamente — mantém só as 10 mais recentes.
+      - name: Prune old package versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ github.event.repository.name }}
+          package-type: container
+          min-versions-to-keep: 10
+          # nunca apaga as tags de ambiente, mesmo se saírem das 10 recentes
+          ignore-versions: '^(latest|main|homolog)$'
