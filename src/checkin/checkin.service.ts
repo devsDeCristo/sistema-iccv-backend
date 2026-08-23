@@ -513,4 +513,44 @@ export class CheckinService {
     this.gateway.notifyQueueChanged(eventId, 'undone', userId);
     return this.participantResponse(eventId, userId);
   }
+
+  /**
+   * Reverte a entrega do crachá: o participante volta para "não chegou", sem
+   * etapa nenhuma de check-in.
+   *
+   * É diferente do `undo`, que volta uma etapa por vez. Aqui quem erra é a
+   * recepção — entregou o crachá para a pessoa errada — e a etapa a desfazer é
+   * a primeira, independente de o posto de foto já ter chamado ou concluído
+   * depois. Voltar de etapa em etapa deixaria a pessoa parada num meio de
+   * caminho que a recepção não tem como resolver.
+   *
+   * A observação do atendimento é preservada: se o posto de foto anotou algo,
+   * a anotação continua valendo quando a pessoa voltar.
+   */
+  async undoBadgeDelivery(eventId: string, userId: string) {
+    await this.findRegistration(eventId, userId);
+
+    const { count } = await this.prisma.checkin.updateMany({
+      // se outro operador reverteu antes, o status já é PENDING e não há o que fazer
+      where: { userId, eventId, status: { not: CheckinStatus.PENDING } },
+      data: {
+        status: CheckinStatus.PENDING,
+        badgeDeliveredAt: null,
+        badgeDeliveredById: null,
+        calledAt: null,
+        calledById: null,
+        doneAt: null,
+        doneById: null,
+      },
+    });
+
+    if (count === 0) {
+      throw new ConflictException(
+        'Este participante não tem entrega de crachá para reverter',
+      );
+    }
+
+    this.gateway.notifyQueueChanged(eventId, 'badge-undone', userId);
+    return this.participantResponse(eventId, userId);
+  }
 }
