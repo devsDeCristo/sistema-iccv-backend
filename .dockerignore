@@ -28,6 +28,4 @@ test
 Dockerfile
 .dockerignore
 docker-compose.yml
-fly.toml
-app.json
 README.md
