@@ -29,3 +29,6 @@ Dockerfile
 .dockerignore
 docker-compose.yml
 README.md
+
+# arquivos de deploy: usados no servidor, não dentro da imagem
+deploy
