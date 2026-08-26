@@ -183,14 +183,18 @@ model Waitlist {
 }
 
 model Bedrooms {
-  id       String            @id @default(uuid())
-  note     String?
-  eventId  String
-  capacity Int?
-  name     String            @default("Quarto sem nome")
-  tag      String[]
-  users    BedroomsOnUsers[]
-  event    Event             @relation(fields: [eventId], references: [id])
+  id        String            @id @default(uuid())
+  note      String?
+  eventId   String
+  capacity  Int?
+  name      String            @default("Quarto sem nome")
+  tag       String[]
+  /// Nomes de grupos de inscrição que podem ocupar o quarto. Vazio = quarto
+  /// aberto, qualquer inscrito entra. Preenchido = restrito a esses grupos,
+  /// tanto na alocação automática do check-in quanto na montagem manual.
+  groupTags String[]          @default([])
+  users     BedroomsOnUsers[]
+  event     Event             @relation(fields: [eventId], references: [id])
 
   @@index([eventId])
   @@map("bedrooms")
@@ -249,9 +253,13 @@ model Checkin {
   doneAt             DateTime?
   doneById           String?
 
-  notes     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  notes         String?
+  /// Quarto que a entrega do crachá alocou sozinha. Guardado para o "reverter
+  /// entrega" liberar a vaga — e só ela: quarto definido à mão não tem essa
+  /// marca e fica onde está.
+  autoBedroomId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   user  User  @relation(fields: [userId], references: [id])
   event Event @relation(fields: [eventId], references: [id])

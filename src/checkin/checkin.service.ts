@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CheckinStatus, PrismaService } from '../prisma';
@@ -16,6 +17,13 @@ const QUEUE_STATUSES = [CheckinStatus.QUEUED, CheckinStatus.IN_PROGRESS];
  */
 const NEXT_CANDIDATES = 5;
 
+/**
+ * Ordena quarto por nome como gente lê: "Quarto 2" antes de "Quarto 10", que a
+ * ordenação do banco colocaria depois.
+ */
+const porNome = (a: { name: string }, b: { name: string }) =>
+  a.name.localeCompare(b.name, 'pt-BR', { numeric: true, sensitivity: 'base' });
+
 const hora = (data?: Date | null) =>
   data
     ? data.toLocaleTimeString('pt-BR', {
@@ -27,10 +35,9 @@ const hora = (data?: Date | null) =>
 
 @Injectable()
 export class CheckinService {
-  constructor(
-    private prisma: PrismaService,
-    private gateway: CheckinGateway,
-  ) {}
+  private readonly logger = new Logger(CheckinService.name);
+
+  constructor(private prisma: PrismaService, private gateway: CheckinGateway) {}
 
   /**
    * Projeção usada nas duas telas. Quarto e equipe entram porque a recepção
@@ -102,7 +109,8 @@ export class CheckinService {
   ) {
     const user = registration.user;
     const eventId = registration.eventId;
-    const nome = (id?: string | null) => (id ? operators.get(id) || null : null);
+    const nome = (id?: string | null) =>
+      id ? operators.get(id) || null : null;
 
     return {
       userId: user.id,
@@ -238,11 +246,7 @@ export class CheckinService {
       // a inscrição pode ter sido removida depois do check-in começar
       .filter((checkin) => porUsuario.has(checkin.userId))
       .map((checkin) =>
-        this.mapParticipant(
-          porUsuario.get(checkin.userId),
-          checkin,
-          operators,
-        ),
+        this.mapParticipant(porUsuario.get(checkin.userId), checkin, operators),
       );
 
     return {
@@ -283,11 +287,118 @@ export class CheckinService {
   }
 
   /**
+   * Quartos que podem receber a pessoa, na ordem em que devem ser tentados:
+   * primeiro os do grupo dela, depois os abertos.
+   *
+   * Quarto com `groupTags` é restrito — só entra quem é de um dos grupos. Sem
+   * tag, é aberto e serve de sobra para quando os do grupo acabam. Quarto
+   * restrito a outro grupo não entra na lista de jeito nenhum.
+   *
+   * Quarto sem capacidade definida fica fora: não há como saber se ainda cabe
+   * alguém, e enfiar gente ali seria pior que deixar a recepção resolver.
+   */
+  private async candidateBedrooms(eventId: string, grupos: string[]) {
+    const quartos = await this.prisma.bedrooms.findMany({
+      where: { eventId },
+      select: {
+        id: true,
+        name: true,
+        capacity: true,
+        groupTags: true,
+        _count: { select: { users: true } },
+      },
+    });
+
+    const comVaga = quartos.filter(
+      (quarto) => !!quarto.capacity && quarto._count.users < quarto.capacity,
+    );
+
+    const doGrupo = comVaga
+      .filter((quarto) => quarto.groupTags.some((tag) => grupos.includes(tag)))
+      .sort(porNome);
+
+    const abertos = comVaga
+      .filter((quarto) => quarto.groupTags.length === 0)
+      .sort(porNome);
+
+    return [...doGrupo, ...abertos];
+  }
+
+  /**
+   * Coloca a pessoa num quarto na hora da entrega do crachá.
+   *
+   * Enche um quarto por vez, na ordem dos nomes: o primeiro quarto do grupo vai
+   * até a capacidade antes do segundo começar. Só quando os do grupo acabam é
+   * que os abertos entram.
+   *
+   * Devolve o id do quarto alocado, ou null quando a pessoa já tinha quarto ou
+   * não sobrou vaga em nenhum candidato.
+   */
+  private async allocateBedroom(
+    eventId: string,
+    userId: string,
+    grupos: string[],
+  ) {
+    const jaTemQuarto = await this.prisma.bedroomsOnUsers.findFirst({
+      where: { userId, bedrooms: { eventId } },
+      select: { bedroomsId: true },
+    });
+
+    // quarto definido antes do evento manda: a alocação não remaneja ninguém
+    if (jaTemQuarto) return null;
+
+    for (const quarto of await this.candidateBedrooms(eventId, grupos)) {
+      const alocado = await this.prisma.$transaction(async (tx) => {
+        /**
+         * Trava a linha do quarto antes de contar. É isto que impede dois
+         * recepcionistas de ocuparem a última vaga ao mesmo tempo: sem o
+         * lock, os dois contariam 3 de 4 e os dois entrariam.
+         */
+        await tx.$queryRaw`SELECT id FROM bedrooms WHERE id = ${quarto.id} FOR UPDATE`;
+
+        const ocupantes = await tx.bedroomsOnUsers.count({
+          where: { bedroomsId: quarto.id },
+        });
+        if (ocupantes >= quarto.capacity) return false;
+
+        await tx.bedroomsOnUsers.create({
+          data: { userId, bedroomsId: quarto.id },
+        });
+        return true;
+      });
+
+      if (alocado) return quarto.id;
+    }
+
+    return null;
+  }
+
+  /**
+   * Libera a vaga que a entrega do crachá alocou — e somente ela. Quarto
+   * definido à mão não tem `autoBedroomId` e fica onde está.
+   */
+  private async releaseAutoBedroom(
+    eventId: string,
+    userId: string,
+    bedroomId?: string | null,
+  ) {
+    if (!bedroomId) return;
+
+    await this.prisma.bedroomsOnUsers.deleteMany({
+      where: { userId, bedroomsId: bedroomId },
+    });
+    await this.prisma.checkin.update({
+      where: { userId_eventId: { userId, eventId } },
+      data: { autoBedroomId: null },
+    });
+  }
+
+  /**
    * Etapa 1 — recepção reconheceu o participante e entregou o crachá.
    * Ele entra na fila do posto de foto.
    */
   async deliverBadge(eventId: string, userId: string, operatorId: string) {
-    await this.findRegistration(eventId, userId);
+    const registration = await this.findRegistration(eventId, userId);
 
     const existente = await this.prisma.checkin.findUnique({
       where: { userId_eventId: { userId, eventId } },
@@ -342,6 +453,34 @@ export class CheckinService {
           }`,
         );
       }
+    }
+
+    const grupos: string[] = Array.from(
+      new Set(
+        registration.rolesRegistration
+          .map((item: any) => item.role.group?.name)
+          .filter(Boolean),
+      ),
+    );
+
+    /**
+     * O quarto é consequência da entrega, não condição dela: se a alocação
+     * falhar, o crachá continua entregue e a recepção resolve o quarto à mão.
+     * Derrubar a entrega por causa disso pararia a fila.
+     */
+    try {
+      const bedroomId = await this.allocateBedroom(eventId, userId, grupos);
+      if (bedroomId) {
+        await this.prisma.checkin.update({
+          where: { userId_eventId: { userId, eventId } },
+          data: { autoBedroomId: bedroomId },
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `Falha ao alocar quarto do usuario ${userId} no evento ${eventId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
 
     this.gateway.notifyQueueChanged(eventId, 'badge-delivered', userId);
@@ -510,6 +649,12 @@ export class CheckinService {
       );
     }
 
+    // voltar de QUEUED para PENDING é desfazer a entrega do crachá, e o quarto
+    // que ela alocou tem de voltar para a fila de vagas junto
+    if (atual.status === CheckinStatus.QUEUED) {
+      await this.releaseAutoBedroom(eventId, userId, atual.autoBedroomId);
+    }
+
     this.gateway.notifyQueueChanged(eventId, 'undone', userId);
     return this.participantResponse(eventId, userId);
   }
@@ -530,6 +675,13 @@ export class CheckinService {
   async undoBadgeDelivery(eventId: string, userId: string) {
     await this.findRegistration(eventId, userId);
 
+    // lido antes do update: o próprio update limpa o campo e depois não haveria
+    // como saber qual vaga liberar
+    const antes = await this.prisma.checkin.findUnique({
+      where: { userId_eventId: { userId, eventId } },
+      select: { autoBedroomId: true },
+    });
+
     const { count } = await this.prisma.checkin.updateMany({
       // se outro operador reverteu antes, o status já é PENDING e não há o que fazer
       where: { userId, eventId, status: { not: CheckinStatus.PENDING } },
@@ -541,6 +693,7 @@ export class CheckinService {
         calledById: null,
         doneAt: null,
         doneById: null,
+        autoBedroomId: null,
       },
     });
 
@@ -549,6 +702,8 @@ export class CheckinService {
         'Este participante não tem entrega de crachá para reverter',
       );
     }
+
+    await this.releaseAutoBedroom(eventId, userId, antes?.autoBedroomId);
 
     this.gateway.notifyQueueChanged(eventId, 'badge-undone', userId);
     return this.participantResponse(eventId, userId);

@@ -36,6 +36,17 @@ export class BedroomDto {
   tags: string[];
 
   @ApiProperty({
+    example: ['Servos', 'Cursilhistas'],
+    description:
+      'Nomes de grupos de inscricao que podem ocupar o quarto. Vazio deixa o quarto aberto a qualquer inscrito; preenchido restringe a esses grupos.',
+    required: false,
+  })
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  groupTags?: string[];
+
+  @ApiProperty({
     example: [1, 2],
     description: 'ids dos usuarios',
   })
