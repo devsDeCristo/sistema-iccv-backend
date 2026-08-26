@@ -38,6 +38,7 @@ model User {
   TeamOnUsers        TeamOnUsers[]
   waitlists          Waitlist[]
   checkins           Checkin[]
+  news               News[]
 
   @@map("users")
 }
@@ -333,4 +334,25 @@ enum CheckoutStatus {
   ACTIVE
   EXPIRED
   INACTIVE
+}
+
+/// Notícia do mural: a secretaria publica e todo inscrito vê no feed de /eventos.
+model News {
+  id          String    @id @default(uuid())
+  title       String
+  /// chamada curta usada no feed; o texto inteiro fica em `content`
+  summary     String?
+  content     String
+  imageUrl    String?
+  /// rascunho não aparece no feed
+  isPublished Boolean   @default(false)
+  /// data da primeira publicação — é por ela que o feed ordena
+  publishedAt DateTime?
+  authorId    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  author      User?     @relation(fields: [authorId], references: [id])
+
+  @@index([isPublished, publishedAt])
+  @@map("news")
 }

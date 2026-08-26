@@ -22,7 +22,10 @@ import { EventDto } from './dto/event.dto';
 import { isAdminRole } from 'src/auth/roles';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
-import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
+import {
+  resolveImageExtension,
+  uploadImageFirebase,
+} from 'src/utils/uploadImgFirebase';
 
 type EventWithGroupRole = Prisma.EventGetPayload<{
   include: {
@@ -60,16 +63,6 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Mime types aceitos em upload de logo/capa -> extensão segura no storage */
-const ALLOWED_IMAGE_MIME_TYPES: Record<string, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/jpg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'image/svg+xml': 'svg',
-};
-
 /** Hosts autorizados para download de imagens do evento (anti-SSRF) */
 const DEFAULT_IMAGE_HOSTS = [
   'firebasestorage.googleapis.com',
@@ -96,24 +89,6 @@ export class EventService {
     private prisma: PrismaService,
     private emailService: MailService,
   ) {}
-
-  /**
-   * Valida o mime type do arquivo e devolve a extensão a ser usada no storage.
-   * Evita que o mime type (controlado pelo cliente) entre cru no path do bucket
-   * e que arquivos não-imagem sejam servidos pelo domínio do storage.
-   */
-  private resolveImageExtension(file: { mimetype?: string }): string {
-    const mimetype = (file?.mimetype ?? '').toLowerCase().trim();
-    const extension = ALLOWED_IMAGE_MIME_TYPES[mimetype];
-
-    if (!extension) {
-      throw new BadRequestException(
-        `Tipo de imagem não suportado: ${mimetype || 'desconhecido'}`,
-      );
-    }
-
-    return extension;
-  }
 
   async registerUserInEvent(
     userId: string,
@@ -919,10 +894,10 @@ export class EventService {
   async create(data: EventDto) {
     // valida os arquivos antes de criar qualquer registro
     const coverExtension = data.coverFile
-      ? this.resolveImageExtension(data.coverFile)
+      ? resolveImageExtension(data.coverFile)
       : null;
     const logoExtension = data.logoFile
-      ? this.resolveImageExtension(data.logoFile)
+      ? resolveImageExtension(data.logoFile)
       : null;
 
     const name = data.name?.trim();
@@ -1204,10 +1179,10 @@ export class EventService {
   async update(id: string, updateEvent: EventDto) {
     // valida os arquivos antes de qualquer escrita
     const coverExtension = updateEvent.coverFile
-      ? this.resolveImageExtension(updateEvent.coverFile)
+      ? resolveImageExtension(updateEvent.coverFile)
       : null;
     const logoExtension = updateEvent.logoFile
-      ? this.resolveImageExtension(updateEvent.logoFile)
+      ? resolveImageExtension(updateEvent.logoFile)
       : null;
 
     const event = await this.prisma.event.findUnique({

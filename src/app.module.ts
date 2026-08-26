@@ -11,6 +11,7 @@ import { PaymentModule } from './payment/payment.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
 import { CheckinModule } from './checkin/checkin.module';
+import { NewsModule } from './news/news.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestContextInterceptor } from './middleware/request-context.middleware';
 
@@ -27,6 +28,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     WebhooksModule,
     CronModule,
     CheckinModule,
+    NewsModule,
   ],
   controllers: [AuthController],
   providers: [

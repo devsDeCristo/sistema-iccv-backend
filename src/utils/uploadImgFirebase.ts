@@ -1,4 +1,33 @@
 import * as admin from 'firebase-admin';
+import { BadRequestException } from '@nestjs/common';
+
+/** Mime types aceitos em upload de imagem -> extensão segura no storage */
+const ALLOWED_IMAGE_MIME_TYPES: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/svg+xml': 'svg',
+};
+
+/**
+ * Valida o mime type do arquivo e devolve a extensão a ser usada no storage.
+ * Evita que o mime type (controlado pelo cliente) entre cru no path do bucket e
+ * que arquivos não-imagem sejam servidos pelo domínio do storage.
+ */
+export function resolveImageExtension(file: { mimetype?: string }): string {
+  const mimetype = (file?.mimetype ?? '').toLowerCase().trim();
+  const extension = ALLOWED_IMAGE_MIME_TYPES[mimetype];
+
+  if (!extension) {
+    throw new BadRequestException(
+      `Tipo de imagem não suportado: ${mimetype || 'desconhecido'}`,
+    );
+  }
+
+  return extension;
+}
 
 type UploadImageResponse = {
   url: string;
