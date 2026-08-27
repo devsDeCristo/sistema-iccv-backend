@@ -1,10 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { EventType } from '@prisma/client';
+import { EventStatus, EventType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
-  IsBoolean,
   IsDateString,
+  IsEnum,
   IsInt,
   IsNumber,
   IsObject,
@@ -75,17 +75,20 @@ export class EventDto {
   groupLink: string;
 
   @ApiProperty({
-    example: true,
-    description: 'Status do evento (ativo/inativo)',
+    enum: EventStatus,
+    example: EventStatus.ACTIVE,
+    description:
+      'Status do evento. TEST só aparece na área do usuário para admin e super admin',
   })
   @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value.toLowerCase() === 'true';
-    }
-    return Boolean(value);
+    // multipart manda tudo como texto; o booleano antigo ainda chega de
+    // clientes que não foram atualizados
+    if (value === true || value === 'true') return EventStatus.ACTIVE;
+    if (value === false || value === 'false') return EventStatus.INACTIVE;
+    return typeof value === 'string' ? value.toUpperCase() : value;
   })
-  @IsBoolean()
-  isActive: boolean;
+  @IsEnum(EventStatus)
+  status: EventStatus;
 
   @ApiProperty({
     example: '2023-02-17',

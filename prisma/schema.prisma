@@ -50,7 +50,11 @@ model Event {
   endDate    DateTime
   createdAt  DateTime       @default(now())
   updateAt   DateTime       @updatedAt
-  isActive   Boolean        @default(false)
+  /// Coluna antiga, preservada porque os eventos já existem em produção.
+  /// `@ignore` mantém ela no banco e fora do Prisma Client: nada no código lê
+  /// ou escreve esse campo — quem manda na visibilidade agora é `status`.
+  isActive   Boolean        @default(false) @ignore
+  status     EventStatus    @default(ACTIVE)
   groupLink  String? // link do grupo do evento (Inativo)
   type       EventType      @default(CURSILHO)
   data       Json?
@@ -305,6 +309,16 @@ enum CheckinStatus {
 enum EventType {
   CURSILHO
   RETIRO
+}
+
+/// Estado de publicação do evento, mostrado como "Status do evento" no painel.
+enum EventStatus {
+  /// Aberto ao público: aparece na área do usuário para qualquer inscrito
+  ACTIVE
+  /// Desligado: não aparece para ninguém na área do usuário
+  INACTIVE
+  /// Ensaio antes de abrir ao público: só admin e super admin enxergam
+  TEST
 }
 
 enum PaymentReceived {

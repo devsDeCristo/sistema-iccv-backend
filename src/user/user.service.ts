@@ -152,7 +152,7 @@ export class UserService {
               select: {
                 id: true,
                 name: true,
-                isActive: true,
+                status: true,
               },
             },
           },

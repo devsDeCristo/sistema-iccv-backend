@@ -12,6 +12,7 @@ import * as sharp from 'sharp';
 
 import {
   Event,
+  EventStatus,
   PaymentMethod,
   PaymentReceived,
   PaymentStatus,
@@ -98,6 +99,8 @@ export class EventService {
       tx?: Prisma.TransactionClient;
       attempt?: number;
       movingFromWaitlist?: boolean;
+      /** quem disparou a inscrição pela API; ausente em chamadas internas */
+      requesterId?: string;
     },
   ) {
     const MAX_RETRIES = 5;
@@ -117,6 +120,12 @@ export class EventService {
     if (uniqueRoleIds.length !== (registrationRoleIds ?? []).length) {
       // mesma resposta de antes: ids repetidos nunca casam com o findMany de roles
       throw new BadRequestException('Role(s) inválido(s)');
+    }
+
+    // evento em teste não recebe inscrição de quem não enxerga o evento: sem
+    // isso bastaria ter o id em mãos para entrar num evento ainda em ensaio
+    if (options?.requesterId) {
+      await this.assertEventIsVisible(eventId, options.requesterId);
     }
 
     try {
@@ -938,7 +947,7 @@ export class EventService {
                 })),
               },
               groupLink: data.groupLink,
-              isActive: true,
+              status: data.status ?? EventStatus.ACTIVE,
             },
           });
         },
@@ -1009,7 +1018,7 @@ export class EventService {
     const events = await this.prisma.event.findMany({
       select: {
         id: true,
-        isActive: true,
+        status: true,
         startDate: true,
         users: {
           select: {
@@ -1048,7 +1057,9 @@ export class EventService {
 
     // 📌 Totais
     const totalEvents = events.length;
-    const totalEventsActive = events.filter((e) => e.isActive).length;
+    const totalEventsActive = events.filter(
+      (e) => e.status === EventStatus.ACTIVE,
+    ).length;
 
     // ⏱ Calcula tempo entre primeiro e último inscrito
     function getTimeToFill(users: { createdAt: Date }[]): number | null {
@@ -1102,11 +1113,53 @@ export class EventService {
     };
   }
 
-  async findAll(filters?: Partial<EventDto>) {
+  /**
+   * Perfil do solicitante lido do banco, e não do JWT: o token dura 24h, então
+   * um admin rebaixado continuaria enxergando evento de teste até ele expirar.
+   * Mesma escolha do `RolesGuard`.
+   */
+  private async requesterIsAdmin(requesterId?: string): Promise<boolean> {
+    if (!requesterId) return false;
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    return isAdminRole(requester?.role);
+  }
+
+  /** Barra quem não pode enxergar o evento — evento de teste responde 404 */
+  private async assertEventIsVisible(eventId: string, requesterId?: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { status: true },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event does not exist');
+    }
+
+    if (
+      event.status === EventStatus.TEST &&
+      !(await this.requesterIsAdmin(requesterId))
+    ) {
+      throw new NotFoundException('Event does not exist');
+    }
+  }
+
+  /**
+   * @param requesterId usuário autenticado que pediu a lista. Evento em teste
+   * é ensaio de configuração, então some da lista de quem não é admin.
+   */
+  async findAll(filters?: Partial<EventDto>, requesterId?: string) {
+    const canSeeTestEvents = await this.requesterIsAdmin(requesterId);
+
     const events = await this.prisma.event
       .findMany({
         where: {
           name: { contains: filters?.name || undefined },
+          ...(canSeeTestEvents ? {} : { status: { not: EventStatus.TEST } }),
         },
         select: {
           id: true,
@@ -1114,7 +1167,7 @@ export class EventService {
           name: true,
           startDate: true,
           endDate: true,
-          isActive: true,
+          status: true,
           data: true,
           groupRoles: {
             select: {
@@ -1136,7 +1189,10 @@ export class EventService {
     return events;
   }
 
-  async findOne(id: string) {
+  /**
+   * @param requesterId usuário autenticado que abriu o evento. Ver `findAll`.
+   */
+  async findOne(id: string, requesterId?: string) {
     try {
       const event = await this.prisma.event.findUnique({
         where: { id },
@@ -1154,6 +1210,15 @@ export class EventService {
       });
 
       if (!event) {
+        throw new NotFoundException('Event does not exist');
+      }
+
+      if (
+        event.status === EventStatus.TEST &&
+        !(await this.requesterIsAdmin(requesterId))
+      ) {
+        // mesma resposta de evento inexistente: quem não pode ver o evento de
+        // teste também não precisa descobrir que ele existe
         throw new NotFoundException('Event does not exist');
       }
 
@@ -1282,7 +1347,7 @@ export class EventService {
           name,
           startDate,
           endDate,
-          isActive: updateEvent.isActive,
+          status: updateEvent.status,
           groupLink: updateEvent.groupLink,
           data: jsonData,
         },

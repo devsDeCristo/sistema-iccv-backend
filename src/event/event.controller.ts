@@ -60,8 +60,8 @@ export class EventController {
 
   @Get()
   @ApiOperation({ summary: 'All events' })
-  async findAll(@Query() filters: Partial<EventDto>) {
-    const events = await this.eventService.findAll(filters);
+  async findAll(@Query() filters: Partial<EventDto>, @Req() req: any) {
+    const events = await this.eventService.findAll(filters, req.user?.userId);
     return events;
   }
   @ApiOperation({ summary: 'Get insights events' })
@@ -74,8 +74,8 @@ export class EventController {
   @ApiOperation({ summary: 'Event by id' })
   @ApiConsumes('multipart/form-data')
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.eventService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req: any) {
+    return this.eventService.findOne(id, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Edit event' })
@@ -203,11 +203,13 @@ export class EventController {
     @Param('idUser') idUser: string,
     @Param('idEvent') idEvent: string,
     @Body() body: roleEventDto,
+    @Req() req: any,
   ) {
     return this.eventService.registerUserInEvent(
       idUser,
       idEvent,
       body.roleRegistrationId,
+      { requesterId: req.user?.userId },
     );
   }
   //remove o usuario do waitlist
