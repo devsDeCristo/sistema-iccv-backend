@@ -2,7 +2,7 @@
 set -e
 
 echo "Running database migrations..."
-npx prisma migrate deploy
+npx prisma migrate deploy || { echo "❌ migrate deploy falhou"; exit 1; }
 
 # O entrypoint compilado é dist/src/main.js, não dist/main.js: prisma/seed.ts
 # entra na compilação e o tsc aninha a saída sob dist/src.
