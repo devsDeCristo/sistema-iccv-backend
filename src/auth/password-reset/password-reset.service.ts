@@ -244,7 +244,11 @@ export class PasswordResetService {
     });
   }
 
-  /** O logo dos templates vai anexado com `cid`, como nos outros e-mails. */
+  /**
+   * O logo vai anexado com `cid`, como nos outros e-mails. Aqui é a versão
+   * branca: o cabeçalho destes dois e-mails é a faixa índigo da marca, e o
+   * `logo.png` original é preto — sumiria dentro dela.
+   */
   private get logoAttachment() {
     return [
       {
@@ -255,7 +259,7 @@ export class PasswordResetService {
           'mail',
           'templates',
           'assets',
-          'logo.png',
+          'logo-branca.png',
         ),
         cid: 'logo',
       },
