@@ -94,9 +94,9 @@ jobs:
           password: ${{ secrets.DEPLOY_PASSWORD }}
           script: |
             set -e
-            # --with-registry-auth repassa aos agentes do Swarm a credencial do
-            # ghcr que está no ~/.docker/config.json do usuário. Sem isso o pull
-            # de imagem privada falha com "No such image".
+            # O package é público, então o pull é anônimo e --with-registry-auth
+            # não é necessário hoje. Fica pelo caso de fecharem o package: aí ele
+            # repassa aos agentes do Swarm a credencial do ~/.docker/config.json.
             docker service update \
               --with-registry-auth \
               --force \
