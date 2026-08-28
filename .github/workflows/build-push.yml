@@ -88,7 +88,10 @@ jobs:
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # Autenticação por senha (a mesma que a VM pede no terminal). Para
+          # migrar pra chave depois: troque por `key:` com o conteúdo do
+          # arquivo de chave privada, não com uma senha.
+          password: ${{ secrets.DEPLOY_PASSWORD }}
           script: |
             set -e
             # --with-registry-auth repassa aos agentes do Swarm a credencial do
