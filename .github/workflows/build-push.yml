@@ -99,7 +99,8 @@ jobs:
             # de imagem privada falha com "No such image".
             docker service update \
               --with-registry-auth \
-              --image ${{ env.IMAGE_LC }}:${{ env.COMMIT_HASH }} \
+              --force \
+              --image ${{ env.IMAGE_LC }}:latest \
               sistema-eventos-iccv_api
 
       # Cada push cria uma versão nova de imagem (tag type=sha). Sem limpeza o
