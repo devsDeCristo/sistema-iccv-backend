@@ -117,4 +117,20 @@ export class CronService {
 
     this.logger.log('✅ Reconciliação finalizada');
   }
+
+  /**
+   * Tokens de redefinição de senha morrem sozinhos ao serem usados; sobra o
+   * caso de quem pediu o código e nunca voltou. A varredura diária impede que
+   * essas linhas fiquem paradas no banco depois de vencidas.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async purgeExpiredUserTokens() {
+    const { count } = await this.prisma.userToken.deleteMany({
+      where: { expiresAt: { lte: new Date() } },
+    });
+
+    if (count > 0) {
+      this.logger.log(`🧹 ${count} token(s) vencido(s) removido(s)`);
+    }
+  }
 }

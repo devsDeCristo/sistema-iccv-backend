@@ -39,8 +39,43 @@ model User {
   waitlists          Waitlist[]
   checkins           Checkin[]
   news               News[]
+  tokens             UserToken[]
 
   @@map("users")
+}
+
+/// Token de uso único e vida curta para fluxos que acontecem **fora** da sessão
+/// autenticada — hoje só a redefinição de senha. A linha existe apenas enquanto
+/// o usuário está no meio do processo: ao concluir (ou estourar tentativas) ela
+/// é apagada, então a tabela vive praticamente vazia.
+///
+/// Nada aqui é guardado em claro. O código de 8 dígitos vai só no e-mail, e o
+/// que fica no banco é o hash — um vazamento do banco não entrega o fluxo de
+/// recuperação de ninguém.
+model UserToken {
+  id         String   @id @default(uuid())
+  userId     String
+  /// 0 = redefinição de senha. Inteiro em vez de enum para um fluxo novo
+  /// (confirmação de e-mail, convite) entrar sem migração de tipo.
+  type       Int
+  /// bcrypt do código de 8 dígitos. bcrypt e não SHA porque 10^8 combinações
+  /// são varridas em segundos com hash rápido caso o banco vaze.
+  codeHash   String
+  /// SHA-256 do ticket entregue quando o código confere. Aqui o SHA basta: o
+  /// ticket tem 256 bits de entropia, não há o que adivinhar por força bruta.
+  ticketHash String?  @unique
+  /// Tentativas erradas de código. Ao chegar em 5 a linha é destruída.
+  attempts   Int      @default(0)
+  /// 1h enquanto vale o código; encurta para 15min quando vira ticket.
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Atende a busca do token ativo do usuário e o descarte por vencimento
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@map("user_tokens")
 }
 
 model Event {

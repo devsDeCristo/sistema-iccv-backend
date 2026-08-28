@@ -212,6 +212,12 @@ export class UserService {
       }
     }
 
+    // Senha não passa por aqui: `data` vai direto para o Prisma, então uma
+    // senha no corpo seria gravada em texto puro e nenhum login voltaria a
+    // funcionar. Quem troca senha é o fluxo de redefinição
+    // (POST /auth/password/*), que grava o hash bcrypt.
+    delete data.password;
+
     // const existEventRelation = await this.prisma.eventOnUsers.findFirst({
     //   where: { userId: id, eventId: data.eventId },
     // });

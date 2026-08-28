@@ -6,6 +6,7 @@ import { BedroomsModule } from './bedrooms/bedrooms.module';
 import { TeamModule } from './team/team.module';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
+import { PasswordResetModule } from './auth/password-reset/password-reset.module';
 import { PagbankModule } from './gateways/pagbank/pagbank.module';
 import { PaymentModule } from './payment/payment.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
@@ -23,6 +24,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     BedroomsModule,
     TeamModule,
     AuthModule,
+    PasswordResetModule,
     PagbankModule,
     PaymentModule,
     WebhooksModule,
