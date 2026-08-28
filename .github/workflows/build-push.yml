@@ -97,7 +97,7 @@ jobs:
             docker service update \
               --with-registry-auth \
               --image ${{ env.IMAGE_LC }}:${{ env.COMMIT_HASH }} \
-              sistema_iccv_api
+              sistema-eventos-iccv_api
 
       # Cada push cria uma versão nova de imagem (tag type=sha). Sem limpeza o
       # storage do package cresce indefinidamente — mantém só as 10 mais recentes.
