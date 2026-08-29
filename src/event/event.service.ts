@@ -400,37 +400,91 @@ export class EventService {
         const statusLabel = escapeHtml(statusMap[ticket.type] ?? ticket.type);
 
         return `
-        <li class="ticket-item">
-          <div style="width:100%">
-            <div class="ticket-name">
-              Ingresso: ${groupName}
-            </div>
-            <div class="ticket-meta">
-              Variação: ${roleName}
-            </div>
-          </div>
-
-          <div style="text-align: right; width: 180px;position: absolute;right: 0">
-            <div style="font-weight: 700; color: ${
-              statusColors[ticket.type] ?? '#0f1724'
-            }">
-              ${statusLabel}
-            </div>
-
-            <div class="ticket-meta">
-              Lugar: ${local}
-            </div>
-          </div>
-        </li>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 8px; border: 1px solid #eceff5; border-radius: 8px">
+          <tr>
+            <td style="padding: 14px 16px; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-size: 14px; line-height: 20px; color: #1a1a1a">
+                    <strong>${groupName}</strong><br />
+                    <span style="font-size: 13px; color: #6b7280">${roleName}</span>
+                  </td>
+                  <td align="right" style="font-size: 13px; line-height: 20px">
+                    <span style="font-weight: 700; color: ${
+                      statusColors[ticket.type] ?? '#1c0f4d'
+                    }">${statusLabel}</span>
+                    ${
+                      local
+                        ? `<br /><span style="color: #6b7280">${local}</span>`
+                        : ''
+                    }
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       `;
       })
       .join('');
 
+    return `<div style="margin: 0 0 20px">${items}</div>`;
+  }
+
+  /**
+   * Faixa do evento, logo abaixo do cabeçalho da marca: a logo do evento sobre
+   * a capa, como o app mostra o evento na tela. Capa e logo são opcionais em
+   * `event.data`, então cada combinação tem seu próprio bloco — <img src="">
+   * vira ícone de imagem quebrada no cliente de e-mail.
+   */
+  private renderEventBanner(data: any): string {
+    const rawCover = this.safeImageUrl(data?.coverUrl);
+    const cover = escapeHtml(rawCover);
+    const logo = escapeHtml(this.safeImageUrl(data?.logoUrl));
+
+    if (!cover && !logo) return '';
+
+    // a capa também entra dentro de url('') no style: aspas e parênteses
+    // fechariam a função CSS, então vão em percent-encode
+    const coverCss = escapeHtml(
+      rawCover.replace(
+        /['"()\\]/g,
+        (char) =>
+          ({
+            "'": '%27',
+            '"': '%22',
+            '(': '%28',
+            ')': '%29',
+            '\\': '%5C',
+          }[char] ?? char),
+      ),
+    );
+
+    const logoImg = logo
+      ? `<img src="${logo}" alt="" height="72" style="display: block; height: 72px; max-height: 72px; width: auto; max-width: 80%; margin: 0 auto; border: 0" />`
+      : '';
+
+    // sem logo a capa entra como imagem de verdade: `background` em <td> é
+    // ignorado pelo Outlook desktop, e aí sobraria só a faixa índigo.
+    const content =
+      cover && !logo
+        ? `<img src="${cover}" alt="" width="600" style="display: block; width: 100%; max-width: 600px; height: auto; border: 0" />`
+        : logoImg;
+
+    const cellStyle = cover
+      ? `background-color: #1c0f4d; background-image: url('${coverCss}'); background-size: cover; background-position: center; ${
+          logo ? 'padding: 28px 24px' : 'font-size: 0; line-height: 0'
+        }`
+      : 'background-color: #1c0f4d; padding: 28px 24px; border-top: 1px solid #2c1a6b';
+
     return `
-    <ul class="ticket-list" style="margin-bottom: 16px">
-      ${items}
-    </ul>
-  `;
+            <tr>
+              <td align="center" bgcolor="#1C0F4D"${
+                cover ? ` background="${cover}"` : ''
+              } style="${cellStyle}">
+                ${content}
+              </td>
+            </tr>`;
   }
 
   private async sendEmailConfirmation({
@@ -466,8 +520,7 @@ export class EventService {
         event.endDate,
       ).toLocaleDateString()}`,
       INSERT_TICKETS: await this.renderTickets(tickets),
-      IMG_CAPA_URL: escapeHtml(this.safeImageUrl(data?.coverUrl)),
-      IMG_LOGO_URL: escapeHtml(this.safeImageUrl(data?.logoUrlInverted)),
+      EVENT_BANNER: this.renderEventBanner(data),
       LOCAL: escapeHtml(LOCAL),
     };
 
@@ -483,13 +536,15 @@ export class EventService {
       attachments: [
         {
           filename: 'logo.png',
+          // versão branca: o cabeçalho é a faixa índigo da marca, e o
+          // `logo.png` original é preto — sumiria dentro dela.
           path: path.join(
             process.cwd(),
             'src',
             'mail',
             'templates',
             'assets',
-            'logo.png',
+            'logo-branca.png',
           ),
           cid: 'logo',
         },

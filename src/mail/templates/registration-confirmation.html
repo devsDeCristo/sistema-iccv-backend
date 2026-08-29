@@ -3,373 +3,231 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap"
-      rel="stylesheet"
-    />
-    <title>Recovery</title>
-
-    <style>
-      /* Estilos básicos - mantenha simples para compatibilidade com clientes de e-mail */
-      body {
-        display: flex;
-        flex-direction: column;
-        gap: 40px;
-        text-align: 'left';
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        margin: 0;
-        padding: 40px;
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        margin: 0;
-        padding: 0;
-        background-color: #f4f6f8;
-        -webkit-font-smoothing: antialiased;
-        -webkit-text-size-adjust: none;
-      }
-      table {
-        border-collapse: collapse;
-      }
-      img {
-        border: 0;
-        display: block;
-        line-height: 100%;
-        outline: none;
-        text-decoration: none;
-      }
-      .container {
-        width: 100%;
-        max-width: 680px;
-        margin: 0 auto;
-      }
-      .card {
-        background: #ffffff;
-        border-radius: 8px;
-        overflow: hidden;
-      }
-      .p-24 {
-        padding: 24px;
-      }
-      .text-center {
-        text-align: center;
-      }
-      .h1 {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-          'Helvetica Neue', Arial;
-        font-size: 22px;
-        font-weight: 700;
-        color: #0f1724;
-        margin: 0 0 8px;
-      }
-      .lead {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-          'Helvetica Neue', Arial;
-        font-size: 15px;
-        color: #374151;
-        margin: 0 0 16px;
-        line-height: 1.5;
-      }
-      .im {
-        width: 100% !important;
-      }
-      .muted {
-        color: #6b7280;
-        font-size: 13px;
-      }
-      .ticket-list {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-      .ticket-item {
-        padding: 10px 12px;
-        border: 1px solid #e6e9ee;
-        border-radius: 6px;
-        margin-bottom: 8px;
-        background: #fbfdff;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-left: 0px !important;
-        position: relative;
-      }
-      .ticket-name {
-        font-weight: 600;
-        color: #0f1724;
-      }
-      .ticket-meta {
-        font-size: 13px;
-        color: #6b7280;
-      }
-      .btn {
-        display: inline-block;
-        background: #2563eb;
-        color: #000000;
-        text-decoration: none;
-        padding: 10px 16px;
-        border-radius: 6px;
-        font-weight: 600;
-      }
-      .footer {
-        font-size: 12px;
-        color: #9aa0a6;
-        text-align: center;
-        padding: 18px 0;
-      }
-      p,
-      h1,
-      h3 {
-        padding: 0;
-        margin: 0;
-      }
-      a {
-        text-decoration: none;
-        color: #0288d1;
-      }
-      .boxLogo {
-        display: inline-block;
-        width: 120px;
-        height: 100px;
-        vertical-align: top;
-        text-align: right;
-      }
-      .boxCenter {
-        display: inline-block;
-        width: calc(100% - 250px);
-        vertical-align: top;
-        margin-top: 0px;
-        text-align: center;
-        margin-left: auto;
-        margin-right: auto;
-      }
-      .logoD {
-        display: block;
-        max-width: 90px;
-        max-height: 60px;
-        width: auto;
-        height: auto;
-        margin-left: auto;
-        margin-right: auto;
-      }
-      .logoE {
-        display: block;
-        max-width: 90px;
-        max-height: 60px;
-        width: auto;
-        height: auto;
-        margin-left: auto;
-        margin-right: auto;
-      }
-
-      @media only screen and (max-width: 480px) {
-        .p-24 {
-          padding: 16px;
-        }
-        .h1 {
-          font-size: 20px;
-        }
-      }
-    </style>
+    <title>Confirmação de inscrição</title>
   </head>
-  <body>
-    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+  <!--
+    Layout em tabela e estilo escrito no próprio elemento: é o que Gmail e
+    Outlook renderizam de forma previsível — folha de estilo no <head> é
+    descartada por parte dos clientes.
+  -->
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background-color: #f1f3f9;
+      -webkit-font-smoothing: antialiased;
+    "
+  >
+    <table
+      role="presentation"
+      width="100%"
+      cellpadding="0"
+      cellspacing="0"
+      border="0"
+      style="background-color: #f1f3f9"
+    >
       <tr>
-        <td align="center" style="padding: 24px 12px">
+        <td align="center" style="padding: 32px 16px">
           <table
-            class="container"
             role="presentation"
+            width="600"
             cellpadding="0"
             cellspacing="0"
+            border="0"
+            style="
+              width: 100%;
+              max-width: 600px;
+              border-radius: 12px;
+              overflow: hidden;
+            "
           >
-            <!-- Header com imagem do evento -->
+            <!-- cabeçalho: logo em branco sobre o índigo da marca -->
             <tr>
-              <td class="card" style="overflow: hidden">
-                <!-- Imagem do evento no topo -->
+              <td
+                align="center"
+                bgcolor="#1C0F4D"
+                style="background-color: #1c0f4d; padding: 28px 24px"
+              >
+                <img
+                  src="cid:logo"
+                  width="55"
+                  alt="Igreja de Cristo Cidade Verde"
+                  style="
+                    display: block;
+                    width: 55px;
+                    max-width: 55px;
+                    height: auto;
+                    border: 0;
+                    margin: 0 auto;
+                  "
+                />
+                <div
+                  style="
+                    margin-top: 14px;
+                    font-family: 'Segoe UI', Roboto, Helvetica, Arial,
+                      sans-serif;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #ffffff;
+                    letter-spacing: 4px;
+                    text-indent: 4px;
+                  "
+                >
+                  ICCV EVENTOS
+                </div>
+              </td>
+            </tr>
+
+            <!--
+              Faixa do evento (logo sobre a capa). Capa e logo vêm de
+              `event.data` e podem não existir, então quem monta a linha é o
+              serviço — ele manda vazio quando não há nenhuma das duas.
+            -->
+            {EVENT_BANNER}
+
+            <tr>
+              <td
+                bgcolor="#FFFFFF"
+                style="
+                  background-color: #ffffff;
+                  padding: 32px 32px 24px;
+                  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                  color: #1a1a1a;
+                "
+              >
+                <h1
+                  style="
+                    margin: 0 0 4px;
+                    font-size: 21px;
+                    font-weight: 600;
+                    color: #1c0f4d;
+                  "
+                >
+                  {eventTitle}
+                </h1>
+                <p style="margin: 0 0 20px; font-size: 13px; color: #9aa1ad">
+                  Confirmação de inscrição
+                </p>
+
+                <p style="margin: 0 0 14px; font-size: 15px; line-height: 24px">
+                  Olá, {userName}.
+                </p>
+                <p style="margin: 0 0 8px; font-size: 15px; line-height: 24px">
+                  É com grande alegria que confirmamos que sua inscrição no
+                  <strong>{eventTitle}</strong> foi realizada com sucesso.
+                </p>
+
+                <!-- onde e quando: o que a pessoa volta para reler depois -->
                 <table
-                  width="100%"
                   role="presentation"
+                  width="100%"
                   cellpadding="0"
                   cellspacing="0"
+                  border="0"
+                  style="margin: 20px 0"
                 >
                   <tr>
-                    <td style="background-color: #0f1724">
-                      <!-- Substitua EVENT_IMAGE_URL pelo link da imagem do evento -->
-                      <img
-                        src="{IMG_CAPA_URL}"
-                        alt="Imagem do evento"
-                        width="380"
-                        style="
-                          width: 100%;
-                          height: auto;
-                          display: block;
-                          object-fit: cover;
-                          max-height: 100px;
-                        "
-                      />
-                    </td>
-                  </tr>
-                </table>
-
-                <table
-                  width="100%"
-                  role="presentation"
-                  cellpadding="0"
-                  cellspacing="0"
-                  style="background-color: #ffffff"
-                >
-                  <tr>
-                    <td class="p-24">
-                      <table
-                        width="100%"
-                        cellpadding="0"
-                        cellspacing="0"
-                        role="presentation"
-                        style="margin-top: -30px"
-                      >
-                        <tr>
-                          <!-- Logo esquerda -->
-                          <td align="left" width="90" style="padding: 0 6px">
-                            <img
-                              src="{IMG_LOGO_URL}"
-                              alt="Logo"
-                              class="logoE"
-                            />
-                          </td>
-
-                          <!-- Centro -->
-                          <td align="center" style="padding: 0 10px">
-                            <h1
-                              style="
-                                margin: 0;
-                                font-size: 20px;
-                                font-weight: 700;
-                                color: #0f1724;
-                              "
-                            >
-                              {eventTitle}
-                            </h1>
-                            <p
-                              style="
-                                margin: 6px 0 18px;
-                                font-size: 14px;
-                                color: #6b7280;
-                              "
-                            >
-                              Confirmação de inscrição
-                            </p>
-                          </td>
-
-                          <!-- Logo direita -->
-                          <td align="right" width="90" style="padding: 0 6px">
-                            <img src="cid:logo" alt="Logo2" class="logoD" />
-                          </td>
-                        </tr>
-                      </table>
-                      <hr />
-                      <br />
-
-                      <p class="lead">Olá <strong>{userName}</strong>,</p>
-
-                      <p class="lead">
-                        É com grande alegria que confirmamos que sua inscrição
-                        no
-                        <strong>{eventTitle}</strong> foi realizada com sucesso!
-                      </p>
-                      <p class="muted" style="margin: 0 0 8px">
-                        <strong>Local do evento:</strong> {LOCAL}
-                      </p>
-                      <p class="muted" style="margin: 0 0 8px">
-                        <strong>Data:</strong> {eventDate}
-                      </p>
-                      <p class="lead">
-                        Abaixo estão os detalhes do(s) ingresso(s) que foram
-                        registrados para você.
-                      </p>
-
-                      <h3
-                        style="
-                          font-family: -apple-system, BlinkMacSystemFont,
-                            'Segoe UI', Roboto, 'Helvetica Neue', Arial;
-                          font-size: 16px;
-                          margin: 14px 0 8px;
-                          color: #0f1724;
-                        "
-                      >
-                        Ingressos
-                      </h3>
-
-                      <!-- Lista de ingressos (cada ingresso pode representar um dia) -->
-                      {INSERT_TICKETS}
-
-                      <p class="lead">
-                        Fique atento para futuras comunicações contendo
-                        informações detalhadas sobre a programação,
-                        procedimentos de chegada, lista de itens necessários e
-                        quaisquer atualizações relevantes.
-                      </p>
-                      <p class="lead">
-                        Se surgir alguma dúvida ou se precisar de assistência
-                        adicional, por favor, não hesite em entrar em contato
-                        conosco.
-                      </p>
-                      <p class="lead">
-                        Estamos ansiosos para recebê-lo pessoalmente no
-                        {eventTitle} da Igreja de Cristo!
-                      </p>
-
-                      <hr
-                        style="
-                          border: none;
-                          border-top: 1px solid #eef2f6;
-                          margin: 20px 0;
-                        "
-                      />
-
-                      <p class="muted" style="margin: 0 0 8px">
-                        Pr. Kleber Junior de Sousa - Líder Espiritual
-                      </p>
-                      <p class="muted" style="margin: 0 0 8px">
-                        <strong>Contato:</strong> admin@iccidadeverde.com
-                        &middot; +55 (84) 99170-1727
-                      </p>
-
-                      <!-- <p class="muted" style="margin: 0 0 8px">
-                        Pr. Neemias Kell Dantas - Líder Espiritual
-                      </p>
-                      <p class="muted" style="margin: 0 0 8px">
-                        <strong>Contato:</strong>
-                        &middot; +55 (84) 99679-8097
-                      </p> -->
-                    </td>
-                  </tr>
-                </table>
-
-                <!-- Rodapé -->
-                <table
-                  width="100%"
-                  role="presentation"
-                  cellpadding="0"
-                  cellspacing="0"
-                  style="background: #f8fafc"
-                >
-                  <tr>
-                    <td class="p-24" style="text-align: center">
-                      <p class="muted" style="margin: 0 0 8px">
-                        Recebeu este e‑mail porque você se inscreveu no evento
-                        <strong>{eventTitle}</strong>.
-                      </p>
-                      <p class="muted" style="margin: 0">
-                        Se não for você, entre em contato com nossa equipe
-                        imediatamente.
-                      </p>
-                      <div class="footer">
-                        © 2026 ICCIDADE VERDE — Todos os direitos reservados.
+                    <td
+                      bgcolor="#F1F3F9"
+                      style="
+                        background-color: #f1f3f9;
+                        border-radius: 8px;
+                        padding: 16px 20px;
+                        font-family: 'Segoe UI', Roboto, Helvetica, Arial,
+                          sans-serif;
+                        font-size: 14px;
+                        line-height: 22px;
+                        color: #1a1a1a;
+                      "
+                    >
+                      <div style="margin-bottom: 6px">
+                        <span style="color: #6b7280">Local:</span> {LOCAL}
+                      </div>
+                      <div>
+                        <span style="color: #6b7280">Data:</span> {eventDate}
                       </div>
                     </td>
                   </tr>
                 </table>
+
+                <h2
+                  style="
+                    margin: 24px 0 10px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: #1c0f4d;
+                  "
+                >
+                  Ingressos
+                </h2>
+
+                <!-- um bloco por ingresso; cada um pode representar um dia -->
+                {INSERT_TICKETS}
+
+                <p style="margin: 0 0 14px; font-size: 15px; line-height: 24px">
+                  Fique atento para futuras comunicações contendo informações
+                  detalhadas sobre a programação, procedimentos de chegada,
+                  lista de itens necessários e quaisquer atualizações
+                  relevantes.
+                </p>
+                <p style="margin: 0 0 14px; font-size: 15px; line-height: 24px">
+                  Se surgir alguma dúvida ou se precisar de assistência
+                  adicional, por favor, não hesite em entrar em contato conosco.
+                </p>
+                <p style="margin: 0; font-size: 15px; line-height: 24px">
+                  Estamos ansiosos para recebê-lo pessoalmente no {eventTitle}
+                  da Igreja de Cristo!
+                </p>
+
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellpadding="0"
+                  cellspacing="0"
+                  border="0"
+                  style="margin-top: 24px; border-top: 1px solid #eceff5"
+                >
+                  <tr>
+                    <td
+                      style="
+                        padding-top: 18px;
+                        font-family: 'Segoe UI', Roboto, Helvetica, Arial,
+                          sans-serif;
+                        font-size: 13px;
+                        line-height: 22px;
+                        color: #6b7280;
+                      "
+                    >
+                      Pr. Kleber Junior de Sousa — Líder Espiritual<br />
+                      admin@iccidadeverde.com &middot; +55 (84) 99170-1727
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td
+                bgcolor="#FFFFFF"
+                style="
+                  background-color: #ffffff;
+                  padding: 0 32px 28px;
+                  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                  font-size: 12px;
+                  line-height: 20px;
+                  color: #9aa1ad;
+                  border-top: 1px solid #eceff5;
+                "
+              >
+                <p style="margin: 20px 0 0">
+                  Você recebeu este e-mail porque se inscreveu no evento
+                  {eventTitle}. Se não foi você, entre em contato com nossa
+                  equipe.
+                </p>
+                <p style="margin: 8px 0 0">
+                  Igreja de Cristo Cidade Verde — mensagem automática, não é
+                  necessário responder.
+                </p>
               </td>
             </tr>
           </table>
