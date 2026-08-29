@@ -9,9 +9,11 @@ ARG NODE_VERSION=20.18.0
 FROM node:${NODE_VERSION}-slim AS deps
 WORKDIR /app
 
+# git + ca-certificates: baileys puxa `libsignal` por git+https no lockfile.
 RUN apt-get update -qq \
     && apt-get install --no-install-recommends -y \
        build-essential node-gyp openssl pkg-config python-is-python3 \
+       git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiado antes do código: a camada só é invalidada quando o lockfile muda.
@@ -31,6 +33,7 @@ WORKDIR /app
 RUN apt-get update -qq \
     && apt-get install --no-install-recommends -y \
        build-essential node-gyp openssl pkg-config python-is-python3 \
+       git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json yarn.lock ./
