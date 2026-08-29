@@ -1,10 +1,10 @@
-import { BufferJSON, initAuthCreds, proto } from 'baileys';
 import type {
   AuthenticationCreds,
   AuthenticationState,
   SignalDataTypeMap,
 } from 'baileys';
 import { PrismaService } from 'src/prisma';
+import { loadBaileys } from './baileys.loader';
 
 /**
  * Estado de autenticação do Baileys guardado no Postgres.
@@ -33,6 +33,8 @@ export interface WhatsappAuthState {
 export async function useDatabaseAuthState(
   prisma: PrismaService,
 ): Promise<WhatsappAuthState> {
+  const { BufferJSON, initAuthCreds, proto } = await loadBaileys();
+
   const ler = async (id: string) => {
     const linha = await prisma.whatsappAuth.findUnique({ where: { id } });
 
@@ -124,6 +126,7 @@ export async function hasStoredCredentials(prisma: PrismaService) {
 
   if (!linha) return false;
 
+  const { BufferJSON } = await loadBaileys();
   const creds: AuthenticationCreds = JSON.parse(linha.data, BufferJSON.reviver);
 
   return !!creds?.registered;

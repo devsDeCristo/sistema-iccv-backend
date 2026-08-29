@@ -5,13 +5,9 @@ import {
   OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import {
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  makeWASocket,
-} from 'baileys';
 import type { WASocket } from 'baileys';
 import { PrismaService } from 'src/prisma';
+import { loadBaileys } from './baileys.loader';
 import {
   clearDatabaseAuthState,
   hasStoredCredentials,
@@ -193,6 +189,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.encerrando = false;
     this.status = 'CONNECTING';
     this.lastError = null;
+
+    const { fetchLatestBaileysVersion, makeWASocket } = await loadBaileys();
 
     const { state, saveCreds } = await useDatabaseAuthState(this.prisma);
     // A versão do WhatsApp Web muda com frequência; pedir a atual evita o
@@ -462,6 +460,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (connection === 'close') {
+      const { DisconnectReason } = await loadBaileys();
       const codigo = (lastDisconnect?.error as any)?.output?.statusCode;
 
       this.socket = null;
