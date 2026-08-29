@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpStatus,
   Param,
   Post,
   Put,
@@ -60,6 +61,17 @@ export class NewsController {
     return this.newsService.findAll();
   }
 
+  /**
+   * Grupos que podem receber disparo — só os que têm link, de eventos no ar.
+   * É a lista que o formulário de notícia oferece.
+   */
+  @Get('whatsapp-groups')
+  @Roles(...ADMIN_ROLES)
+  @ApiOperation({ summary: 'Grupos disponíveis para disparo' })
+  findWhatsappGroups() {
+    return this.newsService.findWhatsappGroups();
+  }
+
   @Post()
   @Roles(...ADMIN_ROLES)
   @UseInterceptors(IMAGEM)
@@ -88,6 +100,20 @@ export class NewsController {
     newsDto.imageFile = files?.imageFile?.[0];
 
     return this.newsService.update(id, newsDto);
+  }
+
+  /**
+   * Reenvio manual. Publicar já dispara sozinho; esta rota manda de novo para
+   * todos os grupos marcados, com o texto e a imagem que a notícia tem agora —
+   * é a saída tanto para o que falhou quanto para a notícia corrigida depois de
+   * publicada.
+   */
+  @Post(':id/whatsapp')
+  @Roles(...ADMIN_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reenviar a notícia nos grupos dos eventos' })
+  resendToWhatsapp(@Param('id') id: string) {
+    return this.newsService.resendToWhatsapp(id);
   }
 
   @Delete(':id')

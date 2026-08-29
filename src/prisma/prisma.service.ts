@@ -16,7 +16,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     await this.$connect();
 
     this.$use(async (params, next) => {
-      if (params.model === 'Log') return next(params);
+      // `WhatsappAuth` fica de fora junto com `Log`: são as chaves do Signal,
+      // reescritas a cada mensagem trocada. Auditar isso encheria a tabela de
+      // log e, pior, copiaria material criptográfico para dentro dela.
+      if (params.model === 'Log' || params.model === 'WhatsappAuth') {
+        return next(params);
+      }
 
       const actionsToLog = [
         'create',

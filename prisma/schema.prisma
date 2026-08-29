@@ -140,6 +140,7 @@ model GroupRoles {
   event    Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
   roles    RolesRegistration[]
   link     String?
+  news     NewsOnGroupRoles[]
 
   @@index([eventId])
   @@map("group_roles")
@@ -387,21 +388,57 @@ enum CheckoutStatus {
 
 /// Notícia do mural: a secretaria publica e todo inscrito vê no feed de /eventos.
 model News {
-  id          String    @id @default(uuid())
+  id          String             @id @default(uuid())
   title       String
   /// chamada curta usada no feed; o texto inteiro fica em `content`
   summary     String?
   content     String
   imageUrl    String?
   /// rascunho não aparece no feed
-  isPublished Boolean   @default(false)
+  isPublished Boolean            @default(false)
   /// data da primeira publicação — é por ela que o feed ordena
   publishedAt DateTime?
   authorId    String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  author      User?     @relation(fields: [authorId], references: [id])
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  author      User?              @relation(fields: [authorId], references: [id])
+  groups      NewsOnGroupRoles[]
 
   @@index([isPublished, publishedAt])
   @@map("news")
+}
+
+/// Grupos escolhidos como destino da notícia no WhatsApp. O destino é o grupo
+/// de inscrição (`GroupRoles`), porque é nele que mora o link do grupo.
+///
+/// A linha é o destino e o comprovante ao mesmo tempo: guarda também o
+/// resultado do envio, para a tela mostrar o que saiu, o que falhou e por quê —
+/// e para o reenvio repetir só o que ficou pendente.
+model NewsOnGroupRoles {
+  newsId      String
+  groupRoleId String
+  /// preenchido quando o WhatsApp aceitou a mensagem
+  sentAt      DateTime?
+  /// motivo da última falha; volta a null quando o envio dá certo
+  error       String?
+  news        News       @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  groupRole   GroupRoles @relation(fields: [groupRoleId], references: [id], onDelete: Cascade)
+
+  @@id([newsId, groupRoleId])
+  @@index([groupRoleId])
+  @@map("news_on_group_roles")
+}
+
+/// Estado da sessão do WhatsApp (Baileys): uma linha por chave — `creds` e as
+/// chaves de criptografia do Signal.
+///
+/// Fica no banco, e não em arquivo, porque o container é recriado a cada deploy:
+/// em disco a sessão morreria junto e alguém teria que parear o número de novo
+/// toda vez que subisse uma versão.
+model WhatsappAuth {
+  id        String   @id
+  data      String
+  updatedAt DateTime @updatedAt
+
+  @@map("whatsapp_auth")
 }

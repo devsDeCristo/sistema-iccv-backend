@@ -1,6 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 /**
  * Corpo de criação/edição de notícia.
@@ -62,6 +68,34 @@ export class NewsDto {
   })
   @IsBoolean()
   removeImage?: boolean;
+
+  @ApiProperty({
+    description:
+      'Grupos de inscrição que recebem esta notícia no WhatsApp — a mensagem ' +
+      'vai para o grupo apontado pelo link de cada um.',
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  // Vem de `multipart/form-data`: um único destino chega como texto, vários
+  // chegam como lista, e o front também pode mandar tudo num JSON.
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return [];
+    if (Array.isArray(value)) return value;
+
+    if (typeof value === 'string' && value.trim().startsWith('[')) {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+
+    return [value];
+  })
+  @IsArray()
+  @IsString({ each: true })
+  groupRoleIds?: string[];
 
   /** Preenchido pelo controller a partir do multipart, não vem no body */
   imageFile?: Express.Multer.File;
