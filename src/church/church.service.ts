@@ -11,7 +11,11 @@ import { CreateChurchDto } from './dto/create-church.dto';
 export class ChurchService {
   constructor(private prisma: PrismaService) {}
 
-  /** Os contadores alimentam a tela de gestão e explicam por que uma igreja não pode ser removida. */
+  /**
+   * Os contadores alimentam a tela de gestão e explicam por que uma igreja não
+   * pode ser removida. `users` conta só quem entra no painel — inscrito não
+   * pertence a igreja nenhuma.
+   */
   async findAll() {
     return this.prisma.church.findMany({
       select: {
@@ -53,8 +57,16 @@ export class ChurchService {
     const church = await this.findOneOrFail(id);
 
     if (church._count.events > 0 || church._count.users > 0) {
+      // `users` aqui é só o pessoal do painel: inscrito não tem igreja
+      const vinculos = [
+        church._count.events && `${church._count.events} evento(s)`,
+        church._count.users && `${church._count.users} administrador(es)`,
+      ].filter(Boolean);
+
       throw new BadRequestException(
-        `"${church.name}" tem ${church._count.events} evento(s) e ${church._count.users} usuário(s) vinculados. Transfira-os antes de remover.`,
+        `"${church.name}" ainda tem ${vinculos.join(
+          ' e ',
+        )}. Remova ou transfira antes de apagar a igreja.`,
       );
     }
 
