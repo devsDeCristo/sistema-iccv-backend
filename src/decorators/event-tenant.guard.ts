@@ -44,6 +44,12 @@ export class EventTenantGuard implements CanActivate {
     // qualquer igreja, então nenhum dos dois é recortado aqui
     if (!isTenantScoped(requester.role)) return true;
 
+    // rota sobre o próprio cadastro (inscrever-se, pagar a própria inscrição) é
+    // área do usuário: ali o admin é um inscrito como outro qualquer e pode
+    // entrar em evento de qualquer igreja. O recorte vale quando ele mexe na
+    // inscrição de outra pessoa, que é trabalho de painel.
+    if (request.params?.idUser && request.params.idUser === userId) return true;
+
     const eventId = await this.resolveEventId(request);
     if (!eventId) return true;
 

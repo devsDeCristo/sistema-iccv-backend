@@ -60,10 +60,23 @@ export class EventController {
     return this.eventService.create(EventDto, req.user?.userId);
   }
 
+  /**
+   * `painel=true` é a lista do administrador, recortada pela igreja dele. Sem o
+   * parâmetro vem o catálogo — o que a área do usuário mostra para qualquer um
+   * que esteja logado, admin inclusive.
+   */
   @Get()
   @ApiOperation({ summary: 'All events' })
-  async findAll(@Query() filters: Partial<EventDto>, @Req() req: any) {
-    const events = await this.eventService.findAll(filters, req.user?.userId);
+  async findAll(
+    @Query() filters: Partial<EventDto>,
+    @Query('painel') painel: string,
+    @Req() req: any,
+  ) {
+    const events = await this.eventService.findAll(
+      filters,
+      req.user?.userId,
+      painel === 'true',
+    );
     return events;
   }
   @ApiOperation({ summary: 'Get insights events' })
@@ -76,8 +89,12 @@ export class EventController {
   @ApiOperation({ summary: 'Event by id' })
   @ApiConsumes('multipart/form-data')
   @Get(':id')
-  findOne(@Param('id') id: string, @Req() req: any) {
-    return this.eventService.findOne(id, req.user?.userId);
+  findOne(
+    @Param('id') id: string,
+    @Query('painel') painel: string,
+    @Req() req: any,
+  ) {
+    return this.eventService.findOne(id, req.user?.userId, painel === 'true');
   }
 
   @ApiOperation({ summary: 'Edit event' })

@@ -1263,8 +1263,15 @@ export class EventService {
   /**
    * @param requesterId usuário autenticado que pediu a lista. Evento em teste
    * é ensaio de configuração, então some da lista de quem não é admin.
+   * @param emPainel lista do painel administrativo, recortada pela igreja de
+   * quem pediu. Na área do usuário o admin é um inscrito como outro qualquer:
+   * navega pelo catálogo inteiro, de todas as igrejas.
    */
-  async findAll(filters?: Partial<EventDto>, requesterId?: string) {
+  async findAll(
+    filters?: Partial<EventDto>,
+    requesterId?: string,
+    emPainel = false,
+  ) {
     const requester = requesterId
       ? await this.prisma.user.findUnique({
           where: { id: requesterId },
@@ -1272,18 +1279,33 @@ export class EventService {
         })
       : null;
 
-    const canSeeTestEvents = requester && isAdminRole(requester.role);
+    const churchFilter =
+      emPainel && tenantChurchId(requester)
+        ? { churchId: tenantChurchId(requester) }
+        : {};
 
-    // painel enxerga só a própria igreja; usuário comum continua vendo o
-    // catálogo inteiro de eventos públicos
-    const scopedChurchId = tenantChurchId(requester);
-    const churchFilter = scopedChurchId ? { churchId: scopedChurchId } : {};
+    /**
+     * Evento em teste é ensaio de configuração: só quem administra o vê.
+     *
+     * No catálogo isso precisa de um passo a mais — lá o admin enxerga as
+     * outras igrejas, e o ensaio da igreja vizinha não é da conta dele.
+     */
+    const testFilter = !isAdminRole(requester?.role)
+      ? { status: { not: EventStatus.TEST } }
+      : emPainel || requester?.role === Role.SUPER_ADMIN
+      ? {}
+      : {
+          OR: [
+            { status: { not: EventStatus.TEST } },
+            { churchId: requester?.churchId ?? '' },
+          ],
+        };
 
     const events = await this.prisma.event
       .findMany({
         where: {
           name: { contains: filters?.name || undefined },
-          ...(canSeeTestEvents ? {} : { status: { not: EventStatus.TEST } }),
+          ...testFilter,
           ...churchFilter,
         },
         select: {
@@ -1294,6 +1316,9 @@ export class EventService {
           endDate: true,
           status: true,
           data: true,
+          // o super admin vê evento de todas as igrejas na mesma lista; sem o
+          // nome junto não dá para saber de quem é cada um
+          church: { select: { id: true, name: true } },
           groupRoles: {
             select: {
               capacity: true,
@@ -1316,8 +1341,10 @@ export class EventService {
 
   /**
    * @param requesterId usuário autenticado que abriu o evento. Ver `findAll`.
+   * @param emPainel abertura pelo painel; na área do usuário o evento de
+   * qualquer igreja abre normalmente, como para qualquer inscrito.
    */
-  async findOne(id: string, requesterId?: string) {
+  async findOne(id: string, requesterId?: string, emPainel = false) {
     try {
       const requester = requesterId
         ? await this.prisma.user.findUnique({
@@ -1353,8 +1380,9 @@ export class EventService {
         throw new NotFoundException('Event does not exist');
       }
 
-      // evento de outra igreja não existe para o painel
-      const scopedChurchId = tenantChurchId(requester);
+      // evento de outra igreja não existe para o painel — mas existe para o
+      // catálogo, onde o admin navega como qualquer inscrito
+      const scopedChurchId = emPainel ? tenantChurchId(requester) : null;
       if (scopedChurchId && event.churchId !== scopedChurchId) {
         throw new NotFoundException('Event does not exist');
       }
@@ -1401,6 +1429,7 @@ export class EventService {
     if (!event) throw new NotFoundException('Event does not exist');
 
     // admin só edita evento da própria igreja
+    let novaIgreja: string | undefined;
     if (requesterId) {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
@@ -1412,6 +1441,25 @@ export class EventService {
         event.churchId,
         'Você não pode editar eventos de outra igreja',
       );
+
+      // mover o evento de igreja é do super admin: o admin não tem para onde
+      // mover, e o campo vem no mesmo formulário
+      if (
+        requester?.role === Role.SUPER_ADMIN &&
+        updateEvent.churchId &&
+        updateEvent.churchId !== event.churchId
+      ) {
+        const church = await this.prisma.church.findUnique({
+          where: { id: updateEvent.churchId },
+          select: { id: true },
+        });
+
+        if (!church) {
+          throw new BadRequestException('Igreja não encontrada');
+        }
+
+        novaIgreja = updateEvent.churchId;
+      }
     }
 
     const name = updateEvent.name?.trim();
@@ -1501,6 +1549,7 @@ export class EventService {
           status: updateEvent.status,
           groupLink: updateEvent.groupLink,
           data: jsonData,
+          ...(novaIgreja ? { churchId: novaIgreja } : {}),
         },
       }),
     );
