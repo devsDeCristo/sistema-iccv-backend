@@ -242,18 +242,20 @@ export class PaymentService {
 
       const { ddd, numero } = this.extrairDddENumero(user.cellphone);
       const dateExpiration = new Date(Date.now() + 1 * 60 * 60 * 1000); //1h
+      const backendUrl = process.env.URL_BACKEND?.replace(/\/$/, '');
+      const frontendUrl = process.env.URL_FRONTEND?.replace(/\/$/, '');
       const payload: CreatePagbankCheckoutDto = {
         reference_id: randomUUID(),
         soft_descriptor: 'Igreja de cristo',
         expiration_date: dateExpiration.toISOString(),
         payment_notification_urls: [
-          `${process.env.URL_BACKEND}/webhooks/pagbank/payments`,
+          `${backendUrl}/webhooks/pagbank/payments`,
         ],
         notification_urls: [
-          `${process.env.URL_BACKEND}/webhooks/pagbank/checkouts`,
+          `${backendUrl}/webhooks/pagbank/checkouts`,
         ],
-        redirect_url: `${process.env.URL_FRONTEND}/events/${eventId}`,
-        return_url: `${process.env.URL_FRONTEND}/events/${eventId}`,
+        redirect_url: `${frontendUrl}/events/${eventId}`,
+        return_url: `${frontendUrl}/events/${eventId}`,
         customer_modifiable: false,
         customer: {
           name: user.fullName,
@@ -275,7 +277,7 @@ export class PaymentService {
           { type: 'CREDIT_CARD' },
           { type: 'DEBIT_CARD' },
           { type: 'BOLETO' },
-          // { type: 'PIX' },
+          { type: 'PIX' },
         ],
       };
 

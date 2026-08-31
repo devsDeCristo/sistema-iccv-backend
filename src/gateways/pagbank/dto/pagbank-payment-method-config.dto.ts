@@ -19,5 +19,5 @@ export class PagbankPaymentMethodConfigDto {
   type: 'CREDIT_CARD' | 'DEBIT_CARD';
 
   @ApiProperty({ type: [PagbankPaymentConfigOptionDto] })
-  configOptions: PagbankPaymentConfigOptionDto[];
+  config_options: PagbankPaymentConfigOptionDto[];
 }
