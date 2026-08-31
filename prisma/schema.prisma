@@ -7,6 +7,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Tenant do sistema. Cada igreja enxerga apenas os próprios eventos, as
+/// pessoas ligadas a eles e as próprias notícias — o recorte é aplicado em
+/// `src/auth/tenant.ts`. Só o super admin atravessa todas.
+model Church {
+  id     String   @id @default(uuid())
+  name   String
+  users  User[]
+  events Event[]
+  news   News[]
+
+  @@map("churches")
+}
+
 model User {
   id                 String            @id @default(uuid())
   email              String
@@ -33,6 +46,12 @@ model User {
   neighborhood       String
   badgeName          String?
   password           String            @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
+  /// Igreja de quem entra no painel (admin e financeiro) — é ela que recorta
+  /// tudo o que a pessoa enxerga. Usuário comum fica nulo: ele não pertence a
+  /// igreja nenhuma e se inscreve em evento de qualquer uma; o que o liga a
+  /// cada painel são as inscrições.
+  churchId           String?
+  church             Church?           @relation(fields: [churchId], references: [id])
   bedrooms           BedroomsOnUsers[]
   events             EventOnUsers[]
   TeamOnUsers        TeamOnUsers[]
@@ -41,6 +60,7 @@ model User {
   news               News[]
   tokens             UserToken[]
 
+  @@index([churchId])
   @@map("users")
 }
 
@@ -93,13 +113,17 @@ model Event {
   groupLink  String? // link do grupo do evento (Inativo)
   type       EventType      @default(CURSILHO)
   data       Json?
+  churchId   String
+  church     Church         @relation(fields: [churchId], references: [id], onDelete: Cascade)
   users      EventOnUsers[]
   bedrooms   Bedrooms[]
   groupRoles GroupRoles[]
   Team       Team[]
   waitlist   Waitlist[]
   checkins   Checkin[]
+  news       News[]
 
+  @@index([churchId])
   @@map("events")
 }
 
@@ -401,10 +425,21 @@ model News {
   authorId    String?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
+  /// igreja que publicou. Diz quem administra a notícia — não quem a lê: o
+  /// mural é de todo mundo. Nulo quando quem publicou foi o super admin.
+  churchId    String?
+  church      Church?            @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  /// Público do anúncio. Nulo (o padrão) é aviso geral, que aparece para todo
+  /// mundo; preenchido restringe o mural a quem está no evento — inscrito ou
+  /// na lista de espera.
+  eventId     String?
+  event       Event?             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   author      User?              @relation(fields: [authorId], references: [id])
   groups      NewsOnGroupRoles[]
 
   @@index([isPublished, publishedAt])
+  @@index([churchId])
+  @@index([eventId])
   @@map("news")
 }
 

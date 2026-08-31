@@ -14,12 +14,13 @@ import { TeammDto } from './dto/team.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
+import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 
 @ApiTags('team')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
 @Roles(...ADMIN_ROLES)
 @Controller('events/:idEvent/teams')
 export class TeamController {
@@ -40,8 +41,8 @@ export class TeamController {
   }
 
   @Get(':idTeam')
-  findOne(@Param('idTeam') idTeam: string) {
-    return this.teamService.findOne(idTeam);
+  findOne(@Param('idEvent') idEvent: string, @Param('idTeam') idTeam: string) {
+    return this.teamService.findOne(idTeam, idEvent);
   }
 
   @Put(':idTeam')
@@ -56,7 +57,7 @@ export class TeamController {
 
   @Delete(':id')
   @HttpCode(204)
-  remove(@Param('id') id: string) {
-    return this.teamService.delete(id);
+  remove(@Param('idEvent') idEvent: string, @Param('id') id: string) {
+    return this.teamService.delete(id, idEvent);
   }
 }

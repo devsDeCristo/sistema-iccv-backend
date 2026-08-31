@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -20,7 +21,8 @@ import {
   PrismaService,
 } from '../prisma';
 import { EventDto } from './dto/event.dto';
-import { isAdminRole } from 'src/auth/roles';
+import { isAdminRole, Role } from 'src/auth/roles';
+import { assertSameChurch, tenantChurchId } from 'src/auth/tenant';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
@@ -212,6 +214,10 @@ export class EventService {
 
     if (!user) throw new NotFoundException('Usuario não encontrado');
     if (!event) throw new NotFoundException('Evento não encontrado');
+
+    // Nada de vincular a pessoa à igreja do evento: inscrito não pertence a
+    // igreja nenhuma, e a mesma pessoa se inscreve em eventos de várias. O que
+    // a torna visível para cada painel é a inscrição em si (`userChurchScope`).
 
     // 2️⃣ Busca roles solicitadas (já com grupo)
     const roles = await tx.rolesRegistration.findMany({
@@ -955,7 +961,7 @@ export class EventService {
     }
   }
 
-  async create(data: EventDto) {
+  async create(data: EventDto, requesterId?: string) {
     // valida os arquivos antes de criar qualquer registro
     const coverExtension = data.coverFile
       ? resolveImageExtension(data.coverFile)
@@ -968,6 +974,45 @@ export class EventService {
 
     if (!name) {
       throw new BadRequestException('O nome do evento é obrigatório');
+    }
+
+    // A igreja do evento vem do próprio admin; só o super admin escolhe.
+    let churchId: string | undefined;
+    if (requesterId) {
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: { churchId: true, role: true },
+      });
+
+      if (!requester) {
+        throw new NotFoundException('Usuário não encontrado');
+      }
+
+      churchId =
+        requester.role === Role.SUPER_ADMIN
+          ? data.churchId
+          : requester.churchId ?? undefined;
+
+      if (!churchId) {
+        throw new BadRequestException(
+          'Evento deve estar vinculado a uma igreja',
+        );
+      }
+
+      // sem isto o `create` estoura violação de chave estrangeira do Prisma,
+      // que sobe como 500 em vez de dizer que a igreja não existe
+      const church = await this.prisma.church.findUnique({
+        where: { id: churchId },
+        select: { id: true },
+      });
+
+      if (!church) {
+        throw new BadRequestException('Igreja não encontrada');
+      }
+    }
+
+    if (!churchId) {
+      throw new BadRequestException('Evento deve estar vinculado a uma igreja');
     }
 
     try {
@@ -988,6 +1033,7 @@ export class EventService {
               startDate: data.startDate,
               name,
               data: data.data as Prisma.JsonObject,
+              churchId,
               groupRoles: {
                 create: data.groupRoles?.map((gr) => ({
                   name: gr.name,
@@ -1069,8 +1115,19 @@ export class EventService {
     }
   }
 
-  async findInsightsEvents() {
+  async findInsightsEvents(requesterId?: string) {
+    const requester = requesterId
+      ? await this.prisma.user.findUnique({
+          where: { id: requesterId },
+          select: { role: true, churchId: true },
+        })
+      : null;
+
+    // os números do painel são da igreja de quem está olhando
+    const churchId = tenantChurchId(requester);
+
     const events = await this.prisma.event.findMany({
+      where: churchId ? { churchId } : {},
       select: {
         id: true,
         status: true,
@@ -1208,13 +1265,26 @@ export class EventService {
    * é ensaio de configuração, então some da lista de quem não é admin.
    */
   async findAll(filters?: Partial<EventDto>, requesterId?: string) {
-    const canSeeTestEvents = await this.requesterIsAdmin(requesterId);
+    const requester = requesterId
+      ? await this.prisma.user.findUnique({
+          where: { id: requesterId },
+          select: { role: true, churchId: true },
+        })
+      : null;
+
+    const canSeeTestEvents = requester && isAdminRole(requester.role);
+
+    // painel enxerga só a própria igreja; usuário comum continua vendo o
+    // catálogo inteiro de eventos públicos
+    const scopedChurchId = tenantChurchId(requester);
+    const churchFilter = scopedChurchId ? { churchId: scopedChurchId } : {};
 
     const events = await this.prisma.event
       .findMany({
         where: {
           name: { contains: filters?.name || undefined },
           ...(canSeeTestEvents ? {} : { status: { not: EventStatus.TEST } }),
+          ...churchFilter,
         },
         select: {
           id: true,
@@ -1249,6 +1319,13 @@ export class EventService {
    */
   async findOne(id: string, requesterId?: string) {
     try {
+      const requester = requesterId
+        ? await this.prisma.user.findUnique({
+            where: { id: requesterId },
+            select: { role: true, churchId: true },
+          })
+        : null;
+
       const event = await this.prisma.event.findUnique({
         where: { id },
         include: {
@@ -1268,12 +1345,17 @@ export class EventService {
         throw new NotFoundException('Event does not exist');
       }
 
+      // Validar TEST status
       if (
         event.status === EventStatus.TEST &&
-        !(await this.requesterIsAdmin(requesterId))
+        !(requester && isAdminRole(requester.role))
       ) {
-        // mesma resposta de evento inexistente: quem não pode ver o evento de
-        // teste também não precisa descobrir que ele existe
+        throw new NotFoundException('Event does not exist');
+      }
+
+      // evento de outra igreja não existe para o painel
+      const scopedChurchId = tenantChurchId(requester);
+      if (scopedChurchId && event.churchId !== scopedChurchId) {
         throw new NotFoundException('Event does not exist');
       }
 
@@ -1296,7 +1378,7 @@ export class EventService {
     //.then((event) => this.handlerReturnEvent(event));
   }
 
-  async update(id: string, updateEvent: EventDto) {
+  async update(id: string, updateEvent: EventDto, requesterId?: string) {
     // valida os arquivos antes de qualquer escrita
     const coverExtension = updateEvent.coverFile
       ? resolveImageExtension(updateEvent.coverFile)
@@ -1317,6 +1399,20 @@ export class EventService {
     });
 
     if (!event) throw new NotFoundException('Event does not exist');
+
+    // admin só edita evento da própria igreja
+    if (requesterId) {
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: { role: true, churchId: true },
+      });
+
+      assertSameChurch(
+        requester,
+        event.churchId,
+        'Você não pode editar eventos de outra igreja',
+      );
+    }
 
     const name = updateEvent.name?.trim();
 
@@ -1580,7 +1676,7 @@ export class EventService {
   async remove(id: string, requesterId: string) {
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
-      select: { role: true },
+      select: { role: true, churchId: true },
     });
 
     if (!requester) {
@@ -1593,12 +1689,19 @@ export class EventService {
 
     const event = await this.prisma.event.findUnique({
       where: { id },
-      select: { id: true, name: true },
+      select: { id: true, name: true, churchId: true },
     });
 
     if (!event) {
       throw new NotFoundException('Event does not exist!');
     }
+
+    // admin só deleta evento da própria igreja
+    assertSameChurch(
+      requester,
+      event.churchId,
+      'Você não pode deletar eventos de outra igreja',
+    );
 
     const userCount = await this.prisma.eventOnUsers.count({
       where: { eventId: id },

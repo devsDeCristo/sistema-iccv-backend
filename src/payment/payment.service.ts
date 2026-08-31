@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
   CheckoutStatus,
   PaymentMethod,
@@ -26,6 +28,25 @@ export class PaymentService {
   ) {}
 
   private readonly logger = new Logger(PaymentService.name);
+
+  /**
+   * Extrato de pagamento é de quem pagou. Fora ele, só o painel — e o
+   * `EventTenantGuard` já garantiu que o evento é da igreja de quem pergunta.
+   */
+  async assertCanSeePayments(requesterId: string, targetUserId: string) {
+    if (requesterId === targetUserId) return;
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) {
+      throw new ForbiddenException(
+        'Você só pode ver os seus próprios pagamentos',
+      );
+    }
+  }
 
   private extrairDddENumero(telefone: string) {
     // Remove tudo que não for número

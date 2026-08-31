@@ -111,10 +111,15 @@ export class TeamService {
       );
   }
 
-  async findOne(id: string) {
+  /**
+   * A equipe é procurada dentro do evento da URL. O `EventTenantGuard` garante
+   * que o evento é da igreja de quem pediu; sem amarrar os dois, um id de
+   * equipe de outra igreja passaria por aqui.
+   */
+  async findOne(id: string, eventId: string) {
     return await this.prisma.team
       .findFirst({
-        where: { id },
+        where: { id, eventId },
         include: {
           event: {
             select: {
@@ -144,9 +149,10 @@ export class TeamService {
 
   async update(idEvent: string, idTeam: string, updateTeamDto: TeammDto) {
     try {
-      const teamExist = await this.prisma.team.findUnique({
+      const teamExist = await this.prisma.team.findFirst({
         where: {
           id: idTeam,
+          eventId: idEvent,
         },
       });
 
@@ -193,10 +199,11 @@ export class TeamService {
     }
   }
 
-  async delete(teamId: string) {
-    const bedroomExist = await this.prisma.team.findUnique({
+  async delete(teamId: string, eventId: string) {
+    const bedroomExist = await this.prisma.team.findFirst({
       where: {
         id: teamId,
+        eventId,
       },
     });
 

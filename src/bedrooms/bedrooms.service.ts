@@ -156,10 +156,15 @@ export class BedroomsService {
       );
   }
 
-  async findOne(id: string) {
+  /**
+   * O quarto é procurado dentro do evento da URL. O `EventTenantGuard` garante
+   * que o evento é da igreja de quem pediu; sem amarrar os dois, um id de
+   * quarto de outra igreja passaria por aqui.
+   */
+  async findOne(id: string, eventId: string) {
     return await this.prisma.bedrooms
       .findFirst({
-        where: { id },
+        where: { id, eventId },
         include: {
           event: {
             select: {
@@ -190,9 +195,10 @@ export class BedroomsService {
     idBedroom: string,
     updateBedroomDto: BedroomDto,
   ) {
-    const bedroomExist = await this.prisma.bedrooms.findUnique({
+    const bedroomExist = await this.prisma.bedrooms.findFirst({
       where: {
         id: idBedroom,
+        eventId: idEvent,
       },
     });
 
@@ -237,10 +243,11 @@ export class BedroomsService {
     await this.createRelations(updateBedroomDto.usersId, idBedroom);
   }
 
-  async delete(idBedroom: string) {
-    const bedroomExist = await this.prisma.bedrooms.findUnique({
+  async delete(idBedroom: string, idEvent: string) {
+    const bedroomExist = await this.prisma.bedrooms.findFirst({
       where: {
         id: idBedroom,
+        eventId: idEvent,
       },
     });
 

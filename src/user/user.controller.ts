@@ -62,8 +62,8 @@ export class UserController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLES)
   @Get()
-  async findAll(@Query() filters: Partial<UserDTO>) {
-    const users = await this.userService.findAll(filters);
+  async findAll(@Query() filters: Partial<UserDTO>, @Req() req: any) {
+    const users = await this.userService.findAll(filters, req.user?.userId);
     return users;
   }
 
@@ -71,22 +71,22 @@ export class UserController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLES)
   @Get('insights')
-  async findInsightsEvents() {
-    return this.userService.findInsightsEvents();
+  async findInsightsEvents(@Req() req: any) {
+    return this.userService.findInsightsEvents(req.user?.userId);
   }
 
   @ApiOperation({ summary: 'User by id' })
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.userService.findOne(id);
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    return this.userService.findOne(id, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Get Groups by user ' })
   @UseGuards(JwtAuthGuard)
   @Get(':id/groups')
-  async findUserGroups(@Param('id') id: string) {
-    return this.userService.findUserGroups(id);
+  async findUserGroups(@Param('id') id: string, @Req() req: any) {
+    return this.userService.findUserGroups(id, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Edit user' })
@@ -112,11 +112,12 @@ export class UserController {
   async setProfilePhoto(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ) {
     // reaproveita o util para não duplicar o cacheControl e o versionamento da URL
     const { url } = await uploadImageFirebase(file, file.originalname);
 
-    await this.userService.setProfilePhoto(id, url);
+    await this.userService.setProfilePhoto(id, url, req.user?.userId);
     return { message: 'Foto de perfil atualizada com sucesso' };
   }
 }

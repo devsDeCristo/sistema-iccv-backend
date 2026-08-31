@@ -11,6 +11,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
+import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 import { CheckinService } from './checkin.service';
@@ -18,7 +19,7 @@ import { CompleteCheckinDto, SearchCheckinDto } from './dto/checkin.dto';
 
 @ApiTags('checkin')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
 @Roles(...ADMIN_ROLES)
 @Controller('events/:eventId/checkin')
 export class CheckinController {

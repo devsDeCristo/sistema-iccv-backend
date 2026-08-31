@@ -22,13 +22,14 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
+import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES, ADMIN_ROLES } from 'src/auth/roles';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('events')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
 @Controller('events')
 export class EventController {
   constructor(private readonly eventService: EventService) {}
@@ -50,12 +51,13 @@ export class EventController {
       coverFile?: Express.Multer.File[];
     },
     @Body() EventDto: EventDto,
+    @Req() req: any,
   ) {
     const logoFile = files.logoFile?.[0];
     const coverFile = files.coverFile?.[0];
     EventDto.logoFile = logoFile;
     EventDto.coverFile = coverFile;
-    return this.eventService.create(EventDto);
+    return this.eventService.create(EventDto, req.user?.userId);
   }
 
   @Get()
@@ -67,8 +69,8 @@ export class EventController {
   @ApiOperation({ summary: 'Get insights events' })
   @Roles(...ADMIN_AREA_ROLES)
   @Get('insights')
-  findInsightsEvents() {
-    return this.eventService.findInsightsEvents();
+  findInsightsEvents(@Req() req: any) {
+    return this.eventService.findInsightsEvents(req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Event by id' })
@@ -103,12 +105,13 @@ export class EventController {
     },
     @Param('id') id: string,
     @Body() updateEventDto: EventDto,
+    @Req() req: any,
   ) {
     const logoFile = files.logoFile?.[0];
     const coverFile = files.coverFile?.[0];
     updateEventDto.logoFile = logoFile;
     updateEventDto.coverFile = coverFile;
-    return this.eventService.update(id, updateEventDto);
+    return this.eventService.update(id, updateEventDto, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Get users by event' })

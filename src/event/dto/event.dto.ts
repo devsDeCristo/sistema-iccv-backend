@@ -189,6 +189,15 @@ export class EventDto {
   })
   @IsOptional()
   coverFile?: Express.Multer.File;
+
+  @ApiProperty({
+    example: 'church-id-uuid',
+    description: 'ID da church/igreja (obrigatório para SuperAdmin)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  churchId?: string;
 }
 export class roleEventDto {
   @ApiProperty({

@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Put,
+  Req,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -21,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
+import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import {
@@ -32,7 +34,7 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('payments')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
 @Controller()
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
@@ -42,11 +44,14 @@ export class PaymentController {
   // ===============================
   @ApiOperation({ summary: 'Create payment checkout for user in event' })
   @Post('events/:idEvent/users/:idUser/payments')
-  create(
+  async create(
     @Param('idEvent') eventId: string,
     @Param('idUser') userId: string,
     @Body() body: payloadCreatePaymentCheckoutDto,
+    @Req() req: any,
   ) {
+    await this.paymentService.assertCanSeePayments(req.user?.userId, userId);
+
     return this.paymentService.createCheckout({
       userId,
       eventId,
@@ -69,16 +74,19 @@ export class PaymentController {
   // ===============================
   @ApiOperation({ summary: 'Get payments by user in event' })
   @Get('events/:idEvent/users/:idUser/payments')
-  findByUserEvent(
+  async findByUserEvent(
     @Param('idEvent') eventId: string,
     @Param('idUser') userId: string,
+    @Req() req: any,
   ) {
+    await this.paymentService.assertCanSeePayments(req.user?.userId, userId);
     return this.paymentService.findPaymentsByUser(userId, eventId);
   }
 
   @ApiOperation({ summary: 'Get payments by user' })
   @Get('users/:idUser/payments')
-  findByUser(@Param('idUser') userId: string) {
+  async findByUser(@Param('idUser') userId: string, @Req() req: any) {
+    await this.paymentService.assertCanSeePayments(req.user?.userId, userId);
     return this.paymentService.findUserEventsWithRoles(userId);
   }
 

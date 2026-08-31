@@ -189,4 +189,13 @@ export class UserDTO {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiProperty({
+    example: 'church-id-uuid',
+    description:
+      'Igreja de quem entra no painel (admin/financeiro). Usuário comum não pertence a nenhuma: fica nulo.',
+  })
+  @IsString()
+  @IsOptional()
+  churchId?: string | null;
 }

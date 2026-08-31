@@ -14,12 +14,13 @@ import { BedroomDto } from './dto/bedroom.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
+import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 
 @ApiTags('bedrooms')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
 @Roles(...ADMIN_ROLES)
 @Controller('events/:idEvent/bedrooms')
 export class BedroomsController {
@@ -40,8 +41,11 @@ export class BedroomsController {
   }
 
   @Get(':idBedrooms')
-  findOne(@Param('idBedrooms') idBedrooms: string) {
-    return this.bedroomsService.findOne(idBedrooms);
+  findOne(
+    @Param('idEvent') idEvent: string,
+    @Param('idBedrooms') idBedrooms: string,
+  ) {
+    return this.bedroomsService.findOne(idBedrooms, idEvent);
   }
 
   @Put(':idBedrooms')
@@ -56,7 +60,7 @@ export class BedroomsController {
 
   @Delete(':id')
   @HttpCode(204)
-  remove(@Param('id') id: string) {
-    return this.bedroomsService.delete(id);
+  remove(@Param('idEvent') idEvent: string, @Param('id') id: string) {
+    return this.bedroomsService.delete(id, idEvent);
   }
 }

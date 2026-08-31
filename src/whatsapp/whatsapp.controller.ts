@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ADMIN_ROLES } from 'src/auth/roles';
+import { Role } from 'src/auth/roles';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/decorators/roles.guard';
@@ -17,13 +17,18 @@ import { PairingCodeDto } from './dto/whatsapp.dto';
 import { WhatsappService } from './whatsapp.service';
 
 /**
- * Painel do disparador de WhatsApp. Tudo aqui mexe no número da igreja inteira,
- * então é restrito a admin — o financeiro entra no painel mas não passa daqui.
+ * Painel do disparador de WhatsApp.
+ *
+ * A sessão do Baileys é uma só para o sistema inteiro: um número, uma conexão,
+ * compartilhada por todas as igrejas. Parear, desconectar ou listar os grupos
+ * do aparelho atinge todo mundo, então isto é do super admin — um admin de
+ * igreja derrubaria o disparo das outras. O que cada igreja controla são os
+ * destinos da própria notícia, em `/news`.
  */
 @ApiTags('whatsapp')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(...ADMIN_ROLES)
+@Roles(Role.SUPER_ADMIN)
 @Controller('whatsapp')
 export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}
