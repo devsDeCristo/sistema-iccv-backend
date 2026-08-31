@@ -166,6 +166,9 @@ export class UserService {
         role: 'asc',
       },
       include: {
+        // igreja de quem entra no painel: é o que diferencia um admin do outro
+        // na lista do super admin, que enxerga os de todas
+        church: { select: { id: true, name: true } },
         events: {
           // quem participa de evento de outra igreja entra na lista pelo
           // vínculo local, mas o evento de lá não aparece junto
@@ -321,8 +324,14 @@ export class UserService {
         }
 
         // a igreja de quem entra no painel é obrigatória — é ela que recorta
-        // tudo o que a pessoa vai enxergar
-        if (data.role !== undefined && ADMIN_AREA_ROLES.includes(data.role)) {
+        // tudo o que a pessoa vai enxergar. O super admin é a exceção: ele
+        // atravessa todas, então não fica preso a nenhuma
+        if (data.role === Role.SUPER_ADMIN) {
+          data.churchId = null;
+        } else if (
+          data.role !== undefined &&
+          ADMIN_AREA_ROLES.includes(data.role)
+        ) {
           if (requesterIsSuperAdmin) {
             const churchId = data.churchId ?? userExists.churchId;
 
