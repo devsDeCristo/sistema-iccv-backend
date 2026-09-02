@@ -29,6 +29,10 @@ import {
   isSuperAdmin,
   tenantChurchIds,
 } from 'src/auth/tenant';
+import {
+  filtroDeEventoEmTeste,
+  podeVerEventoEmTeste,
+} from './event-visibility';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
@@ -1258,22 +1262,6 @@ export class EventService {
     };
   }
 
-  /**
-   * Perfil do solicitante lido do banco, e não do JWT: o token dura 24h, então
-   * um admin rebaixado continuaria enxergando evento de teste até ele expirar.
-   * Mesma escolha do `RolesGuard`.
-   */
-  private async requesterIsAdmin(requesterId?: string): Promise<boolean> {
-    if (!requesterId) return false;
-
-    const requester = await this.prisma.user.findUnique({
-      where: { id: requesterId },
-      select: { role: true },
-    });
-
-    return isAdminRole(requester?.role);
-  }
-
   /** Barra quem não pode enxergar o evento — evento de teste responde 404 */
   /**
    * Inscrever é ato do próprio inscrito. Quem inscreve outra pessoa está
@@ -1301,17 +1289,29 @@ export class EventService {
   private async assertEventIsVisible(eventId: string, requesterId?: string) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { status: true },
+      // a igreja vem junto: o ensaio é da igreja, não do perfil efetivo
+      select: { status: true, churchId: true },
     });
 
     if (!event) {
       throw new NotFoundException('Event does not exist');
     }
 
-    if (
-      event.status === EventStatus.TEST &&
-      !(await this.requesterIsAdmin(requesterId))
-    ) {
+    if (event.status !== EventStatus.TEST) return;
+
+    /**
+     * Perfil lido do banco, e não do JWT: o token dura 24h, então um admin
+     * rebaixado continuaria enxergando o ensaio até ele expirar. Mesma escolha
+     * do `RolesGuard`.
+     */
+    const requester = requesterId
+      ? await this.prisma.user.findUnique({
+          where: { id: requesterId },
+          select: SELECT_TENANT,
+        })
+      : null;
+
+    if (!podeVerEventoEmTeste(requester, event.churchId)) {
       throw new NotFoundException('Event does not exist');
     }
   }
@@ -1337,26 +1337,10 @@ export class EventService {
 
     const igrejasDoPainel = tenantChurchIds(requester, ADMIN_AREA_ROLES);
     const churchFilter =
-      emPainel && igrejasDoPainel
-        ? { churchId: { in: igrejasDoPainel } }
-        : {};
+      emPainel && igrejasDoPainel ? { churchId: { in: igrejasDoPainel } } : {};
 
-    /**
-     * Evento em teste é ensaio de configuração: só quem administra o vê.
-     *
-     * No catálogo isso precisa de um passo a mais — lá o admin enxerga as
-     * outras igrejas, e o ensaio da igreja vizinha não é da conta dele.
-     */
-    const testFilter = !isAdminRole(requester?.role)
-      ? { status: { not: EventStatus.TEST } }
-      : emPainel || isSuperAdmin(requester)
-      ? {}
-      : {
-          OR: [
-            { status: { not: EventStatus.TEST } },
-            { churchId: { in: churchIdsComPerfil(requester, [Role.ADMIN]) } },
-          ],
-        };
+    // ensaio de configuração só aparece para quem administra aquela igreja
+    const testFilter = filtroDeEventoEmTeste(requester);
 
     const events = await this.prisma.event
       .findMany({
@@ -1429,10 +1413,10 @@ export class EventService {
         throw new NotFoundException('Event does not exist');
       }
 
-      // Validar TEST status
+      // ensaio de configuração: existe só para quem administra esta igreja
       if (
         event.status === EventStatus.TEST &&
-        !(requester && isAdminRole(requester.role))
+        !podeVerEventoEmTeste(requester, event.churchId)
       ) {
         throw new NotFoundException('Event does not exist');
       }
