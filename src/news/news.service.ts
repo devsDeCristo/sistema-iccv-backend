@@ -5,7 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventStatus, PrismaService } from '../prisma';
-import { assertSameChurch, isTenantScoped, tenantChurchId } from 'src/auth/tenant';
+import {
+  SELECT_TENANT,
+  assertChurchAccess,
+  churchIdsComPerfil,
+  tenantChurchIds,
+} from 'src/auth/tenant';
 import { Role } from 'src/auth/roles';
 import {
   resolveImageExtension,
@@ -113,10 +118,10 @@ export class NewsService {
   /** Lista do admin: inclui rascunho, ordenada pela última mexida. */
   async findAll(requesterId?: string) {
     const requester = requesterId ? await this.getRequester(requesterId) : null;
-    const churchId = tenantChurchId(requester);
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
 
     return this.prisma.news.findMany({
-      where: churchId ? { churchId } : {},
+      where: churchIds ? { churchId: { in: churchIds } } : {},
       select: {
         ...CAMPOS_DO_FEED,
         isPublished: true,
@@ -152,6 +157,8 @@ export class NewsService {
     const eventId = await this.resolvePublico(autor, data.eventId);
     await this.assertDestinosDaIgreja(autor, data.groupRoleIds);
 
+    const igrejaDaNoticia = await this.igrejaDaPublicacao(autor, eventId);
+
     const noticia = await this.prisma.news.create({
       data: {
         title: data.title.trim(),
@@ -160,8 +167,10 @@ export class NewsService {
         isPublished: data.isPublished,
         publishedAt: data.isPublished ? new Date() : null,
         authorId: authorId ?? null,
-        // quem publicou; o mural não filtra por isso
-        churchId: autor?.churchId ?? null,
+        // quem publicou; o mural não filtra por isso. Quem administra mais de
+        // uma igreja publica pela igreja do evento escolhido, e sem evento
+        // escolhido pela primeira delas — o aviso é dela.
+        churchId: igrejaDaNoticia,
         eventId,
       },
     });
@@ -396,14 +405,14 @@ export class NewsService {
    */
   async findWhatsappGroups(requesterId?: string) {
     const requester = requesterId ? await this.getRequester(requesterId) : null;
-    const churchId = tenantChurchId(requester);
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
 
     const grupos = await this.prisma.groupRoles.findMany({
       where: {
         NOT: { link: null },
         event: {
           status: { in: EVENTOS_QUE_RECEBEM },
-          ...(churchId ? { churchId } : {}),
+          ...(churchIds ? { churchId: { in: churchIds } } : {}),
         },
       },
       select: {
@@ -478,10 +487,37 @@ export class NewsService {
     };
   }
 
+  /**
+   * Igreja que assina a notícia — quem vai poder editá-la e reenviá-la depois.
+   *
+   * Com um vínculo só não há dúvida. Com mais de um, a igreja do evento
+   * escolhido resolve; sem evento, fica com a primeira igreja da pessoa, que é
+   * a única resposta possível sem inventar uma pergunta a mais no formulário.
+   * Do super admin sai nula: aviso do sistema, sem dono.
+   */
+  private async igrejaDaPublicacao(
+    autor: { role?: number | null; churchRoles?: any[] | null } | null,
+    eventId: string | null,
+  ): Promise<string | null> {
+    const minhas = churchIdsComPerfil(autor, [Role.ADMIN]);
+    if (!minhas.length) return null;
+
+    if (eventId) {
+      const evento = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { churchId: true },
+      });
+
+      if (evento && minhas.includes(evento.churchId)) return evento.churchId;
+    }
+
+    return minhas[0];
+  }
+
   private async getRequester(requesterId: string) {
     return this.prisma.user.findUnique({
       where: { id: requesterId },
-      select: { role: true, churchId: true },
+      select: SELECT_TENANT,
     });
   }
 
@@ -494,11 +530,10 @@ export class NewsService {
 
     const requester = await this.getRequester(requesterId);
 
-    assertSameChurch(
-      requester,
-      noticia.churchId,
-      'Esta notícia é de outra igreja',
-    );
+    assertChurchAccess(requester, noticia.churchId, {
+      roles: [Role.ADMIN],
+      message: 'Esta notícia é de uma igreja que você não administra',
+    });
 
     return requester;
   }
@@ -525,11 +560,10 @@ export class NewsService {
       throw new NotFoundException('Evento não encontrado');
     }
 
-    assertSameChurch(
-      requester,
-      evento.churchId,
-      'Este evento é de outra igreja',
-    );
+    assertChurchAccess(requester, evento.churchId, {
+      roles: [Role.ADMIN],
+      message: 'Você não administra a igreja deste evento',
+    });
 
     return eventId;
   }
@@ -543,11 +577,14 @@ export class NewsService {
     requester: { role?: number | null; churchId?: string | null } | null,
     groupRoleIds?: string[],
   ) {
-    const churchId = tenantChurchId(requester);
-    if (!churchId || !groupRoleIds?.length) return;
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
+    if (!churchIds || !groupRoleIds?.length) return;
 
     const permitidos = await this.prisma.groupRoles.count({
-      where: { id: { in: groupRoleIds }, event: { churchId } },
+      where: {
+        id: { in: groupRoleIds },
+        event: { churchId: { in: churchIds } },
+      },
     });
 
     if (permitidos !== new Set(groupRoleIds).size) {

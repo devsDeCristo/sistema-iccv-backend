@@ -11,13 +11,37 @@ datasource db {
 /// pessoas ligadas a eles e as próprias notícias — o recorte é aplicado em
 /// `src/auth/tenant.ts`. Só o super admin atravessa todas.
 model Church {
-  id     String   @id @default(uuid())
+  id     String           @id @default(uuid())
   name   String
-  users  User[]
+  users  UserChurchRole[]
   events Event[]
   news   News[]
 
   @@map("churches")
+}
+
+/// Vínculo de painel: qual perfil a pessoa tem em qual igreja.
+///
+/// É aqui que mora a permissão de quem administra. A mesma pessoa pode ser
+/// admin de uma igreja e financeiro de outra, e cada linha vale só para a sua
+/// igreja — o perfil não vaza de uma para a outra.
+///
+/// Fora daqui existem só dois perfis, e nenhum deles é de igreja: super admin
+/// (atravessa todas) e usuário comum (não pertence a nenhuma).
+model UserChurchRole {
+  userId    String
+  churchId  String
+  /// 2 = admin, 3 = financeiro. Um perfil por igreja: admin já faz o que o
+  /// financeiro faz, então as duas linhas na mesma igreja não fariam sentido.
+  role      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  church    Church   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, churchId])
+  @@index([churchId])
+  @@map("user_church_roles")
 }
 
 model User {
@@ -39,6 +63,10 @@ model User {
   leadershipPosition String?
   profession         String
   profilePhotoUrl    String?
+  /// Perfil efetivo: 1 super admin, 5 usuário comum, ou o mais alto dos
+  /// vínculos em `churchRoles`. É o que os guards de rota leem para saber se a
+  /// pessoa pode chegar na rota — qual igreja ela alcança vem dos vínculos.
+  /// Escrito junto deles, na mesma transação, por `UserService`.
   role               Int               @default(5)
   state              String
   worker             Boolean
@@ -46,12 +74,9 @@ model User {
   neighborhood       String
   badgeName          String?
   password           String            @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
-  /// Igreja de quem entra no painel (admin e financeiro) — é ela que recorta
-  /// tudo o que a pessoa enxerga. Usuário comum fica nulo: ele não pertence a
-  /// igreja nenhuma e se inscreve em evento de qualquer uma; o que o liga a
-  /// cada painel são as inscrições.
-  churchId           String?
-  church             Church?           @relation(fields: [churchId], references: [id])
+  /// Vínculos de painel: em qual igreja a pessoa é admin e em qual é
+  /// financeiro. É daqui que sai QUAL igreja ela alcança.
+  churchRoles        UserChurchRole[]
   bedrooms           BedroomsOnUsers[]
   events             EventOnUsers[]
   TeamOnUsers        TeamOnUsers[]
@@ -60,7 +85,6 @@ model User {
   news               News[]
   tokens             UserToken[]
 
-  @@index([churchId])
   @@map("users")
 }
 

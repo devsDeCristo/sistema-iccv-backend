@@ -22,7 +22,13 @@ import {
 } from '../prisma';
 import { EventDto } from './dto/event.dto';
 import { ADMIN_AREA_ROLES, isAdminRole, Role } from 'src/auth/roles';
-import { assertSameChurch, tenantChurchId } from 'src/auth/tenant';
+import {
+  SELECT_TENANT,
+  assertChurchAccess,
+  churchIdsComPerfil,
+  isSuperAdmin,
+  tenantChurchIds,
+} from 'src/auth/tenant';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
@@ -977,22 +983,48 @@ export class EventService {
       throw new BadRequestException('O nome do evento é obrigatório');
     }
 
-    // A igreja do evento vem do próprio admin; só o super admin escolhe.
+    /**
+     * A igreja do evento sai dos vínculos de quem está criando: quem administra
+     * uma só nem escolhe, quem administra duas precisa dizer qual. O super
+     * admin não tem vínculo e escolhe entre todas.
+     */
     let churchId: string | undefined;
     if (requesterId) {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
-        select: { churchId: true, role: true },
+        select: SELECT_TENANT,
       });
 
       if (!requester) {
         throw new NotFoundException('Usuário não encontrado');
       }
 
-      churchId =
-        requester.role === Role.SUPER_ADMIN
-          ? data.churchId
-          : requester.churchId ?? undefined;
+      if (isSuperAdmin(requester)) {
+        churchId = data.churchId;
+      } else {
+        const minhas = churchIdsComPerfil(requester, [Role.ADMIN]);
+
+        if (!minhas.length) {
+          throw new ForbiddenException(
+            'Você não administra nenhuma igreja para criar eventos',
+          );
+        }
+
+        if (data.churchId && !minhas.includes(data.churchId)) {
+          throw new ForbiddenException(
+            'Você não administra a igreja escolhida',
+          );
+        }
+
+        churchId =
+          data.churchId ?? (minhas.length === 1 ? minhas[0] : undefined);
+
+        if (!churchId) {
+          throw new BadRequestException(
+            'Escolha em qual das suas igrejas o evento será criado',
+          );
+        }
+      }
 
       if (!churchId) {
         throw new BadRequestException(
@@ -1120,15 +1152,15 @@ export class EventService {
     const requester = requesterId
       ? await this.prisma.user.findUnique({
           where: { id: requesterId },
-          select: { role: true, churchId: true },
+          select: SELECT_TENANT,
         })
       : null;
 
-    // os números do painel são da igreja de quem está olhando
-    const churchId = tenantChurchId(requester);
+    // os números do painel são das igrejas de quem está olhando
+    const churchIds = tenantChurchIds(requester, ADMIN_AREA_ROLES);
 
     const events = await this.prisma.event.findMany({
-      where: churchId ? { churchId } : {},
+      where: churchIds ? { churchId: { in: churchIds } } : {},
       select: {
         id: true,
         status: true,
@@ -1299,13 +1331,14 @@ export class EventService {
     const requester = requesterId
       ? await this.prisma.user.findUnique({
           where: { id: requesterId },
-          select: { role: true, churchId: true },
+          select: SELECT_TENANT,
         })
       : null;
 
+    const igrejasDoPainel = tenantChurchIds(requester, ADMIN_AREA_ROLES);
     const churchFilter =
-      emPainel && tenantChurchId(requester)
-        ? { churchId: tenantChurchId(requester) }
+      emPainel && igrejasDoPainel
+        ? { churchId: { in: igrejasDoPainel } }
         : {};
 
     /**
@@ -1316,12 +1349,12 @@ export class EventService {
      */
     const testFilter = !isAdminRole(requester?.role)
       ? { status: { not: EventStatus.TEST } }
-      : emPainel || requester?.role === Role.SUPER_ADMIN
+      : emPainel || isSuperAdmin(requester)
       ? {}
       : {
           OR: [
             { status: { not: EventStatus.TEST } },
-            { churchId: requester?.churchId ?? '' },
+            { churchId: { in: churchIdsComPerfil(requester, [Role.ADMIN]) } },
           ],
         };
 
@@ -1373,7 +1406,7 @@ export class EventService {
       const requester = requesterId
         ? await this.prisma.user.findUnique({
             where: { id: requesterId },
-            select: { role: true, churchId: true },
+            select: SELECT_TENANT,
           })
         : null;
 
@@ -1405,9 +1438,11 @@ export class EventService {
       }
 
       // evento de outra igreja não existe para o painel — mas existe para o
-      // catálogo, onde o admin navega como qualquer inscrito
-      const scopedChurchId = emPainel ? tenantChurchId(requester) : null;
-      if (scopedChurchId && event.churchId !== scopedChurchId) {
+      // catálogo, onde quem administra navega como qualquer inscrito
+      const igrejas = emPainel
+        ? tenantChurchIds(requester, ADMIN_AREA_ROLES)
+        : null;
+      if (igrejas && !igrejas.includes(event.churchId)) {
         throw new NotFoundException('Event does not exist');
       }
 
@@ -1457,19 +1492,18 @@ export class EventService {
     if (requesterId) {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
-        select: { role: true, churchId: true },
+        select: SELECT_TENANT,
       });
 
-      assertSameChurch(
-        requester,
-        event.churchId,
-        'Você não pode editar eventos de outra igreja',
-      );
+      assertChurchAccess(requester, event.churchId, {
+        roles: [Role.ADMIN],
+        message: 'Você não administra a igreja deste evento',
+      });
 
       // mover o evento de igreja é do super admin: o admin não tem para onde
       // mover, e o campo vem no mesmo formulário
       if (
-        requester?.role === Role.SUPER_ADMIN &&
+        isSuperAdmin(requester) &&
         updateEvent.churchId &&
         updateEvent.churchId !== event.churchId
       ) {
@@ -1763,7 +1797,7 @@ export class EventService {
   async remove(id: string, requesterId: string) {
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
-      select: { role: true, churchId: true },
+      select: SELECT_TENANT,
     });
 
     if (!requester) {
@@ -1783,12 +1817,11 @@ export class EventService {
       throw new NotFoundException('Event does not exist!');
     }
 
-    // admin só deleta evento da própria igreja
-    assertSameChurch(
-      requester,
-      event.churchId,
-      'Você não pode deletar eventos de outra igreja',
-    );
+    // só apaga evento de igreja que ele administra
+    assertChurchAccess(requester, event.churchId, {
+      roles: [Role.ADMIN],
+      message: 'Você não administra a igreja deste evento',
+    });
 
     const userCount = await this.prisma.eventOnUsers.count({
       where: { eventId: id },

@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma';
-import { ADMIN_ROLES, Role } from 'src/auth/roles';
-import { isTenantScoped } from 'src/auth/tenant';
+import { Role } from 'src/auth/roles';
+import { SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
 import {
   ConnectedSocket,
   MessageBody,
@@ -87,7 +87,7 @@ export class CheckinGateway implements OnGatewayConnection {
     const [requester, event] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
-        select: { role: true, churchId: true },
+        select: SELECT_TENANT,
       }),
       this.prisma.event.findUnique({
         where: { id: eventId },
@@ -95,17 +95,16 @@ export class CheckinGateway implements OnGatewayConnection {
       }),
     ]);
 
-    // check-in é trabalho de painel: o financeiro e o inscrito não entram
-    if (!requester || !ADMIN_ROLES.includes(requester.role as Role)) {
-      return { joined: false };
-    }
+    if (!requester || !event) return { joined: false };
 
-    if (!event) return { joined: false };
+    // check-in é trabalho de admin: o financeiro e o inscrito não entram, e o
+    // admin só entra na sala de evento de igreja que ele administra
+    const igrejas = tenantChurchIds(requester, [Role.ADMIN]);
 
-    if (
-      isTenantScoped(requester.role) &&
-      event.churchId !== requester.churchId
-    ) {
+    if (igrejas === null) {
+      // super admin passa; qualquer outro sem vínculo não é gente de painel
+      if (requester.role !== Role.SUPER_ADMIN) return { joined: false };
+    } else if (!igrejas.includes(event.churchId)) {
       return { joined: false };
     }
 

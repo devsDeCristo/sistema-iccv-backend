@@ -1,79 +1,130 @@
 import { ForbiddenException } from '@nestjs/common';
-import { ADMIN_AREA_ROLES, Role } from './roles';
+import { ADMIN_AREA_ROLES, CHURCH_ROLES, Role } from './roles';
 
 /**
- * Recorte multi-tenant do sistema: cada igreja (`Church`) enxerga apenas os
- * próprios eventos e as pessoas inscritas neles.
+ * Recorte multi-tenant do sistema.
  *
- * Quem tem igreja é só quem entra no painel — admin e financeiro. O usuário
- * comum **não pertence a igreja nenhuma**: ele navega pelo catálogo inteiro e
- * se inscreve em evento de qualquer uma, e é a inscrição que o torna visível
- * para o painel daquela igreja. O super admin atravessa todas.
+ * A permissão de quem administra mora em `UserChurchRole`: uma linha por
+ * igreja, dizendo se a pessoa é admin ou financeiro **naquela** igreja. A mesma
+ * pessoa pode ser admin de uma e financeiro de outra, e o perfil de uma não
+ * vale na outra.
+ *
+ * Fora dos vínculos existem dois perfis, nenhum deles de igreja: o super admin,
+ * que atravessa todas, e o usuário comum, que não pertence a nenhuma — ele se
+ * inscreve em evento de qualquer igreja, e é a inscrição que o torna visível
+ * para aquele painel.
+ *
+ * `User.role` guarda o perfil efetivo (o mais alto dos vínculos) e serve só
+ * para o `RolesGuard` saber se a pessoa pode **chegar** na rota. Qual igreja
+ * ela alcança é sempre decidido aqui.
  */
+export type VinculoDeIgreja = { churchId: string; role: number };
+
 export type TenantRequester = {
   role?: number | null;
-  churchId?: string | null;
+  churchRoles?: VinculoDeIgreja[] | null;
 };
 
-/** Perfis de painel que obedecem ao recorte por igreja (todos menos o super admin) */
-export function isTenantScoped(role?: number | null): boolean {
-  return (
-    role !== Role.SUPER_ADMIN && ADMIN_AREA_ROLES.includes(role as Role)
+/**
+ * O que o Prisma precisa trazer do usuário para responder qualquer pergunta de
+ * tenant. Num lugar só para que nenhuma consulta esqueça os vínculos e conclua,
+ * por engano, que a pessoa não administra nada.
+ */
+export const SELECT_TENANT = {
+  role: true,
+  churchRoles: { select: { churchId: true, role: true } },
+} as const;
+
+export function isSuperAdmin(requester?: TenantRequester | null): boolean {
+  return requester?.role === Role.SUPER_ADMIN;
+}
+
+/** Igrejas em que a pessoa tem um dos perfis pedidos. */
+export function churchIdsComPerfil(
+  requester?: TenantRequester | null,
+  roles: number[] = CHURCH_ROLES,
+): string[] {
+  return (requester?.churchRoles ?? [])
+    .filter((vinculo) => roles.includes(vinculo.role))
+    .map((vinculo) => vinculo.churchId);
+}
+
+/** Perfil da pessoa numa igreja específica, ou `null` se ela não administra lá. */
+export function perfilNaIgreja(
+  requester: TenantRequester | null | undefined,
+  churchId: string,
+): number | null {
+  const vinculo = (requester?.churchRoles ?? []).find(
+    (item) => item.churchId === churchId,
   );
+
+  return vinculo?.role ?? null;
 }
 
 /**
- * Igreja do requisitante quando ele é recortado, `null` quando atravessa tudo.
+ * Igrejas que o requisitante alcança, ou `null` quando não há recorte a aplicar
+ * — super admin (atravessa todas) e usuário comum (o catálogo é aberto a ele).
  *
- * Falha fechado de propósito: admin sem igreja vinculada não vira super admin
- * por omissão — ele fica sem acesso até alguém corrigir o vínculo. Antes disso
- * a condição era `requester.churchId && ...`, e um `churchId` nulo desligava a
- * checagem inteira, liberando as outras igrejas.
+ * Lista vazia é diferente de `null`: significa "nenhuma igreja", e é o que sai
+ * quando a rota pede um perfil que a pessoa não tem em lugar nenhum. Fica
+ * fechado por padrão, e não aberto.
  */
-export function tenantChurchId(requester?: TenantRequester | null): string | null {
-  if (!requester || !isTenantScoped(requester.role)) return null;
+export function tenantChurchIds(
+  requester?: TenantRequester | null,
+  roles: number[] = CHURCH_ROLES,
+): string[] | null {
+  if (isSuperAdmin(requester)) return null;
 
-  if (!requester.churchId) {
-    throw new ForbiddenException(
-      'Seu usuário não está vinculado a uma igreja. Peça ao super admin para definir a igreja do seu perfil.',
-    );
-  }
+  /**
+   * Quem decide se há recorte é o perfil, não a existência de vínculos.
+   *
+   * Perguntar "tem vínculo?" abriria um buraco: alguém com perfil de painel e
+   * a lista de vínculos vazia — uma igreja apagada, um vínculo removido pela
+   * metade — cairia no caminho do usuário comum e passaria a enxergar todas as
+   * igrejas. Com o perfil na frente, essa pessoa recebe lista vazia e não
+   * alcança nenhuma, que é o lado seguro do erro.
+   */
+  if (!CHURCH_ROLES.includes(requester?.role as Role)) return null;
 
-  return requester.churchId;
+  return churchIdsComPerfil(requester, roles);
 }
 
-/** Barra o acesso quando o recurso é de outra igreja. */
-export function assertSameChurch(
+/** Barra o acesso quando o recurso é de uma igreja que a pessoa não alcança. */
+export function assertChurchAccess(
   requester: TenantRequester | null | undefined,
   resourceChurchId: string | null | undefined,
-  message = 'Este recurso pertence a outra igreja',
+  options?: { roles?: number[]; message?: string },
 ): void {
-  const churchId = tenantChurchId(requester);
-  if (churchId && resourceChurchId !== churchId) {
-    throw new ForbiddenException(message);
+  const ids = tenantChurchIds(requester, options?.roles);
+  if (ids === null) return;
+
+  if (!resourceChurchId || !ids.includes(resourceChurchId)) {
+    throw new ForbiddenException(
+      options?.message ?? 'Este recurso pertence a outra igreja',
+    );
   }
 }
 
 /**
- * `where` do Prisma que limita a lista de pessoas à igreja do requisitante.
+ * `where` do Prisma que limita a lista de pessoas às igrejas do requisitante.
  *
- * O que traz alguém para a lista é a participação em um evento da igreja —
- * inscrita ou na lista de espera. O `churchId` direto alcança só o pessoal do
- * painel (admin e financeiro), que precisa se enxergar mesmo sem inscrição;
- * usuário comum não tem igreja e entra apenas pelos eventos.
- *
- * Quem se cadastrou e ainda não se inscreveu em nada não aparece para nenhum
- * admin de igreja — só para o super admin, que vê tudo.
+ * O que traz alguém para a lista é participar de um evento da igreja —
+ * inscrito ou na lista de espera — ou administrar a própria igreja. Usuário
+ * comum não tem vínculo e entra só pelos eventos; quem se cadastrou e ainda não
+ * se inscreveu em nada não aparece para admin nenhum, só para o super admin.
  */
-export function userChurchScope(requester?: TenantRequester | null) {
-  const churchId = tenantChurchId(requester);
-  if (!churchId) return {};
+export function userChurchScope(
+  requester?: TenantRequester | null,
+  roles: number[] = ADMIN_AREA_ROLES,
+) {
+  const churchIds = tenantChurchIds(requester, roles);
+  if (churchIds === null) return {};
 
   return {
     OR: [
-      { churchId },
-      { events: { some: { event: { churchId } } } },
-      { waitlists: { some: { event: { churchId } } } },
+      { churchRoles: { some: { churchId: { in: churchIds } } } },
+      { events: { some: { event: { churchId: { in: churchIds } } } } },
+      { waitlists: { some: { event: { churchId: { in: churchIds } } } } },
     ],
   };
 }

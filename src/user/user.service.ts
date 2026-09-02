@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -11,13 +12,21 @@ import { UserDTO } from './dto/user.dto';
 import {
   ADMIN_AREA_ROLES,
   ADMIN_ROLES,
-  ASSIGNABLE_ROLES,
+  CHURCH_ROLES,
   Role,
   isAdminRole,
 } from 'src/auth/roles';
 import { enviarEmailConfirmacao } from 'src/nodeMailer/sendEmail';
 import { JwtService } from '@nestjs/jwt';
-import { tenantChurchId, userChurchScope } from 'src/auth/tenant';
+import {
+  SELECT_TENANT,
+  TenantRequester,
+  VinculoDeIgreja,
+  churchIdsComPerfil,
+  isSuperAdmin,
+  tenantChurchIds,
+  userChurchScope,
+} from 'src/auth/tenant';
 
 @Injectable()
 export class UserService {
@@ -39,13 +48,17 @@ export class UserService {
       // const eventId = data.eventId;
       // delete data.eventId;
 
-      // a igreja também não vem do corpo: quem se cadastra não escolhe o
-      // tenant a que pertence — isso é definido na primeira inscrição em evento
-      delete data.churchId;
+      // nem igreja nem permissão vêm do corpo: o cadastro é público, e quem se
+      // cadastra não escolhe o tenant nem o próprio perfil
+      const {
+        churchId: _lente,
+        churchRoles: _vinculos,
+        ...cadastro
+      } = data;
 
       const user = await this.prisma.user.create({
         data: {
-          ...data,
+          ...cadastro,
           // o cadastro é público: a permissão nunca vem do corpo da requisição.
           // Promoção de perfil só acontece pelo painel (PUT /users/:id por admin).
           role: Role.USER,
@@ -156,25 +169,38 @@ export class UserService {
     const requester = requesterId ? await this.getRequester(requesterId) : null;
 
     /**
-     * O super admin enxerga todas as igrejas, então ganha a lente: pedir uma
-     * igreja no filtro faz a lista responder como se ele fosse admin dela.
-     * Para os outros o parâmetro não vale nada — o recorte deles já veio do
-     * banco e um `churchId` na query não amplia nada.
+     * Lente de igreja: a lista responde como se quem pediu fosse admin só
+     * daquela igreja. Serve ao super admin, que enxerga todas, e a quem
+     * administra mais de uma e quer olhar uma de cada vez.
+     *
+     * Igreja que a pessoa não alcança é ignorada — a lente estreita o recorte,
+     * nunca amplia.
      */
-    const lente =
-      requester?.role === Role.SUPER_ADMIN && filters?.churchId
-        ? userChurchScope({ role: Role.ADMIN, churchId: filters.churchId })
-        : {};
+    // gerenciar pessoas é trabalho de admin: as igrejas onde ela é só
+    // financeiro não entram na lista
+    const alcance = churchIdsComPerfil(requester, [Role.ADMIN]);
+    const podeUsarLente =
+      !!filters?.churchId &&
+      (isSuperAdmin(requester) || alcance.includes(filters.churchId));
 
-    const recortes = [userChurchScope(requester), lente].filter(
+    const lente = podeUsarLente
+      ? userChurchScope({
+          role: Role.ADMIN,
+          churchRoles: [
+            { churchId: filters!.churchId as string, role: Role.ADMIN },
+          ],
+        })
+      : {};
+
+    const recortes = [userChurchScope(requester, [Role.ADMIN]), lente].filter(
       (recorte) => Object.keys(recorte).length > 0,
     );
 
-    // a igreja que manda nos eventos mostrados em cada linha: a do admin ou,
-    // para o super admin, a que ele escolheu na lente
-    const churchId =
-      tenantChurchId(requester) ??
-      (requester?.role === Role.SUPER_ADMIN ? filters?.churchId ?? null : null);
+    // as igrejas que mandam nos eventos mostrados em cada linha: as do admin
+    // ou, para o super admin, a que ele escolheu na lente
+    const churchIds = podeUsarLente
+      ? [filters!.churchId as string]
+      : tenantChurchIds(requester, [Role.ADMIN]);
 
     const users = await this.prisma.user.findMany({
       where: {
@@ -188,13 +214,18 @@ export class UserService {
         role: 'asc',
       },
       include: {
-        // igreja de quem entra no painel: é o que diferencia um admin do outro
-        // na lista do super admin, que enxerga os de todas
-        church: { select: { id: true, name: true } },
+        // os vínculos de painel: é o que diferencia um admin do outro na lista
+        // do super admin, que enxerga os de todas as igrejas
+        churchRoles: {
+          select: {
+            role: true,
+            church: { select: { id: true, name: true } },
+          },
+        },
         events: {
           // quem participa de evento de outra igreja entra na lista pelo
           // vínculo local, mas o evento de lá não aparece junto
-          where: churchId ? { event: { churchId } } : undefined,
+          where: churchIds ? { event: { churchId: { in: churchIds } } } : undefined,
           include: {
             event: {
               select: {
@@ -213,7 +244,17 @@ export class UserService {
 
   async findByDocument(document: string) {
     if (!document) return null;
-    return this.prisma.user.findUnique({ where: { cpf: document } });
+
+    // os vínculos vão junto: é com eles que o painel monta o que a pessoa
+    // administra em cada igreja logo depois do login
+    return this.prisma.user.findUnique({
+      where: { cpf: document },
+      include: {
+        churchRoles: {
+          select: { role: true, church: { select: { id: true, name: true } } },
+        },
+      },
+    });
   }
 
   /**
@@ -223,13 +264,109 @@ export class UserService {
   async findOne(id: string, requesterId?: string) {
     await this.assertCanReachUser(requesterId, id);
 
-    const user = await this.prisma.user.findFirst({ where: { id } });
+    const user = await this.prisma.user.findFirst({
+      where: { id },
+      include: {
+        // o painel precisa saber em quais igrejas a pessoa trabalha
+        churchRoles: {
+          select: { role: true, church: { select: { id: true, name: true } } },
+        },
+      },
+    });
     if (!user) return null;
 
     // `password` fica de fora: a rota é aberta a qualquer autenticado e o hash
     // não tem por que sair do banco.
     const { password: _password, ...userWithoutPassword } = user;
     return userWithoutPassword;
+  }
+
+  /**
+   * Perfil efetivo da pessoa: super admin manda, senão vale o mais alto dos
+   * vínculos, e sem vínculo nenhum ela é usuário comum. É o que os guards de
+   * rota leem para saber se ela pode chegar na rota; em qual igreja, quem
+   * responde são os vínculos.
+   */
+  private perfilEfetivo(pessoa: TenantRequester | null): number {
+    if (!pessoa) return Role.USER;
+    if (pessoa.role === Role.SUPER_ADMIN) return Role.SUPER_ADMIN;
+
+    const perfis = (pessoa.churchRoles ?? []).map((vinculo) => vinculo.role);
+
+    if (perfis.includes(Role.ADMIN)) return Role.ADMIN;
+    if (perfis.includes(Role.FINANCE)) return Role.FINANCE;
+
+    return Role.USER;
+  }
+
+  /**
+   * Monta a lista de vínculos que vai substituir a atual.
+   *
+   * O super admin define a lista inteira. O admin só mexe nas igrejas que ele
+   * administra: os vínculos da pessoa nas outras são preservados como estão —
+   * sem isso, um admin de uma igreja apagaria, sem querer ou de propósito, a
+   * permissão que a pessoa tem na igreja vizinha.
+   */
+  private async resolveVinculos(
+    requester: TenantRequester | null,
+    targetId: string,
+    pedidos: VinculoDeIgreja[],
+  ): Promise<VinculoDeIgreja[]> {
+    const limpos = (pedidos ?? []).map((vinculo) => ({
+      churchId: vinculo.churchId,
+      role: Number(vinculo.role),
+    }));
+
+    if (limpos.some((vinculo) => !CHURCH_ROLES.includes(vinculo.role))) {
+      throw new BadRequestException(
+        'Só admin e financeiro são perfis de igreja',
+      );
+    }
+
+    const igrejas = limpos.map((vinculo) => vinculo.churchId);
+    if (new Set(igrejas).size !== igrejas.length) {
+      throw new BadRequestException(
+        'Cada igreja aceita um perfil só por pessoa',
+      );
+    }
+
+    if (igrejas.length) {
+      const existentes = await this.prisma.church.count({
+        where: { id: { in: igrejas } },
+      });
+
+      if (existentes !== new Set(igrejas).size) {
+        throw new BadRequestException('Igreja não encontrada');
+      }
+    }
+
+    if (isSuperAdmin(requester)) return limpos;
+
+    const minhas = churchIdsComPerfil(requester, [Role.ADMIN]);
+
+    if (!minhas.length) {
+      throw new ForbiddenException(
+        'Você não administra nenhuma igreja para dar permissões',
+      );
+    }
+
+    const forasteira = igrejas.find((churchId) => !minhas.includes(churchId));
+    if (forasteira) {
+      throw new ForbiddenException(
+        'Você só dá permissão nas igrejas que administra',
+      );
+    }
+
+    const atuais = await this.prisma.userChurchRole.findMany({
+      where: { userId: targetId },
+      select: { churchId: true, role: true },
+    });
+
+    const preservados = atuais.filter(
+      (vinculo) => !minhas.includes(vinculo.churchId),
+    );
+
+    return [...preservados, ...limpos];
   }
 
   private async assertChurchExists(churchId: string) {
@@ -265,7 +402,7 @@ export class UserService {
   private async getRequester(requesterId: string) {
     return this.prisma.user.findUnique({
       where: { id: requesterId },
-      select: { role: true, churchId: true },
+      select: SELECT_TENANT,
     });
   }
 
@@ -302,6 +439,9 @@ export class UserService {
       throw new NotFoundException('User does not exists!');
     }
 
+    /** vínculos a gravar; `undefined` significa "não mexi neles" */
+    let vinculosParaSalvar: VinculoDeIgreja[] | undefined;
+
     if (requesterId) {
       const requester = await this.getRequester(requesterId);
 
@@ -317,7 +457,7 @@ export class UserService {
       // já que o formulário de perfil devolve o usuário inteiro no payload
       if (!requesterIsAdmin) {
         delete data.role;
-        delete data.churchId;
+        delete data.churchRoles;
       } else {
         if (!requesterIsSuperAdmin) {
           // o super admin não é editável por quem está abaixo dele: sem esta
@@ -331,9 +471,13 @@ export class UserService {
           await this.assertUserInScope(requester, id);
         }
 
+        // o perfil global só tem dois valores: super admin e usuário comum.
+        // Admin e financeiro moram nos vínculos, um por igreja.
         if (data.role !== undefined) {
-          if (!ASSIGNABLE_ROLES.includes(data.role)) {
-            throw new BadRequestException('Permissão inválida');
+          if (![Role.SUPER_ADMIN, Role.USER].includes(data.role)) {
+            throw new BadRequestException(
+              'Admin e financeiro são definidos por igreja, em churchRoles',
+            );
           }
 
           // o perfil de super admin não se concede a si mesmo: sem esta trava
@@ -345,70 +489,75 @@ export class UserService {
           }
         }
 
-        // a igreja de quem entra no painel é obrigatória — é ela que recorta
-        // tudo o que a pessoa vai enxergar. O super admin é a exceção: ele
-        // atravessa todas, então não fica preso a nenhuma
-        if (data.role === Role.SUPER_ADMIN) {
-          data.churchId = null;
-        } else if (
-          data.role !== undefined &&
-          ADMIN_AREA_ROLES.includes(data.role)
-        ) {
-          if (requesterIsSuperAdmin) {
-            const churchId = data.churchId ?? userExists.churchId;
-
-            if (!churchId) {
-              throw new BadRequestException(
-                'Informe a igreja do administrador',
-              );
-            }
-
-            await this.assertChurchExists(churchId);
-            data.churchId = churchId;
-          } else {
-            // admin de igreja só cria gente da própria igreja
-            if (!requester?.churchId) {
-              throw new ForbiddenException(
-                'Admin sem igreja associada não pode criar outros admins',
-              );
-            }
-            data.churchId = requester.churchId;
-          }
-        } else if (data.role === Role.USER) {
-          // saiu do painel: usuário comum não pertence a igreja nenhuma, o que
-          // o liga a cada uma são as inscrições em eventos
-          data.churchId = null;
-        } else if (!requesterIsSuperAdmin) {
-          // mudar alguém de igreja é privilégio do super admin
-          delete data.churchId;
-        } else if (data.churchId) {
-          await this.assertChurchExists(data.churchId);
+        if (data.churchRoles !== undefined) {
+          vinculosParaSalvar = await this.resolveVinculos(
+            requester,
+            id,
+            data.churchRoles,
+          );
         }
       }
     }
 
-    // Senha não passa por aqui: `data` vai direto para o Prisma, então uma
-    // senha no corpo seria gravada em texto puro e nenhum login voltaria a
-    // funcionar. Quem troca senha é o fluxo de redefinição
-    // (POST /auth/password/*), que grava o hash bcrypt.
-    delete data.password;
+    /**
+     * Sai tudo o que não é coluna de `users`:
+     *
+     * - `churchRoles` virou tabela própria e é gravado logo abaixo;
+     * - `churchId` hoje é só a lente da listagem;
+     * - a senha nunca passa por aqui — iria em texto puro e nenhum login
+     *   voltaria a funcionar. Quem troca senha é `POST /auth/password/*`, que
+     *   grava o hash bcrypt.
+     */
+    const {
+      churchRoles: _vinculosDoCorpo,
+      churchId: _lenteDoCorpo,
+      password: _senha,
+      ...campos
+    } = data;
 
     try {
-      await this.prisma.user.update({
-        data,
-        where: {
-          id,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({ data: campos, where: { id } });
+
+        if (vinculosParaSalvar !== undefined) {
+          await tx.userChurchRole.deleteMany({ where: { userId: id } });
+
+          if (vinculosParaSalvar.length) {
+            await tx.userChurchRole.createMany({
+              data: vinculosParaSalvar.map((vinculo) => ({
+                userId: id,
+                churchId: vinculo.churchId,
+                role: vinculo.role,
+              })),
+            });
+          }
+        }
+
+        // `role` é derivado: fica sempre igual ao mais alto dos vínculos, na
+        // mesma transação que os escreve. É ele que os guards de rota leem, e
+        // duas fontes divergindo é como uma permissão sobra ou some sem
+        // ninguém pedir.
+        const atual = await tx.user.findUnique({
+          where: { id },
+          select: SELECT_TENANT,
+        });
+
+        const efetivo = this.perfilEfetivo(atual);
+
+        if (atual && atual.role !== efetivo) {
+          await tx.user.update({ where: { id }, data: { role: efetivo } });
+        }
       });
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       console.log(error);
       throw new InternalServerErrorException();
     }
   }
   async findInsightsEvents(requesterId?: string) {
     const requester = requesterId ? await this.getRequester(requesterId) : null;
-    // os números do painel são da igreja de quem está olhando
-    const scope = userChurchScope(requester);
+    // os números da tela de usuários seguem o mesmo recorte da lista
+    const scope = userChurchScope(requester, [Role.ADMIN]);
 
     // verifica quais usuarios tem recorrencia em eventos em um ano
     const currentYear = new Date().getFullYear() - 1;

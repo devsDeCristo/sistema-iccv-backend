@@ -27,6 +27,8 @@ export class AuthService {
     return {
       id: userConsult.id,
       role: userConsult.role,
+      // o painel usa os vínculos para saber em quais igrejas a pessoa trabalha
+      churchRoles: userConsult.churchRoles,
       fullName: userConsult.fullName,
       email: userConsult.email,
       cpf: userConsult.cpf,
@@ -56,7 +58,6 @@ export class AuthService {
       sub: user.id,
       username: user.fullName,
       role: user.role,
-      churchId: user.churchId || null,
     };
     return {
       access_token: this.jwtService.sign(payload),

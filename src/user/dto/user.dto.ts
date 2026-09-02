@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsIn,
@@ -8,8 +10,20 @@ import {
   IsOptional,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { ASSIGNABLE_ROLES } from 'src/auth/roles';
+
+/** Um vínculo de painel: o perfil que a pessoa tem em uma igreja. */
+export class ChurchRoleDto {
+  @ApiProperty({ example: 'church-id-uuid' })
+  @IsString()
+  churchId: string;
+
+  @ApiProperty({ example: 2, description: '2 = admin, 3 = financeiro' })
+  @IsInt()
+  role: number;
+}
 
 export class UserDTO {
   @ApiProperty({
@@ -190,12 +204,37 @@ export class UserDTO {
   @IsOptional()
   notes?: string;
 
+  /**
+   * Lente da lista de usuários: o super admin pede uma igreja e a lista
+   * responde como se ele fosse admin dela. Não é campo de gravação.
+   */
   @ApiProperty({
     example: 'church-id-uuid',
-    description:
-      'Igreja de quem entra no painel (admin/financeiro). Usuário comum não pertence a nenhuma: fica nulo.',
+    description: 'Filtra a lista pela igreja (só o super admin usa)',
+    required: false,
   })
   @IsString()
   @IsOptional()
-  churchId?: string | null;
+  churchId?: string;
+
+  @ApiProperty({
+    description:
+      'Vínculos de painel: em qual igreja a pessoa é admin (2) e em qual é ' +
+      'financeiro (3). A mesma pessoa pode ter perfis diferentes em igrejas ' +
+      'diferentes. Lista vazia tira a pessoa do painel.',
+    required: false,
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        churchId: { type: 'string' },
+        role: { type: 'number', example: 2 },
+      },
+    },
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ChurchRoleDto)
+  churchRoles?: ChurchRoleDto[];
 }

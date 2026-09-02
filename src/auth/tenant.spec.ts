@@ -1,82 +1,113 @@
 import { ForbiddenException } from '@nestjs/common';
-import { Role } from './roles';
+import { ADMIN_AREA_ROLES, Role } from './roles';
 import {
-  assertSameChurch,
-  isTenantScoped,
-  tenantChurchId,
+  assertChurchAccess,
+  churchIdsComPerfil,
+  perfilNaIgreja,
+  tenantChurchIds,
   userChurchScope,
 } from './tenant';
 
-const admin = { role: Role.ADMIN, churchId: 'igreja-a' };
-const finance = { role: Role.FINANCE, churchId: 'igreja-a' };
-const superAdmin = { role: Role.SUPER_ADMIN, churchId: null };
-// usuário comum não pertence a igreja nenhuma: se inscreve em evento de
-// qualquer uma e é a inscrição que o mostra para aquele painel
-const comum = { role: Role.USER, churchId: null };
+const IGREJA_A = 'igreja-a';
+const IGREJA_B = 'igreja-b';
 
-describe('isTenantScoped', () => {
-  it('recorta admin e financeiro', () => {
-    expect(isTenantScoped(Role.ADMIN)).toBe(true);
-    expect(isTenantScoped(Role.FINANCE)).toBe(true);
-  });
+/** admin numa igreja e financeiro na outra: o caso que o modelo existe para atender */
+const doisChapeus = {
+  role: Role.ADMIN,
+  churchRoles: [
+    { churchId: IGREJA_A, role: Role.ADMIN },
+    { churchId: IGREJA_B, role: Role.FINANCE },
+  ],
+};
 
-  it('não recorta super admin nem usuário comum', () => {
-    // o super admin atravessa as igrejas; o usuário comum se inscreve em
-    // evento de qualquer uma
-    expect(isTenantScoped(Role.SUPER_ADMIN)).toBe(false);
-    expect(isTenantScoped(Role.USER)).toBe(false);
-    expect(isTenantScoped(null)).toBe(false);
-  });
-});
+const adminDeA = {
+  role: Role.ADMIN,
+  churchRoles: [{ churchId: IGREJA_A, role: Role.ADMIN }],
+};
 
-describe('tenantChurchId', () => {
-  it('devolve a igreja de quem é recortado', () => {
-    expect(tenantChurchId(admin)).toBe('igreja-a');
-    expect(tenantChurchId(finance)).toBe('igreja-a');
-  });
+const superAdmin = { role: Role.SUPER_ADMIN, churchRoles: [] };
+const inscrito = { role: Role.USER, churchRoles: [] };
 
-  it('devolve null para quem atravessa o recorte', () => {
-    expect(tenantChurchId(superAdmin)).toBeNull();
-    expect(tenantChurchId(comum)).toBeNull();
-    expect(tenantChurchId(null)).toBeNull();
-  });
-
-  it('não recorta usuário comum nem se ele tiver igreja gravada', () => {
-    // vínculo antigo de antes da regra não pode virar filtro no catálogo
-    expect(tenantChurchId({ role: Role.USER, churchId: 'igreja-a' })).toBeNull();
-  });
-
-  it('falha fechado quando o admin está sem igreja', () => {
-    // o contrário — devolver null — daria a ele acesso de super admin
-    expect(() => tenantChurchId({ role: Role.ADMIN, churchId: null })).toThrow(
-      ForbiddenException,
-    );
+describe('churchIdsComPerfil', () => {
+  it('separa onde a pessoa é admin de onde ela é financeiro', () => {
+    expect(churchIdsComPerfil(doisChapeus, [Role.ADMIN])).toEqual([IGREJA_A]);
+    expect(churchIdsComPerfil(doisChapeus, [Role.FINANCE])).toEqual([IGREJA_B]);
+    expect(churchIdsComPerfil(doisChapeus, ADMIN_AREA_ROLES)).toEqual([
+      IGREJA_A,
+      IGREJA_B,
+    ]);
   });
 });
 
-describe('assertSameChurch', () => {
-  it('deixa passar recurso da própria igreja', () => {
-    expect(() => assertSameChurch(admin, 'igreja-a')).not.toThrow();
+describe('perfilNaIgreja', () => {
+  it('devolve o perfil daquela igreja, não o mais alto', () => {
+    expect(perfilNaIgreja(doisChapeus, IGREJA_A)).toBe(Role.ADMIN);
+    expect(perfilNaIgreja(doisChapeus, IGREJA_B)).toBe(Role.FINANCE);
   });
 
-  it('barra recurso de outra igreja', () => {
-    expect(() => assertSameChurch(admin, 'igreja-b')).toThrow(
-      ForbiddenException,
-    );
+  it('devolve null onde ela não administra', () => {
+    expect(perfilNaIgreja(adminDeA, IGREJA_B)).toBeNull();
+  });
+});
+
+describe('tenantChurchIds', () => {
+  it('não recorta o super admin nem o inscrito', () => {
+    expect(tenantChurchIds(superAdmin)).toBeNull();
+    expect(tenantChurchIds(inscrito)).toBeNull();
+    expect(tenantChurchIds(null)).toBeNull();
+  });
+
+  it('lista vazia quando o perfil pedido ela não tem em lugar nenhum', () => {
+    // vazio é "nenhuma igreja", e não "todas": o recorte falha fechado
+    expect(tenantChurchIds(adminDeA, [Role.FINANCE])).toEqual([]);
+  });
+
+  it('não abre tudo para perfil de painel que ficou sem vínculo', () => {
+    // igreja apagada, vínculo removido pela metade: alcança nada, não tudo
+    expect(tenantChurchIds({ role: Role.ADMIN, churchRoles: [] })).toEqual([]);
+  });
+});
+
+describe('assertChurchAccess', () => {
+  it('deixa passar na igreja onde ela tem o perfil pedido', () => {
+    expect(() =>
+      assertChurchAccess(doisChapeus, IGREJA_A, { roles: [Role.ADMIN] }),
+    ).not.toThrow();
+  });
+
+  it('barra o perfil de uma igreja de valer na outra', () => {
+    // é financeiro na B: administrar a B continua fora de alcance
+    expect(() =>
+      assertChurchAccess(doisChapeus, IGREJA_B, { roles: [Role.ADMIN] }),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('aceita o financeiro onde a rota admite financeiro', () => {
+    expect(() =>
+      assertChurchAccess(doisChapeus, IGREJA_B, { roles: ADMIN_AREA_ROLES }),
+    ).not.toThrow();
   });
 
   it('não barra o super admin', () => {
-    expect(() => assertSameChurch(superAdmin, 'igreja-b')).not.toThrow();
+    expect(() => assertChurchAccess(superAdmin, IGREJA_B)).not.toThrow();
   });
 });
 
 describe('userChurchScope', () => {
-  it('alcança o pessoal do painel e quem participa dos eventos da igreja', () => {
-    expect(userChurchScope(admin)).toEqual({
+  it('alcança quem administra as igrejas e quem participa dos eventos delas', () => {
+    expect(userChurchScope(doisChapeus)).toEqual({
       OR: [
-        { churchId: 'igreja-a' },
-        { events: { some: { event: { churchId: 'igreja-a' } } } },
-        { waitlists: { some: { event: { churchId: 'igreja-a' } } } },
+        { churchRoles: { some: { churchId: { in: [IGREJA_A, IGREJA_B] } } } },
+        {
+          events: {
+            some: { event: { churchId: { in: [IGREJA_A, IGREJA_B] } } },
+          },
+        },
+        {
+          waitlists: {
+            some: { event: { churchId: { in: [IGREJA_A, IGREJA_B] } } },
+          },
+        },
       ],
     });
   });

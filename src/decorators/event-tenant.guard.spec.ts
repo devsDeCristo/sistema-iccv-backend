@@ -15,11 +15,30 @@ import { EventTenantGuard } from './event-tenant.guard';
 const IGREJA_A = 'igreja-a';
 const IGREJA_B = 'igreja-b';
 
-const PESSOAS: Record<string, { role: number; churchId: string | null }> = {
-  'admin-a': { role: Role.ADMIN, churchId: IGREJA_A },
-  'financeiro-a': { role: Role.FINANCE, churchId: IGREJA_A },
-  'super': { role: Role.SUPER_ADMIN, churchId: null },
-  'inscrito': { role: Role.USER, churchId: null },
+type Pessoa = {
+  role: number;
+  churchRoles: { churchId: string; role: number }[];
+};
+
+const PESSOAS: Record<string, Pessoa> = {
+  'admin-a': {
+    role: Role.ADMIN,
+    churchRoles: [{ churchId: IGREJA_A, role: Role.ADMIN }],
+  },
+  'financeiro-a': {
+    role: Role.FINANCE,
+    churchRoles: [{ churchId: IGREJA_A, role: Role.FINANCE }],
+  },
+  // admin numa igreja e financeiro na outra
+  'dois-chapeus': {
+    role: Role.ADMIN,
+    churchRoles: [
+      { churchId: IGREJA_A, role: Role.ADMIN },
+      { churchId: IGREJA_B, role: Role.FINANCE },
+    ],
+  },
+  super: { role: Role.SUPER_ADMIN, churchRoles: [] },
+  inscrito: { role: Role.USER, churchRoles: [] },
 };
 
 const EVENTOS: Record<string, { churchId: string }> = {
@@ -44,10 +63,16 @@ const prismaFalso = {
   },
 } as any;
 
-const guard = new EventTenantGuard(prismaFalso);
+/** o guard lê o `@Roles` da rota pelo Reflector para saber qual perfil cobrar */
+const guardComRoles = (roles?: Role[]) =>
+  new EventTenantGuard({ getAllAndOverride: () => roles } as any, prismaFalso);
+
+const guard = guardComRoles([Role.SUPER_ADMIN, Role.ADMIN]);
 
 const contexto = (userId: string | undefined, params: any) =>
   ({
+    getHandler: () => undefined,
+    getClass: () => undefined,
     switchToHttp: () => ({
       getRequest: () => ({ user: userId ? { userId } : undefined, params }),
     }),
@@ -70,6 +95,51 @@ describe('EventTenantGuard', () => {
     await expect(
       guard.canActivate(contexto('financeiro-a', { eventId: 'evento-b' })),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('barra o financeiro em rota que exige admin, mesmo na igreja dele', async () => {
+    await expect(
+      guard.canActivate(contexto('financeiro-a', { idEvent: 'evento-a' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('aceita o financeiro na rota que admite financeiro', async () => {
+    const rotaDoFinanceiro = guardComRoles([
+      Role.SUPER_ADMIN,
+      Role.ADMIN,
+      Role.FINANCE,
+    ]);
+
+    await expect(
+      rotaDoFinanceiro.canActivate(
+        contexto('financeiro-a', { idEvent: 'evento-a' }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('não deixa o perfil de uma igreja valer na outra', async () => {
+    // admin na A, financeiro na B: administrar a B continua barrado
+    await expect(
+      guard.canActivate(contexto('dois-chapeus', { idEvent: 'evento-b' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      guard.canActivate(contexto('dois-chapeus', { idEvent: 'evento-a' })),
+    ).resolves.toBe(true);
+  });
+
+  it('deixa o financeiro da outra igreja ver o que é de financeiro lá', async () => {
+    const rotaDoFinanceiro = guardComRoles([
+      Role.SUPER_ADMIN,
+      Role.ADMIN,
+      Role.FINANCE,
+    ]);
+
+    await expect(
+      rotaDoFinanceiro.canActivate(
+        contexto('dois-chapeus', { idEvent: 'evento-b' }),
+      ),
+    ).resolves.toBe(true);
   });
 
   it('deixa o super admin atravessar', async () => {

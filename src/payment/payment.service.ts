@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
-import { tenantChurchId } from 'src/auth/tenant';
+import { SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
 import {
   CheckoutStatus,
   PaymentMethod,
@@ -646,17 +646,17 @@ export class PaymentService {
     const requester = requesterId
       ? await this.prisma.user.findUnique({
           where: { id: requesterId },
-          select: { role: true, churchId: true },
+          select: SELECT_TENANT,
         })
       : null;
 
-    // a própria pessoa vê tudo o que é dela; o painel vê só a igreja dele
-    const churchId =
-      requesterId === userId ? null : tenantChurchId(requester);
+    // a própria pessoa vê tudo o que é dela; o painel vê só as igrejas dele
+    const churchIds =
+      requesterId === userId ? null : tenantChurchIds(requester);
 
     const events = await this.prisma.event.findMany({
       where: {
-        ...(churchId ? { churchId } : {}),
+        ...(churchIds ? { churchId: { in: churchIds } } : {}),
         OR: [
           {
             users: {
