@@ -154,13 +154,35 @@ export class UserService {
    */
   async findAll(filters?: Partial<UserDTO>, requesterId?: string) {
     const requester = requesterId ? await this.getRequester(requesterId) : null;
-    const churchId = tenantChurchId(requester);
+
+    /**
+     * O super admin enxerga todas as igrejas, então ganha a lente: pedir uma
+     * igreja no filtro faz a lista responder como se ele fosse admin dela.
+     * Para os outros o parâmetro não vale nada — o recorte deles já veio do
+     * banco e um `churchId` na query não amplia nada.
+     */
+    const lente =
+      requester?.role === Role.SUPER_ADMIN && filters?.churchId
+        ? userChurchScope({ role: Role.ADMIN, churchId: filters.churchId })
+        : {};
+
+    const recortes = [userChurchScope(requester), lente].filter(
+      (recorte) => Object.keys(recorte).length > 0,
+    );
+
+    // a igreja que manda nos eventos mostrados em cada linha: a do admin ou,
+    // para o super admin, a que ele escolheu na lente
+    const churchId =
+      tenantChurchId(requester) ??
+      (requester?.role === Role.SUPER_ADMIN ? filters?.churchId ?? null : null);
 
     const users = await this.prisma.user.findMany({
       where: {
         fullName: { contains: filters?.fullName || undefined },
         email: { contains: filters?.email || undefined },
-        ...userChurchScope(requester),
+        // `AND` e não espalhar os dois: ambos usam a chave `OR` e um
+        // sobrescreveria o outro no objeto
+        ...(recortes.length ? { AND: recortes } : {}),
       },
       orderBy: {
         role: 'asc',

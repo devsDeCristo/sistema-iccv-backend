@@ -1,5 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma';
+import { ADMIN_ROLES, Role } from 'src/auth/roles';
+import { isTenantScoped } from 'src/auth/tenant';
 import {
   ConnectedSocket,
   MessageBody,
@@ -31,7 +34,10 @@ export class CheckinGateway implements OnGatewayConnection {
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    * Só aceita conexões com um JWT válido. Sem isso, qualquer um na rede do
@@ -48,22 +54,60 @@ export class CheckinGateway implements OnGatewayConnection {
     }
 
     try {
-      this.jwtService.verify(token, {
+      const payload = this.jwtService.verify(token, {
         secret: process.env.JWT_SECRET || 'default_secret',
       });
+
+      // guardado para o `join`: é por ele que se confere de quem é a sala.
+      // O perfil não vem daqui — o token dura 24h e o vínculo pode ter mudado.
+      client.data.userId = payload?.sub;
     } catch {
       this.logger.warn('Conexão de check-in recusada: token inválido');
       client.disconnect(true);
     }
   }
 
+  /**
+   * A sala é do evento, e o evento é de uma igreja: entrar nela é operar a
+   * recepção daquele evento. Sem esta conferência, qualquer pessoa logada
+   * abria o socket e acompanhava o movimento da recepção da igreja vizinha —
+   * quem chegou e a que horas — mesmo sem conseguir ler as rotas REST.
+   */
   @SubscribeMessage('checkin:join')
-  join(
+  async join(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { eventId?: string } | string,
   ) {
     const eventId = typeof payload === 'string' ? payload : payload?.eventId;
     if (!eventId) return { joined: false };
+
+    const userId = client.data?.userId;
+    if (!userId) return { joined: false };
+
+    const [requester, event] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true, churchId: true },
+      }),
+      this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { churchId: true },
+      }),
+    ]);
+
+    // check-in é trabalho de painel: o financeiro e o inscrito não entram
+    if (!requester || !ADMIN_ROLES.includes(requester.role as Role)) {
+      return { joined: false };
+    }
+
+    if (!event) return { joined: false };
+
+    if (
+      isTenantScoped(requester.role) &&
+      event.churchId !== requester.churchId
+    ) {
+      return { joined: false };
+    }
 
     client.join(room(eventId));
     return { joined: true, eventId };

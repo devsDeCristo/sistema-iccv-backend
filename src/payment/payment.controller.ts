@@ -87,7 +87,7 @@ export class PaymentController {
   @Get('users/:idUser/payments')
   async findByUser(@Param('idUser') userId: string, @Req() req: any) {
     await this.paymentService.assertCanSeePayments(req.user?.userId, userId);
-    return this.paymentService.findUserEventsWithRoles(userId);
+    return this.paymentService.findUserEventsWithRoles(userId, req.user?.userId);
   }
 
   // ===============================

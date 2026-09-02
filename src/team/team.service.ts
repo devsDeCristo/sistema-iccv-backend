@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -52,7 +54,34 @@ export class TeamService {
       });
   }
 
+  /**
+   * Quem entra na equipe tem que estar inscrito no evento. Os ids vêm do corpo
+   * da requisição: sem esta conferência, um id de pessoa de outra igreja (ou de
+   * quem nem se inscreveu) virava membro, e o nome dela passava a aparecer na
+   * equipe e no PDF do evento.
+   */
+  private async assertUsersNoEvento(eventId: string, userIds: string[]) {
+    const ids = Array.from(new Set(userIds ?? [])).filter(Boolean);
+    if (!ids.length) return;
+
+    const inscritos = await this.prisma.eventOnUsers.count({
+      where: { eventId, userId: { in: ids } },
+    });
+
+    if (inscritos !== ids.length) {
+      throw new BadRequestException(
+        'Há pessoas na lista que não estão inscritas neste evento',
+      );
+    }
+  }
+
   async create(idEvent: string, createTeam: TeammDto) {
+    // fora do try: o catch genérico abaixo viraria um 500 sem explicação
+    await this.assertUsersNoEvento(idEvent, [
+      ...(createTeam.usersId ?? []),
+      ...(createTeam.usersLeadersId ?? []),
+    ]);
+
     try {
       const team = await this.prisma.team.create({
         data: {
@@ -148,6 +177,11 @@ export class TeamService {
   }
 
   async update(idEvent: string, idTeam: string, updateTeamDto: TeammDto) {
+    await this.assertUsersNoEvento(idEvent, [
+      ...(updateTeamDto.usersId ?? []),
+      ...(updateTeamDto.usersLeadersId ?? []),
+    ]);
+
     try {
       const teamExist = await this.prisma.team.findFirst({
         where: {
@@ -194,7 +228,9 @@ export class TeamService {
         updateTeamDto.usersId,
         team.id,
       );
-    } catch {
+    } catch (erro) {
+      // sem isto o "equipe não existe" saía como 500 sem explicação
+      if (erro instanceof HttpException) throw erro;
       throw new InternalServerErrorException();
     }
   }

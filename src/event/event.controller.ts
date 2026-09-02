@@ -232,19 +232,4 @@ export class EventController {
       { requesterId: req.user?.userId },
     );
   }
-  //remove o usuario do waitlist
-  @ApiOperation({ summary: 'Remove user from waitlist' })
-  @Roles(...ADMIN_ROLES)
-  @Delete(':idEvent/waitlist/users/:idUser/rule/:roleRegistrationId')
-  removeUserFromEventWaitlist(
-    @Param('idEvent') idEvent: string,
-    @Param('idUser') idUser: string,
-    @Param('roleRegistrationId') roleRegistrationId: string,
-  ) {
-    return this.eventService.removeUserFromEventWaitlist(
-      idUser,
-      idEvent,
-      roleRegistrationId,
-    );
-  }
 }

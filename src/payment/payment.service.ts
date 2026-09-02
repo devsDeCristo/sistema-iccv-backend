@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
+import { tenantChurchId } from 'src/auth/tenant';
 import {
   CheckoutStatus,
   PaymentMethod,
@@ -636,9 +637,26 @@ export class PaymentService {
       },
     });
   }
-  async findUserEventsWithRoles(userId: string) {
+  /**
+   * @param requesterId quem pediu o extrato. O admin de uma igreja não pode
+   * ver o que a pessoa deve nas outras: sem este recorte bastava o id de um
+   * inscrito para ler a vida financeira dele no sistema inteiro.
+   */
+  async findUserEventsWithRoles(userId: string, requesterId?: string) {
+    const requester = requesterId
+      ? await this.prisma.user.findUnique({
+          where: { id: requesterId },
+          select: { role: true, churchId: true },
+        })
+      : null;
+
+    // a própria pessoa vê tudo o que é dela; o painel vê só a igreja dele
+    const churchId =
+      requesterId === userId ? null : tenantChurchId(requester);
+
     const events = await this.prisma.event.findMany({
       where: {
+        ...(churchId ? { churchId } : {}),
         OR: [
           {
             users: {

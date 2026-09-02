@@ -15,7 +15,7 @@ import { CreateChurchDto } from './dto/create-church.dto';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
+import { Role } from 'src/auth/roles';
 
 /**
  * A igreja é o tenant do sistema: criar, renomear ou apagar uma delas mexe no
@@ -29,8 +29,14 @@ import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 export class ChurchController {
   constructor(private readonly churchService: ChurchService) {}
 
+  /**
+   * A lista é metadado do tenant: nome das outras igrejas e quanto cada uma
+   * tem de evento e de administrador. Só o super admin precisa — as telas que
+   * consomem isto (gestão de igrejas, escolha da igreja no evento e na
+   * permissão) são todas dele.
+   */
   @ApiOperation({ summary: 'Lista as igrejas' })
-  @Roles(...ADMIN_AREA_ROLES)
+  @Roles(Role.SUPER_ADMIN)
   @Get()
   async findAll() {
     return this.churchService.findAll();

@@ -47,6 +47,27 @@ export class BedroomsService {
    * A checagem vale para a montagem manual do quarto, não só para a alocação
    * automática do check-in — do contrário a tag valeria apenas metade do tempo.
    */
+  /**
+   * Quem entra no quarto tem que estar inscrito no evento. Os ids vêm do corpo
+   * da requisição: sem esta conferência, um id de pessoa de outra igreja (ou de
+   * alguém que nem se inscreveu) virava ocupante — o nome dela aparecia na
+   * lista do evento, no PDF dos quartos e na fila do check-in.
+   */
+  private async assertUsersNoEvento(eventId: string, userIds: string[]) {
+    const ids = Array.from(new Set(userIds ?? [])).filter(Boolean);
+    if (!ids.length) return;
+
+    const inscritos = await this.prisma.eventOnUsers.count({
+      where: { eventId, userId: { in: ids } },
+    });
+
+    if (inscritos !== ids.length) {
+      throw new BadRequestException(
+        'Há pessoas na lista que não estão inscritas neste evento',
+      );
+    }
+  }
+
   private async assertUsersAllowed(
     eventId: string,
     groupTags: string[] | undefined,
@@ -96,6 +117,7 @@ export class BedroomsService {
   async create(idEvent: string, createBedroom: BedroomDto) {
     // fora do try: o catch abaixo é genérico e transformaria a recusa de grupo
     // num 500 sem explicação
+    await this.assertUsersNoEvento(idEvent, createBedroom.usersId || []);
     await this.assertUsersAllowed(
       idEvent,
       createBedroom.groupTags,
@@ -206,6 +228,7 @@ export class BedroomsService {
       throw new NotFoundException('Bedroom does not exists!');
     }
 
+    await this.assertUsersNoEvento(idEvent, updateBedroomDto.usersId || []);
     await this.assertUsersAllowed(
       idEvent,
       updateBedroomDto.groupTags,

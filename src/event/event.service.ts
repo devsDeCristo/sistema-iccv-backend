@@ -21,7 +21,7 @@ import {
   PrismaService,
 } from '../prisma';
 import { EventDto } from './dto/event.dto';
-import { isAdminRole, Role } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, isAdminRole, Role } from 'src/auth/roles';
 import { assertSameChurch, tenantChurchId } from 'src/auth/tenant';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
@@ -128,6 +128,7 @@ export class EventService {
     // isso bastaria ter o id em mãos para entrar num evento ainda em ensaio
     if (options?.requesterId) {
       await this.assertEventIsVisible(eventId, options.requesterId);
+      await this.assertPodeInscrever(options.requesterId, userId);
     }
 
     try {
@@ -1242,6 +1243,29 @@ export class EventService {
   }
 
   /** Barra quem não pode enxergar o evento — evento de teste responde 404 */
+  /**
+   * Inscrever é ato do próprio inscrito. Quem inscreve outra pessoa está
+   * operando o painel, e para isso precisa ser do painel — sem esta checagem
+   * bastava trocar o id na URL para pôr qualquer um em qualquer evento, com
+   * vaga ocupada, cobrança gerada e e-mail de confirmação no nome dele.
+   *
+   * A igreja do evento já foi conferida pelo `EventTenantGuard`.
+   */
+  private async assertPodeInscrever(requesterId: string, userId: string) {
+    if (requesterId === userId) return;
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) {
+      throw new ForbiddenException(
+        'Você só pode inscrever a si mesmo neste evento',
+      );
+    }
+  }
+
   private async assertEventIsVisible(eventId: string, requesterId?: string) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
@@ -1621,8 +1645,22 @@ export class EventService {
         }
 
         // CRIAR / ATUALIZAR ROLES
+        const idsDoGrupo = new Set(dbRoles.map((role) => role.id));
+
         for (const role of group.roles) {
           if (role.id) {
+            /**
+             * O id vem do corpo da requisição: sem conferir que ele é uma
+             * regra deste grupo, um admin editando o próprio evento alterava
+             * preço e descrição de regra de evento de outra igreja, só
+             * mandando o id dela no lugar.
+             */
+            if (!idsDoGrupo.has(role.id)) {
+              throw new BadRequestException(
+                'Regra de inscrição não pertence a este evento',
+              );
+            }
+
             ops.push(
               this.prisma.rolesRegistration.update({
                 where: { id: role.id },
