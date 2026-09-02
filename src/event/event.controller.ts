@@ -18,6 +18,7 @@ import {
   ApiBearerAuth,
   ApiConsumes,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
@@ -72,10 +73,23 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Event by id' })
+  @ApiQuery({
+    name: 'embedImages',
+    required: false,
+    description:
+      'Inclui logo e capa em base64 (data.logoBase64/data.coverBase64). ' +
+      'Só para geração de PDF: deixa a resposta ~1,5s mais lenta.',
+  })
   @ApiConsumes('multipart/form-data')
   @Get(':id')
-  findOne(@Param('id') id: string, @Req() req: any) {
-    return this.eventService.findOne(id, req.user?.userId);
+  findOne(
+    @Param('id') id: string,
+    @Query('embedImages') embedImages: string,
+    @Req() req: any,
+  ) {
+    return this.eventService.findOne(id, req.user?.userId, {
+      embedImages: embedImages === 'true' || embedImages === '1',
+    });
   }
 
   @ApiOperation({ summary: 'Edit event' })

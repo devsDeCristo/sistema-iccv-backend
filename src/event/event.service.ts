@@ -73,7 +73,18 @@ const DEFAULT_IMAGE_HOSTS = [
 
 const IMAGE_FETCH_TIMEOUT_MS = 8000;
 const IMAGE_FETCH_MAX_BYTES = 8 * 1024 * 1024;
-const IMAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+/**
+ * TTL longo de propósito: a chave do cache carrega o `updateAt` do evento
+ * (ver `imageCacheKey`), então uma troca de logo/capa gera chave nova e
+ * invalida sozinha — inclusive nas outras réplicas, que não veem o `update`.
+ */
+const IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Falha transitória (timeout, DNS, conexão derrubada) não pode virar entrada
+ * de 24h, mas também não pode ficar sem cache: cada request repetiria um fetch
+ * que custa ~1,5s. Meio termo curto.
+ */
+const IMAGE_CACHE_ERROR_TTL_MS = 30 * 1000;
 const IMAGE_CACHE_MAX_ENTRIES = 50;
 
 @Injectable()
@@ -765,40 +776,67 @@ export class EventService {
     }
   }
 
-  private getCachedImage(url: string): string | null | undefined {
-    const cached = this.imageCache.get(url);
+  /**
+   * A URL do Storage é estável (o upload sempre grava no mesmo path), então ela
+   * sozinha não distingue a logo nova da antiga. O `updateAt` do evento entra na
+   * chave para que qualquer edição invalide a imagem em todas as réplicas — o
+   * cache é de processo, e só a réplica que atendeu o PUT saberia apagá-lo.
+   */
+  private imageCacheKey(url: string, version?: string): string {
+    return version ? `${url}#${version}` : url;
+  }
+
+  private getCachedImage(key: string): string | null | undefined {
+    const cached = this.imageCache.get(key);
 
     if (!cached) return undefined;
 
     if (cached.expiresAt <= Date.now()) {
-      this.imageCache.delete(url);
+      this.imageCache.delete(key);
       return undefined;
     }
 
     return cached.value;
   }
 
-  private setCachedImage(url: string, value: string | null) {
+  private setCachedImage(
+    key: string,
+    value: string | null,
+    ttlMs: number = IMAGE_CACHE_TTL_MS,
+  ) {
     if (this.imageCache.size >= IMAGE_CACHE_MAX_ENTRIES) {
       const oldestKey = this.imageCache.keys().next().value;
       if (oldestKey) this.imageCache.delete(oldestKey);
     }
 
-    this.imageCache.set(url, {
+    this.imageCache.set(key, {
       value,
-      expiresAt: Date.now() + IMAGE_CACHE_TTL_MS,
+      expiresAt: Date.now() + ttlMs,
     });
   }
 
-  private async getLogoImgFromUrl(logoUrl?: string): Promise<string | null> {
+  /**
+   * Baixa a imagem e devolve como data URI. Custa ~1,5s por imagem em cache
+   * frio: o endpoint `?alt=media` do Firebase Storage tem TTFB de ~1,1s mesmo
+   * para arquivos de poucos KB. Por isso só é chamado sob demanda — ver
+   * `findOne`.
+   *
+   * @param version identificador da versão da imagem para a chave do cache.
+   */
+  private async getLogoImgFromUrl(
+    logoUrl?: string,
+    version?: string,
+  ): Promise<string | null> {
     if (!logoUrl) return null;
 
-    const cached = this.getCachedImage(logoUrl);
+    const cacheKey = this.imageCacheKey(logoUrl, version);
+
+    const cached = this.getCachedImage(cacheKey);
     if (cached !== undefined) return cached;
 
     if (!this.isFetchableImageUrl(logoUrl)) {
       this.logger.warn(`URL de imagem bloqueada: ${logoUrl}`);
-      this.setCachedImage(logoUrl, null);
+      this.setCachedImage(cacheKey, null);
       return null;
     }
 
@@ -812,21 +850,21 @@ export class EventService {
       const response = await fetch(logoUrl, { signal: controller.signal });
 
       if (!response.ok) {
-        this.setCachedImage(logoUrl, null);
+        this.setCachedImage(cacheKey, null);
         return null;
       }
 
       // um redirect não pode levar o download para fora dos hosts autorizados
       if (response.url && !this.isFetchableImageUrl(response.url)) {
         this.logger.warn(`Redirect de imagem bloqueado: ${response.url}`);
-        this.setCachedImage(logoUrl, null);
+        this.setCachedImage(cacheKey, null);
         return null;
       }
 
       const contentType = response.headers.get('content-type') ?? 'image/png';
 
       if (!contentType.toLowerCase().startsWith('image/')) {
-        this.setCachedImage(logoUrl, null);
+        this.setCachedImage(cacheKey, null);
         return null;
       }
 
@@ -836,38 +874,73 @@ export class EventService {
         this.logger.warn(
           `Imagem acima do limite (${buffer.byteLength} bytes): ${logoUrl}`,
         );
-        this.setCachedImage(logoUrl, null);
+        this.setCachedImage(cacheKey, null);
         return null;
       }
 
       const dataUri = `data:${contentType};base64,${buffer.toString('base64')}`;
-      this.setCachedImage(logoUrl, dataUri);
+      this.setCachedImage(cacheKey, dataUri);
 
       return dataUri;
-    } catch {
+    } catch (error) {
+      // sem cachear aqui, todo erro de rede vira um fetch novo (e lento) por
+      // request; TTL curto porque a causa costuma ser transitória
+      this.logger.warn(
+        `Falha ao baixar imagem ${logoUrl}: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      this.setCachedImage(cacheKey, null, IMAGE_CACHE_ERROR_TTL_MS);
+
       return null;
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  private async handlerReturnEvent(event: EventWithGroupRole) {
-    const eventData = (event.data ?? {}) as Record<string, any>;
+  /** Logo e capa como data URI, baixadas em paralelo. Ver `handlerReturnEvent`. */
+  private async buildEmbeddedImages(
+    event: EventWithGroupRole,
+    eventData: Record<string, any>,
+  ) {
     const logoUrl =
       typeof eventData.logoUrl === 'string' ? eventData.logoUrl : undefined;
     const coverUrl =
       typeof eventData.coverUrl === 'string' ? eventData.coverUrl : undefined;
+
+    // versão da imagem no cache: muda a cada edição do evento
+    const version = event.updateAt?.getTime().toString();
+
     const [logoBase64, coverBase64] = await Promise.all([
-      this.getLogoImgFromUrl(logoUrl),
-      this.getLogoImgFromUrl(coverUrl),
+      this.getLogoImgFromUrl(logoUrl, version),
+      this.getLogoImgFromUrl(coverUrl, version),
     ]);
+
+    return { logoBase64, coverBase64 };
+  }
+
+  /**
+   * @param embedImages baixa logo e capa e devolve em `data.logoBase64` /
+   * `data.coverBase64`. Só o gerador de PDF precisa disso (o `@react-pdf` não
+   * busca imagem remota), e cada imagem custa ~1,5s em cache frio — então o
+   * padrão é não embutir e as chaves nem aparecem na resposta. A UI usa
+   * `data.logoUrl` / `data.coverUrl`, que o navegador carrega e cacheia sozinho.
+   */
+  private async handlerReturnEvent(
+    event: EventWithGroupRole,
+    embedImages = false,
+  ) {
+    const eventData = (event.data ?? {}) as Record<string, any>;
+
+    const base64Data = embedImages
+      ? await this.buildEmbeddedImages(event, eventData)
+      : {};
 
     return {
       ...event,
       data: {
         ...eventData,
-        logoBase64,
-        coverBase64,
+        ...base64Data,
       },
       groupRoles: event.groupRoles.map((group) => ({
         ...group,
@@ -1246,8 +1319,15 @@ export class EventService {
 
   /**
    * @param requesterId usuário autenticado que abriu o evento. Ver `findAll`.
+   * @param options.embedImages inclui logo e capa em base64 na resposta. Custa
+   * ~1,5s por imagem em cache frio, então só quem gera PDF deve pedir — ver
+   * `handlerReturnEvent`.
    */
-  async findOne(id: string, requesterId?: string) {
+  async findOne(
+    id: string,
+    requesterId?: string,
+    options: { embedImages?: boolean } = {},
+  ) {
     try {
       const event = await this.prisma.event.findUnique({
         where: { id },
@@ -1277,7 +1357,7 @@ export class EventService {
         throw new NotFoundException('Event does not exist');
       }
 
-      return this.handlerReturnEvent(event);
+      return this.handlerReturnEvent(event, options.embedImages ?? false);
     } catch (error) {
       throw error;
     }
@@ -1349,10 +1429,6 @@ export class EventService {
 
     if (coverResult) coverUrl = coverResult.url;
     if (logoResult) logoUrl = logoResult.url;
-
-    // a URL do storage é estável: invalida o cache para não servir a imagem antiga
-    if (coverResult) this.imageCache.delete(coverResult.url);
-    if (logoResult) this.imageCache.delete(logoResult.url);
 
     if (updateEvent.logoFile) {
       const blackBuffer = await sharp(updateEvent.logoFile.buffer)
