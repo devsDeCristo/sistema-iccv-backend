@@ -481,7 +481,10 @@ export class PaymentService {
           ...(typeof payment.payload === 'object' && payment.payload !== null
             ? payment.payload
             : {}),
-          comprovanteFileUrl: url,
+          // Só sobrescreve quando veio arquivo novo: `comprovanteFileUrl:
+          // undefined` some na serialização do Json e apagaria o comprovante
+          // já enviado em qualquer edição posterior (o reembolso, por ex.).
+          ...(url && { comprovanteFileUrl: url }),
         },
       },
     });
