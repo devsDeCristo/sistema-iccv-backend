@@ -18,6 +18,12 @@ import { PagbankService } from 'src/gateways/pagbank/pagbank.service';
 import { randomUUID } from 'crypto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
+const ACCEPTED_RECEIPT_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'application/pdf',
+];
+
 @Injectable()
 export class PaymentService {
   constructor(
@@ -453,7 +459,17 @@ export class PaymentService {
     }
     const eventId = payment.eventUserRole?.eventOnUsers?.event?.id;
     let url: string | undefined;
+    let fileType: string | undefined;
     if (payload.receiptFile) {
+      // O front filtra, mas o `accept` do input não é garantia nenhuma — já
+      // chegou aqui .txt de drag-and-drop do app Fotos, que virou comprovante
+      // "enviado" e não abre em lugar nenhum.
+      if (!ACCEPTED_RECEIPT_MIME_TYPES.includes(payload.receiptFile.mimetype)) {
+        throw new BadRequestException(
+          'O comprovante precisa ser PNG, JPG ou PDF',
+        );
+      }
+      fileType = payload.receiptFile.mimetype;
       url = (
         await uploadImageFirebase(
           payload.receiptFile,
@@ -484,7 +500,9 @@ export class PaymentService {
           // Só sobrescreve quando veio arquivo novo: `comprovanteFileUrl:
           // undefined` some na serialização do Json e apagaria o comprovante
           // já enviado em qualquer edição posterior (o reembolso, por ex.).
-          ...(url && { comprovanteFileUrl: url }),
+          // o tipo fica salvo para o front saber renderizar sem chutar: a url
+          // gerada no upload não tem extensão
+          ...(url && { comprovanteFileUrl: url, comprovanteFileType: fileType }),
         },
       },
     });
