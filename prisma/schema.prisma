@@ -313,15 +313,31 @@ model Checkin {
 }
 
 model Log {
-  id        String   @id @default(uuid())
-  model     String // nome da tabela (ex: User, Order, Map)
-  action    String // create | update | delete
-  entityId  String? // id do registro afetado
-  before    Json? // estado anterior
-  after     Json? // estado posterior
-  userId    String? // se quiser relacionar ao usuário
+  id       String  @id @default(uuid())
+  model    String // nome da tabela (ex: User, Order, Map)
+  action   String // create | update | delete
+  entityId String? // id do registro afetado
+  before   Json? // estado anterior
+  after    Json? // estado posterior
+  userId   String? // quem executou a ação
+
+  /// Amarra as várias escritas de uma mesma requisição. Uma ação do painel
+  /// costuma tocar em três ou quatro tabelas, e sem isto a tela de atividades
+  /// mostraria cada uma como um evento separado.
+  requestId String?
+
+  /// Quem a ação atingiu, extraído do snapshot na hora da gravação. É lista
+  /// porque um `deleteMany` derruba o vínculo de várias pessoas de uma vez.
+  /// Sem esta coluna o filtro por usuário da tela de atividades teria que
+  /// abrir o JSON de todas as linhas a cada consulta.
+  targetUserIds String[]
+
   createdAt DateTime @default(now())
 
+  @@index([createdAt(sort: Desc)])
+  @@index([requestId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([targetUserIds(ops: ArrayOps)], type: Gin)
   @@map("logs")
 }
 

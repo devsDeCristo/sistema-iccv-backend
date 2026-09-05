@@ -72,7 +72,7 @@ export class UserDTO {
   @ApiProperty({
     example: 5,
     description:
-      'Permissão - 1: Super Admin, 2: Admin, 3: Financeiro, 5: Usuário',
+      'Permissão - -1: Dev, 1: Super Admin, 2: Admin, 3: Financeiro, 5: Usuário',
     enum: ASSIGNABLE_ROLES,
   })
   @IsInt()

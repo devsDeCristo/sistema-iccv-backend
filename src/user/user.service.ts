@@ -11,6 +11,7 @@ import { UserDTO } from './dto/user.dto';
 import {
   ADMIN_ROLES,
   ASSIGNABLE_ROLES,
+  isDevRole,
   Role,
   isAdminRole,
 } from 'src/auth/roles';
@@ -129,7 +130,39 @@ export class UserService {
   //   return event;
   // }
 
-  async setProfilePhoto(id: string, photoUrl: string): Promise<UserDTO> {
+  /**
+   * A conta dev só é alterada por outro dev. Rebaixar, trocar dados pessoais ou
+   * mexer na foto são todos caminhos para tomar a conta ou para se passar por
+   * ela, então a checagem é do alvo, não do campo.
+   */
+  private assertDevAccountIsUntouchable(
+    targetRole?: number | null,
+    requesterRole?: number | null,
+  ) {
+    if (isDevRole(targetRole) && !isDevRole(requesterRole)) {
+      throw new ForbiddenException(
+        'Somente o perfil Dev pode alterar uma conta Dev',
+      );
+    }
+  }
+
+  async setProfilePhoto(
+    id: string,
+    photoUrl: string,
+    requesterId?: string,
+  ): Promise<UserDTO> {
+    if (requesterId) {
+      const [target, requester] = await Promise.all([
+        this.prisma.user.findUnique({ where: { id }, select: { role: true } }),
+        this.prisma.user.findUnique({
+          where: { id: requesterId },
+          select: { role: true },
+        }),
+      ]);
+
+      this.assertDevAccountIsUntouchable(target?.role, requester?.role);
+    }
+
     return this.prisma.user.update({
       where: { id },
       data: { profilePhotoUrl: photoUrl },
@@ -194,11 +227,18 @@ export class UserService {
       });
 
       const requesterIsAdmin = isAdminRole(requester?.role);
+      const requesterIsDev = isDevRole(requester?.role);
 
       // usuário comum só edita o próprio cadastro
       if (!requesterIsAdmin && requesterId !== id) {
         throw new ForbiddenException('Você só pode editar o seu cadastro');
       }
+
+      // Nenhum campo da conta dev, e não só o `role`: com o e-mail trocado, um
+      // super admin pediria a redefinição de senha pelo CPF do dev
+      // (POST /auth/password/request, que envia o código para o e-mail
+      // gravado) e assumiria a conta sem nunca tocar na permissão.
+      this.assertDevAccountIsUntouchable(userExists.role, requester?.role);
 
       // só admin altera permissão — para os demais o campo é ignorado,
       // já que o formulário de perfil devolve o usuário inteiro no payload
@@ -209,6 +249,12 @@ export class UserService {
         !ASSIGNABLE_ROLES.includes(data.role)
       ) {
         throw new BadRequestException('Permissão inválida');
+      } else if (data.role === Role.DEV && !requesterIsDev) {
+        // Promover alguém a dev também é privilégio de dev — senão qualquer
+        // admin criaria um dev e entraria pela porta que acabamos de trancar.
+        throw new ForbiddenException(
+          'Apenas o perfil Dev pode conceder o acesso Dev',
+        );
       }
     }
 

@@ -112,11 +112,12 @@ export class UserController {
   async setProfilePhoto(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ) {
     // reaproveita o util para não duplicar o cacheControl e o versionamento da URL
     const { url } = await uploadImageFirebase(file, file.originalname);
 
-    await this.userService.setProfilePhoto(id, url);
+    await this.userService.setProfilePhoto(id, url, req.user?.userId);
     return { message: 'Foto de perfil atualizada com sucesso' };
   }
 }

@@ -14,6 +14,7 @@ import { CronModule } from './cron/cron.module';
 import { CheckinModule } from './checkin/checkin.module';
 import { NewsModule } from './news/news.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { LogsModule } from './logs/logs.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestContextInterceptor } from './middleware/request-context.middleware';
 
@@ -33,6 +34,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     CheckinModule,
     NewsModule,
     WhatsappModule,
+    LogsModule,
   ],
   controllers: [AuthController],
   providers: [
