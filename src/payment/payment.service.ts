@@ -1,11 +1,14 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
+import { SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
 import {
   CheckoutStatus,
   PaymentMethod,
@@ -32,6 +35,25 @@ export class PaymentService {
   ) {}
 
   private readonly logger = new Logger(PaymentService.name);
+
+  /**
+   * Extrato de pagamento é de quem pagou. Fora ele, só o painel — e o
+   * `EventTenantGuard` já garantiu que o evento é da igreja de quem pergunta.
+   */
+  async assertCanSeePayments(requesterId: string, targetUserId: string) {
+    if (requesterId === targetUserId) return;
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) {
+      throw new ForbiddenException(
+        'Você só pode ver os seus próprios pagamentos',
+      );
+    }
+  }
 
   private extrairDddENumero(telefone: string) {
     // Remove tudo que não for número
@@ -248,18 +270,20 @@ export class PaymentService {
 
       const { ddd, numero } = this.extrairDddENumero(user.cellphone);
       const dateExpiration = new Date(Date.now() + 1 * 60 * 60 * 1000); //1h
+      const backendUrl = process.env.URL_BACKEND?.replace(/\/$/, '');
+      const frontendUrl = process.env.URL_FRONTEND?.replace(/\/$/, '');
       const payload: CreatePagbankCheckoutDto = {
         reference_id: randomUUID(),
         soft_descriptor: 'Igreja de cristo',
         expiration_date: dateExpiration.toISOString(),
         payment_notification_urls: [
-          `${process.env.URL_BACKEND}/webhooks/pagbank/payments`,
+          `${backendUrl}/webhooks/pagbank/payments`,
         ],
         notification_urls: [
-          `${process.env.URL_BACKEND}/webhooks/pagbank/checkouts`,
+          `${backendUrl}/webhooks/pagbank/checkouts`,
         ],
-        redirect_url: `${process.env.URL_FRONTEND}/events/${eventId}`,
-        return_url: `${process.env.URL_FRONTEND}/events/${eventId}`,
+        redirect_url: `${frontendUrl}/events/${eventId}`,
+        return_url: `${frontendUrl}/events/${eventId}`,
         customer_modifiable: false,
         customer: {
           name: user.fullName,
@@ -281,7 +305,7 @@ export class PaymentService {
           { type: 'CREDIT_CARD' },
           { type: 'DEBIT_CARD' },
           { type: 'BOLETO' },
-          // { type: 'PIX' },
+          { type: 'PIX' },
         ],
       };
 
@@ -634,9 +658,26 @@ export class PaymentService {
       },
     });
   }
-  async findUserEventsWithRoles(userId: string) {
+  /**
+   * @param requesterId quem pediu o extrato. O admin de uma igreja não pode
+   * ver o que a pessoa deve nas outras: sem este recorte bastava o id de um
+   * inscrito para ler a vida financeira dele no sistema inteiro.
+   */
+  async findUserEventsWithRoles(userId: string, requesterId?: string) {
+    const requester = requesterId
+      ? await this.prisma.user.findUnique({
+          where: { id: requesterId },
+          select: SELECT_TENANT,
+        })
+      : null;
+
+    // a própria pessoa vê tudo o que é dela; o painel vê só as igrejas dele
+    const churchIds =
+      requesterId === userId ? null : tenantChurchIds(requester);
+
     const events = await this.prisma.event.findMany({
       where: {
+        ...(churchIds ? { churchId: { in: churchIds } } : {}),
         OR: [
           {
             users: {

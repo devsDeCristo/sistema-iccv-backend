@@ -22,6 +22,13 @@ export const SUPER_ADMIN_ROLES = [Role.DEV, Role.SUPER_ADMIN];
 export const ADMIN_ROLES = [...SUPER_ADMIN_ROLES, Role.ADMIN];
 
 /**
+ * Perfis que moram em `UserChurchRole` — os que valem por igreja. O super admin
+ * atravessa todas e o usuário comum não pertence a nenhuma, então nenhum dos
+ * dois aparece aqui.
+ */
+export const CHURCH_ROLES = [Role.ADMIN, Role.FINANCE];
+
+/**
  * Perfis que entram no painel administrativo.
  * O financeiro entra, mas só enxerga inscritos e pagamentos dos eventos.
  */

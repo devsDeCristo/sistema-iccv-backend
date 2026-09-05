@@ -13,8 +13,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    // `role` é só uma pista vinda do token (pode estar defasada por até 24h).
-    // A autorização de verdade é feita pelo RolesGuard, que lê o perfil do banco.
+    // `role` é só uma pista vinda do token (pode estar defasada por até 24h — o
+    // vínculo pode ter mudado depois do login). A autorização de verdade lê o
+    // banco: o perfil no RolesGuard e as igrejas em `src/auth/tenant.ts`.
+    // Nenhum recorte de igreja deve ser decidido a partir daqui.
     return {
       userId: payload.sub,
       username: payload.username,

@@ -71,6 +71,18 @@ export class NewsDto {
 
   @ApiProperty({
     description:
+      'Restringe o mural a quem está neste evento (inscrito ou na lista de ' +
+      'espera). Vazio = aviso geral, visível para todo mundo.',
+    required: false,
+  })
+  @IsOptional()
+  // vem do multipart: "" é o "todos" do formulário
+  @Transform(({ value }) => (value === '' ? null : value))
+  @IsString()
+  eventId?: string | null;
+
+  @ApiProperty({
+    description:
       'Grupos de inscrição que recebem esta notícia no WhatsApp — a mensagem ' +
       'vai para o grupo apontado pelo link de cada um.',
     required: false,

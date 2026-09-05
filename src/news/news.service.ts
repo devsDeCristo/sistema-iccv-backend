@@ -1,5 +1,17 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventStatus, PrismaService } from '../prisma';
+import {
+  SELECT_TENANT,
+  assertChurchAccess,
+  churchIdsComPerfil,
+  tenantChurchIds,
+} from 'src/auth/tenant';
+import { Role } from 'src/auth/roles';
 import {
   resolveImageExtension,
   uploadImageFirebase,
@@ -72,6 +84,8 @@ const CAMPOS_DO_FEED = {
   publishedAt: true,
   createdAt: true,
   author: { select: { fullName: true } },
+  // evento do anúncio restrito: o mural mostra de qual ele fala
+  event: { select: { id: true, name: true } },
 };
 
 @Injectable()
@@ -89,9 +103,12 @@ export class NewsService {
    * Ordena por `publishedAt` com `createdAt` como desempate — notícia publicada
    * e reeditada não pula para o topo por causa da edição.
    */
-  async findPublished(take?: number) {
+  async findPublished(take?: number, requesterId?: string) {
     return this.prisma.news.findMany({
-      where: { isPublished: true },
+      where: {
+        isPublished: true,
+        ...this.filtroDoFeed(requesterId),
+      },
       select: CAMPOS_DO_FEED,
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: take && take > 0 ? take : undefined,
@@ -99,8 +116,12 @@ export class NewsService {
   }
 
   /** Lista do admin: inclui rascunho, ordenada pela última mexida. */
-  async findAll() {
+  async findAll(requesterId?: string) {
+    const requester = requesterId ? await this.getRequester(requesterId) : null;
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
+
     return this.prisma.news.findMany({
+      where: churchIds ? { churchId: { in: churchIds } } : {},
       select: {
         ...CAMPOS_DO_FEED,
         isPublished: true,
@@ -132,6 +153,12 @@ export class NewsService {
       ? resolveImageExtension(data.imageFile)
       : null;
 
+    const autor = authorId ? await this.getRequester(authorId) : null;
+    const eventId = await this.resolvePublico(autor, data.eventId);
+    await this.assertDestinosDaIgreja(autor, data.groupRoleIds);
+
+    const igrejaDaNoticia = await this.igrejaDaPublicacao(autor, eventId);
+
     const noticia = await this.prisma.news.create({
       data: {
         title: data.title.trim(),
@@ -140,6 +167,11 @@ export class NewsService {
         isPublished: data.isPublished,
         publishedAt: data.isPublished ? new Date() : null,
         authorId: authorId ?? null,
+        // quem publicou; o mural não filtra por isso. Quem administra mais de
+        // uma igreja publica pela igreja do evento escolhido, e sem evento
+        // escolhido pela primeira delas — o aviso é dela.
+        churchId: igrejaDaNoticia,
+        eventId,
       },
     });
 
@@ -165,9 +197,17 @@ export class NewsService {
     return salva;
   }
 
-  async update(id: string, data: NewsDto) {
+  async update(id: string, data: NewsDto, requesterId?: string) {
     const atual = await this.prisma.news.findUnique({ where: { id } });
     if (!atual) throw new NotFoundException('Notícia não encontrada');
+
+    const requester = await this.assertNoticiaDaIgreja(atual, requesterId);
+    // campo ausente é "não mexi no público"; vazio é "volta a valer para todos"
+    const eventId =
+      data.eventId === undefined
+        ? atual.eventId
+        : await this.resolvePublico(requester, data.eventId);
+    await this.assertDestinosDaIgreja(requester, data.groupRoleIds);
 
     const extensao = data.imageFile
       ? resolveImageExtension(data.imageFile)
@@ -191,6 +231,7 @@ export class NewsService {
         summary: data.summary?.trim() || null,
         content: data.content,
         isPublished: data.isPublished,
+        eventId,
         imageUrl,
         // a data de publicação é a da primeira vez: republicar depois de virar
         // rascunho não muda a ordem do feed
@@ -212,12 +253,14 @@ export class NewsService {
     return atualizada;
   }
 
-  async remove(id: string) {
+  async remove(id: string, requesterId?: string) {
     const atual = await this.prisma.news.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
     if (!atual) throw new NotFoundException('Notícia não encontrada');
+
+    await this.assertNoticiaDaIgreja(atual, requesterId);
 
     await this.prisma.news.delete({ where: { id } });
   }
@@ -228,12 +271,14 @@ export class NewsService {
    * imagem que a notícia tem agora. É o que o admin espera de um botão de
    * reenviar — corrigiu a notícia, clicou, o grupo recebe a versão certa.
    */
-  async resendToWhatsapp(id: string) {
+  async resendToWhatsapp(id: string, requesterId?: string) {
     const noticia = await this.prisma.news.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, churchId: true },
     });
     if (!noticia) throw new NotFoundException('Notícia não encontrada');
+
+    await this.assertNoticiaDaIgreja(noticia, requesterId);
 
     return this.disparaNoWhatsapp(id, true);
   }
@@ -358,11 +403,17 @@ export class NewsService {
    * (ativos ou em teste). Evento encerrado não aparece — não há por que avisar
    * quem já passou.
    */
-  async findWhatsappGroups() {
+  async findWhatsappGroups(requesterId?: string) {
+    const requester = requesterId ? await this.getRequester(requesterId) : null;
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
+
     const grupos = await this.prisma.groupRoles.findMany({
       where: {
         NOT: { link: null },
-        event: { status: { in: EVENTOS_QUE_RECEBEM } },
+        event: {
+          status: { in: EVENTOS_QUE_RECEBEM },
+          ...(churchIds ? { churchId: { in: churchIds } } : {}),
+        },
       },
       select: {
         id: true,
@@ -414,6 +465,133 @@ export class NewsService {
     return mensagem.length > limite
       ? `${mensagem.slice(0, limite).trimEnd()}…`
       : mensagem;
+  }
+
+  /**
+   * Quem vê o anúncio no mural.
+   *
+   * O padrão é todo mundo — inclusive quem ainda não se inscreveu em nada, e
+   * sem olhar a igreja que publicou. O recorte só existe quando o admin
+   * escolheu um evento: aí a notícia fica para quem está nele, inscrito ou na
+   * lista de espera.
+   */
+  private filtroDoFeed(requesterId?: string) {
+    if (!requesterId) return { eventId: null };
+
+    return {
+      OR: [
+        { eventId: null },
+        { event: { users: { some: { userId: requesterId } } } },
+        { event: { waitlist: { some: { userId: requesterId } } } },
+      ],
+    };
+  }
+
+  /**
+   * Igreja que assina a notícia — quem vai poder editá-la e reenviá-la depois.
+   *
+   * Com um vínculo só não há dúvida. Com mais de um, a igreja do evento
+   * escolhido resolve; sem evento, fica com a primeira igreja da pessoa, que é
+   * a única resposta possível sem inventar uma pergunta a mais no formulário.
+   * Do super admin sai nula: aviso do sistema, sem dono.
+   */
+  private async igrejaDaPublicacao(
+    autor: { role?: number | null; churchRoles?: any[] | null } | null,
+    eventId: string | null,
+  ): Promise<string | null> {
+    const minhas = churchIdsComPerfil(autor, [Role.ADMIN]);
+    if (!minhas.length) return null;
+
+    if (eventId) {
+      const evento = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { churchId: true },
+      });
+
+      if (evento && minhas.includes(evento.churchId)) return evento.churchId;
+    }
+
+    return minhas[0];
+  }
+
+  private async getRequester(requesterId: string) {
+    return this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: SELECT_TENANT,
+    });
+  }
+
+  /** Notícia de outra igreja não se edita, nem se apaga, nem se reenvia. */
+  private async assertNoticiaDaIgreja(
+    noticia: { churchId: string | null },
+    requesterId?: string,
+  ) {
+    if (!requesterId) return null;
+
+    const requester = await this.getRequester(requesterId);
+
+    assertChurchAccess(requester, noticia.churchId, {
+      roles: [Role.ADMIN],
+      message: 'Esta notícia é de uma igreja que você não administra',
+    });
+
+    return requester;
+  }
+
+  /**
+   * Público do anúncio: `null` (o padrão) é para todo mundo, um evento
+   * restringe o mural a quem está nele.
+   *
+   * O evento tem que ser da igreja de quem publica — do contrário um admin
+   * escreveria no mural do evento da igreja vizinha.
+   */
+  private async resolvePublico(
+    requester: { role?: number | null; churchId?: string | null } | null,
+    eventId?: string | null,
+  ) {
+    if (!eventId) return null;
+
+    const evento = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { churchId: true },
+    });
+
+    if (!evento) {
+      throw new NotFoundException('Evento não encontrado');
+    }
+
+    assertChurchAccess(requester, evento.churchId, {
+      roles: [Role.ADMIN],
+      message: 'Você não administra a igreja deste evento',
+    });
+
+    return eventId;
+  }
+
+  /**
+   * Os grupos de WhatsApp vêm do formulário como ids: sem conferir a igreja de
+   * cada um, um admin marcaria o grupo de um evento da igreja vizinha e a
+   * mensagem sairia lá.
+   */
+  private async assertDestinosDaIgreja(
+    requester: { role?: number | null; churchId?: string | null } | null,
+    groupRoleIds?: string[],
+  ) {
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
+    if (!churchIds || !groupRoleIds?.length) return;
+
+    const permitidos = await this.prisma.groupRoles.count({
+      where: {
+        id: { in: groupRoleIds },
+        event: { churchId: { in: churchIds } },
+      },
+    });
+
+    if (permitidos !== new Set(groupRoleIds).size) {
+      throw new BadRequestException(
+        'Há grupos de eventos de outra igreja na lista de destinos',
+      );
+    }
   }
 
   /**

@@ -43,8 +43,14 @@ export class NewsController {
    */
   @Get()
   @ApiOperation({ summary: 'Notícias publicadas' })
-  findPublished(@Query('take') take?: string) {
-    return this.newsService.findPublished(Number(take) || undefined);
+  findPublished(
+    @Req() req: { user?: { userId?: string } },
+    @Query('take') take?: string,
+  ) {
+    return this.newsService.findPublished(
+      Number(take) || undefined,
+      req.user?.userId,
+    );
   }
 
   /**
@@ -57,8 +63,8 @@ export class NewsController {
   @Get('admin')
   @Roles(...ADMIN_ROLES)
   @ApiOperation({ summary: 'Todas as notícias, inclusive rascunhos' })
-  findAll() {
-    return this.newsService.findAll();
+  findAll(@Req() req: { user?: { userId?: string } }) {
+    return this.newsService.findAll(req.user?.userId);
   }
 
   /**
@@ -68,8 +74,8 @@ export class NewsController {
   @Get('whatsapp-groups')
   @Roles(...ADMIN_ROLES)
   @ApiOperation({ summary: 'Grupos disponíveis para disparo' })
-  findWhatsappGroups() {
-    return this.newsService.findWhatsappGroups();
+  findWhatsappGroups(@Req() req: { user?: { userId?: string } }) {
+    return this.newsService.findWhatsappGroups(req.user?.userId);
   }
 
   @Post()
@@ -94,12 +100,13 @@ export class NewsController {
   @ApiOperation({ summary: 'Editar notícia' })
   update(
     @Param('id') id: string,
+    @Req() req: { user?: { userId?: string } },
     @UploadedFiles() files: { imageFile?: Express.Multer.File[] },
     @Body() newsDto: NewsDto,
   ) {
     newsDto.imageFile = files?.imageFile?.[0];
 
-    return this.newsService.update(id, newsDto);
+    return this.newsService.update(id, newsDto, req.user?.userId);
   }
 
   /**
@@ -112,15 +119,18 @@ export class NewsController {
   @Roles(...ADMIN_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reenviar a notícia nos grupos dos eventos' })
-  resendToWhatsapp(@Param('id') id: string) {
-    return this.newsService.resendToWhatsapp(id);
+  resendToWhatsapp(
+    @Param('id') id: string,
+    @Req() req: { user?: { userId?: string } },
+  ) {
+    return this.newsService.resendToWhatsapp(id, req.user?.userId);
   }
 
   @Delete(':id')
   @Roles(...ADMIN_ROLES)
   @HttpCode(204)
   @ApiOperation({ summary: 'Excluir notícia' })
-  remove(@Param('id') id: string) {
-    return this.newsService.remove(id);
+  remove(@Param('id') id: string, @Req() req: { user?: { userId?: string } }) {
+    return this.newsService.remove(id, req.user?.userId);
   }
 }
