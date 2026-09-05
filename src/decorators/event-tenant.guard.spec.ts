@@ -155,10 +155,44 @@ describe('EventTenantGuard', () => {
   });
 
   it('libera a ação do admin sobre a própria inscrição em outra igreja', async () => {
-    // área do usuário: ali ele é um inscrito como outro qualquer
+    // área do usuário: rota sem `@Roles`, onde ele é um inscrito como outro
+    // qualquer e se inscreve em evento de qualquer igreja
+    const rotaDoUsuario = guardComRoles();
+
+    await expect(
+      rotaDoUsuario.canActivate(
+        contexto('admin-a', { idEvent: 'evento-b', idUser: 'admin-a' }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('mantém o recorte na rota de painel, mesmo o alvo sendo ele mesmo', async () => {
+    /**
+     * O atalho de auto-atendimento não vale onde a rota pede perfil de painel.
+     * Sem esta linha o admin da igreja A usava, sobre a própria inscrição,
+     * endpoints de painel da igreja B — apagá-la com os pagamentos junto, ou
+     * trocar de grupo. Nem os inscritos de lá conseguem fazer isso.
+     */
     await expect(
       guard.canActivate(
         contexto('admin-a', { idEvent: 'evento-b', idUser: 'admin-a' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('deixa o admin agir sobre a própria inscrição na igreja dele', async () => {
+    // o recorte fecha a igreja de fora, não a própria
+    await expect(
+      guard.canActivate(
+        contexto('admin-a', { idEvent: 'evento-a', idUser: 'admin-a' }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('deixa o super admin agir sobre a própria inscrição em qualquer igreja', async () => {
+    await expect(
+      guard.canActivate(
+        contexto('super', { idEvent: 'evento-b', idUser: 'super' }),
       ),
     ).resolves.toBe(true);
   });
@@ -190,6 +224,8 @@ describe('EventTenantGuard', () => {
   });
 
   it('deixa passar rota sem evento nenhum na URL', async () => {
-    await expect(guard.canActivate(contexto('admin-a', {}))).resolves.toBe(true);
+    await expect(guard.canActivate(contexto('admin-a', {}))).resolves.toBe(
+      true,
+    );
   });
 });

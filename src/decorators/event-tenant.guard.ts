@@ -48,14 +48,23 @@ export class EventTenantGuard implements CanActivate {
       throw new UnauthorizedException('Usuário não encontrado');
     }
 
-    // rota sobre o próprio cadastro (inscrever-se, pagar a própria inscrição) é
-    // área do usuário: ali quem administra é um inscrito como outro qualquer e
-    // pode entrar em evento de qualquer igreja. O recorte vale quando ele mexe
-    // na inscrição de outra pessoa, que é trabalho de painel.
-    if (request.params?.idUser && request.params.idUser === userId) return true;
+    const exigidos = this.perfisExigidos(context);
 
-    const perfisAceitos = this.perfisDaRota(context);
-    const churchIds = tenantChurchIds(requester, perfisAceitos);
+    /**
+     * Rota sobre o próprio cadastro (inscrever-se, pagar a própria inscrição) é
+     * área do usuário: ali quem administra é um inscrito como outro qualquer e
+     * pode entrar em evento de qualquer igreja. O recorte vale quando ele mexe
+     * na inscrição de outra pessoa, que é trabalho de painel.
+     *
+     * A ausência de `@Roles` é o que separa uma coisa da outra. Sem essa
+     * condição o atalho valia também nas rotas de painel que carregam
+     * `:idUser`, e o admin de uma igreja alcançava, sobre a própria inscrição,
+     * endpoints de painel de outra: apagá-la junto com os pagamentos, ou trocar
+     * de grupo — coisas que nem os inscritos de lá conseguem fazer.
+     */
+    if (!exigidos.length && request.params?.idUser === userId) return true;
+
+    const churchIds = tenantChurchIds(requester, this.perfisDaRota(exigidos));
 
     // super admin e usuário comum não são recortados
     if (churchIds === null) return true;
@@ -86,17 +95,24 @@ export class EventTenantGuard implements CanActivate {
   }
 
   /**
+   * Perfis declarados no `@Roles` da rota. Lista vazia significa rota sem
+   * `@Roles` — aberta a qualquer autenticado, e portanto área do usuário.
+   */
+  private perfisExigidos(context: ExecutionContext): Role[] {
+    return (
+      this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? []
+    );
+  }
+
+  /**
    * Perfis de igreja que a rota exige. `@Roles(...ADMIN_ROLES)` vira "admin
    * naquela igreja"; `@Roles(...ADMIN_AREA_ROLES)` aceita o financeiro também.
    * Rota sem `@Roles` (a inscrição, por exemplo) aceita qualquer vínculo.
    */
-  private perfisDaRota(context: ExecutionContext): number[] {
-    const exigidos =
-      this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? [];
-
+  private perfisDaRota(exigidos: Role[]): number[] {
     const deIgreja = exigidos.filter((perfil) =>
       CHURCH_ROLES.includes(perfil as Role),
     );
