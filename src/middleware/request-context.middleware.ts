@@ -8,7 +8,7 @@ import {
 import { PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
-import { requestContext } from 'src/context/request.context';
+import { OrigemDaEscrita, requestContext } from 'src/context/request.context';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -25,9 +25,10 @@ export class RequestContextInterceptor implements NestInterceptor {
     const requestId = randomUUID();
 
     const operation = this.operacaoDe(context, req);
+    const source = this.origemDe(operation, userId);
 
     return new Observable((subscriber) => {
-      requestContext.run({ userId, requestId, operation }, () => {
+      requestContext.run({ userId, requestId, operation, source }, () => {
         next.handle().subscribe({
           next: (value) => subscriber.next(value),
           error: (err) => subscriber.error(err),
@@ -69,5 +70,22 @@ export class RequestContextInterceptor implements NestInterceptor {
         .replace(/(.)\/$/, '$1') || '/';
 
     return `${req.method} ${caminho}`;
+  }
+
+  /**
+   * Quem está por trás da requisição.
+   *
+   * O retorno do PagBank chega por HTTP como qualquer outra chamada, mas não é
+   * ninguém agindo — e no log do dinheiro essa diferença é a primeira coisa
+   * que se pergunta. Requisição autenticada é pessoa; rota pública (a
+   * inscrição que gera a cobrança) é o sistema.
+   */
+  private origemDe(
+    operation: string | undefined,
+    userId: string | undefined,
+  ): OrigemDaEscrita {
+    if (operation?.includes(' /webhooks/')) return 'WEBHOOK';
+
+    return userId ? 'PANEL' : 'SYSTEM';
   }
 }

@@ -14,12 +14,14 @@ import {
   PaymentMethod,
   PaymentReceived,
   PaymentStatus,
+  Prisma,
 } from '@prisma/client';
 import { CreatePaymentCheckoutDto } from './dto/create-payment-checkout.dto';
 import { CreatePagbankCheckoutDto } from 'src/gateways/pagbank/dto/create-checkout.dto';
 import { PagbankService } from 'src/gateways/pagbank/pagbank.service';
 import { randomUUID } from 'crypto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
+import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
 const ACCEPTED_RECEIPT_MIME_TYPES = [
   'image/png',
@@ -276,12 +278,8 @@ export class PaymentService {
         reference_id: randomUUID(),
         soft_descriptor: 'Igreja de cristo',
         expiration_date: dateExpiration.toISOString(),
-        payment_notification_urls: [
-          `${backendUrl}/webhooks/pagbank/payments`,
-        ],
-        notification_urls: [
-          `${backendUrl}/webhooks/pagbank/checkouts`,
-        ],
+        payment_notification_urls: [`${backendUrl}/webhooks/pagbank/payments`],
+        notification_urls: [`${backendUrl}/webhooks/pagbank/checkouts`],
         redirect_url: `${frontendUrl}/events/${eventId}`,
         return_url: `${frontendUrl}/events/${eventId}`,
         customer_modifiable: false,
@@ -526,7 +524,10 @@ export class PaymentService {
           // já enviado em qualquer edição posterior (o reembolso, por ex.).
           // o tipo fica salvo para o front saber renderizar sem chutar: a url
           // gerada no upload não tem extensão
-          ...(url && { comprovanteFileUrl: url, comprovanteFileType: fileType }),
+          ...(url && {
+            comprovanteFileUrl: url,
+            comprovanteFileType: fileType,
+          }),
         },
       },
     });
@@ -561,6 +562,81 @@ export class PaymentService {
     //   },
     //   data: { status: CheckoutStatus.INACTIVE },
     // });
+  }
+
+  /**
+   * A trilha do dinheiro do evento: quem mexeu, no quê e vindo de onde.
+   *
+   * Vem de `payment_logs`, e não de `logs`: lá cada mudança é um retrato em
+   * JSON de uma tabela: aqui a linha já traz valor, status e origem, que é o
+   * que se lê para entender por que uma cobrança está como está.
+   *
+   * Os nomes são resolvidos numa consulta só para a página inteira. O da
+   * pessoa vem do cadastro atual; quando o cadastro sumiu, a linha continua
+   * valendo pelo valor e pelo status — o histórico do dinheiro não depende de
+   * o inscrito ainda existir.
+   */
+  async findPaymentLogs(eventId: string, query: ListPaymentLogsDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 50;
+
+    const where: Prisma.PaymentLogWhereInput = {
+      eventId,
+      ...(query.paymentId && { paymentId: query.paymentId }),
+      ...(query.userId && { userId: query.userId }),
+      ...(query.source && { source: query.source }),
+      ...((query.from || query.to) && {
+        createdAt: {
+          ...(query.from && { gte: new Date(query.from) }),
+          ...(query.to && { lte: new Date(query.to) }),
+        },
+      }),
+    };
+
+    const [linhas, total] = await Promise.all([
+      this.prisma.paymentLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.paymentLog.count({ where }),
+    ]);
+
+    const pessoas = await this.nomesDasPessoas(linhas);
+
+    return {
+      items: linhas.map((linha) => ({
+        ...linha,
+        /** quem deve; nulo quando a linha não é sobre uma pessoa */
+        userName: linha.userId ? pessoas.get(linha.userId) ?? null : null,
+        /** quem executou; nulo no cron e no retorno do gateway */
+        actorName: linha.actorId ? pessoas.get(linha.actorId) ?? null : null,
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /** Uma consulta para a página inteira: quem deve e quem executou, juntos */
+  private async nomesDasPessoas(
+    linhas: { userId: string | null; actorId: string | null }[],
+  ) {
+    const ids = new Set<string>();
+    linhas.forEach((linha) => {
+      if (linha.userId) ids.add(linha.userId);
+      if (linha.actorId) ids.add(linha.actorId);
+    });
+
+    if (ids.size === 0) return new Map<string, string>();
+
+    const pessoas = await this.prisma.user.findMany({
+      where: { id: { in: [...ids] } },
+      select: { id: true, fullName: true },
+    });
+
+    return new Map(pessoas.map((p) => [p.id, p.fullName.trim()]));
   }
 
   async findPaymentsByEvent(eventId?: string, userId?: string) {

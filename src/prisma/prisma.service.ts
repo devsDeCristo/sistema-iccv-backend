@@ -4,8 +4,8 @@ import {
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { requestContext } from 'src/context/request.context';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { OrigemDaEscrita, requestContext } from 'src/context/request.context';
 import { randomUUID } from 'crypto';
 
 /**
@@ -100,6 +100,89 @@ function nothingChanged(before: any, after: any): boolean {
 }
 
 /**
+ * As tabelas do dinheiro.
+ *
+ * `Discounts` entra junto com as duas de pagamento: mexer no percentual muda o
+ * que cada pessoa deve, mesmo sem tocar em cobrança nenhuma.
+ */
+const FINANCE_MODELS = new Set(['Payment', 'PaymentCheckout', 'Discounts']);
+
+/** Carimbo de tempo muda em todo save e não é notícia financeira */
+const FINANCE_NOISE = new Set(['createdAt', 'updatedAt', 'updateAt']);
+
+/**
+ * Campos grandes demais para copiar linha a linha. O retorno do PagBank tem
+ * quilobytes de JSON, e o que interessa ao financeiro é que ele mudou.
+ */
+const BULKY_FIELDS = new Set(['payload']);
+
+/** Marca no lugar do conteúdo volumoso */
+const BULKY_MARKER = '(atualizado)';
+
+/**
+ * O que mudou numa cobrança, campo a campo.
+ *
+ * Guarda só a diferença, e não os dois retratos inteiros como faz `Log`: a
+ * pergunta aqui é "o que aconteceu com este dinheiro", e a resposta cabe em
+ * três ou quatro campos.
+ */
+function financeChanges(before: any, after: any) {
+  const campos = new Set([
+    ...Object.keys(before ?? {}),
+    ...Object.keys(after ?? {}),
+  ]);
+
+  const diff: Record<string, Prisma.InputJsonValue> = {};
+
+  for (const campo of campos) {
+    if (FINANCE_NOISE.has(campo)) continue;
+
+    const antes = before?.[campo] ?? null;
+    const depois = after?.[campo] ?? null;
+
+    if (JSON.stringify(antes) === JSON.stringify(depois)) continue;
+
+    diff[campo] = BULKY_FIELDS.has(campo)
+      ? {
+          before: antes === null ? null : BULKY_MARKER,
+          after: depois === null ? null : BULKY_MARKER,
+        }
+      : { before: antes, after: depois };
+  }
+
+  return Object.keys(diff).length > 0 ? diff : null;
+}
+
+/** Um retrato vira lista: operação em lote grava array, a simples grava objeto */
+function comoLista(snapshot: any): any[] {
+  if (snapshot === null || snapshot === undefined) return [];
+  return Array.isArray(snapshot) ? snapshot : [snapshot];
+}
+
+/**
+ * Casa o antes com o depois registro a registro, pelo id.
+ *
+ * É o que faz um `updateMany` de doze cobranças virar doze linhas de log em
+ * vez de uma: "o que aconteceu com a minha" é a pergunta que se faz aqui, e
+ * uma linha por comando não a responde.
+ */
+function parearPorId(before: any, after: any) {
+  const pares = new Map<string, { antes?: any; depois?: any }>();
+
+  comoLista(before).forEach((row, indice) => {
+    const chave = row?.id ?? `#${indice}`;
+    pares.set(chave, { ...pares.get(chave), antes: row });
+  });
+
+  comoLista(after).forEach((row, indice) => {
+    const chave = row?.id ?? `#${indice}`;
+    pares.set(chave, { ...pares.get(chave), depois: row });
+  });
+
+  return [...pares.values()];
+}
+
+/**
  * O "depois" de um `updateMany`, calculado em vez de relido.
  *
  * Dentro de uma transação interativa a releitura roda **por fora** dela e
@@ -170,8 +253,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       // uma linha por tentativa de entrada. Auditar o registro geraria uma
       // linha de log por login — e o log de auditoria existe para contar o que
       // as pessoas mudam, não quantas vezes elas entram.
+      //
+      // `PaymentLog` sai porque é log também: auditar a trilha do dinheiro
+      // geraria uma linha genérica por linha financeira, em dobro.
       if (
         params.model === 'Log' ||
+        params.model === 'PaymentLog' ||
         params.model === 'WhatsappAuth' ||
         params.model === 'LoginAttempt'
       ) {
@@ -351,7 +438,117 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
         } entity=${entityId}`,
       );
 
+      if (FINANCE_MODELS.has(model)) {
+        await this.registrarNoFinanceiro({
+          model,
+          action: params.action,
+          before,
+          after,
+          userId,
+          operation,
+          requestId,
+          source: store?.source ?? 'SYSTEM',
+        });
+      }
+
       return result;
+    });
+  }
+
+  /**
+   * Grava a trilha do dinheiro: uma linha por cobrança afetada.
+   *
+   * Roda ao lado da auditoria genérica e não no lugar dela — `Log` continua
+   * guardando o retrato inteiro para quem investiga o sistema. Aqui a linha é
+   * do financeiro: valor, status e de onde veio a mudança, consultáveis por
+   * evento e por pessoa sem abrir JSON.
+   *
+   * Nunca derruba a operação: um erro ao registrar a trilha não pode desfazer
+   * um pagamento que já entrou. Vira aviso no log da aplicação.
+   */
+  private async registrarNoFinanceiro(dados: {
+    model: string;
+    action: string;
+    before: any;
+    after: any;
+    userId: string | null;
+    operation: string | null;
+    requestId: string | null;
+    source: OrigemDaEscrita;
+  }) {
+    try {
+      const pares = parearPorId(dados.before, dados.after);
+      if (pares.length === 0) return;
+
+      const linhas: Prisma.PaymentLogCreateManyInput[] = pares.map(
+        ({ antes, depois }) => {
+          // o registro pelo lado que existir: numa remoção só há o "antes"
+          const alvo = depois ?? antes;
+
+          return {
+            paymentId:
+              dados.model === 'Payment'
+                ? alvo?.id ?? null
+                : dados.model === 'PaymentCheckout'
+                ? alvo?.paymentId ?? null
+                : null,
+            userId: dados.model === 'Payment' ? alvo?.userId ?? null : null,
+            eventId: dados.model === 'Payment' ? alvo?.eventId ?? null : null,
+            model: dados.model,
+            action: dados.action,
+            entityId: alvo?.id ?? null,
+            amountBefore: antes?.amount ?? null,
+            amountAfter: depois?.amount ?? null,
+            statusBefore: antes?.status ?? null,
+            statusAfter: depois?.status ?? null,
+            source: dados.source,
+            actorId: dados.userId,
+            operation: dados.operation,
+            requestId: dados.requestId,
+            changes: financeChanges(antes, depois) ?? Prisma.DbNull,
+          };
+        },
+      );
+
+      await this.completarDonoDaCobranca(linhas);
+
+      await this.paymentLog.createMany({ data: linhas });
+    } catch (erro: any) {
+      this.logger.warn(
+        `Não foi possível registrar a trilha financeira de ${dados.model}.${dados.action}: ${erro?.message}`,
+      );
+    }
+  }
+
+  /**
+   * Preenche quem deve e por qual evento nas linhas de checkout.
+   *
+   * O checkout só conhece a cobrança; quem consulta o log procura pelo evento.
+   * Uma consulta para o lote inteiro, e não uma por linha — a reconciliação
+   * mexe em dezenas de checkouts por rodada.
+   */
+  private async completarDonoDaCobranca(
+    linhas: Prisma.PaymentLogCreateManyInput[],
+  ) {
+    const pendentes = linhas.flatMap((linha) =>
+      linha.paymentId && !linha.userId && !linha.eventId
+        ? [{ linha, paymentId: linha.paymentId }]
+        : [],
+    );
+    if (pendentes.length === 0) return;
+
+    const cobrancas = await this.payment.findMany({
+      where: { id: { in: [...new Set(pendentes.map((p) => p.paymentId))] } },
+      select: { id: true, userId: true, eventId: true },
+    });
+
+    const porId = new Map(cobrancas.map((c) => [c.id, c]));
+
+    pendentes.forEach(({ linha, paymentId }) => {
+      const dona = porId.get(paymentId);
+      if (!dona) return;
+      linha.userId = dona.userId;
+      linha.eventId = dona.eventId;
     });
   }
 

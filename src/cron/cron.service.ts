@@ -1,20 +1,35 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { CheckoutStatus, PaymentStatus, PrismaClient } from '@prisma/client';
-import axios from 'axios';
+import { CheckoutStatus, PaymentStatus } from '@prisma/client';
 import { PagbankService } from 'src/gateways/pagbank/pagbank.service';
+import { PrismaService } from 'src/prisma';
+import { runAsJob } from 'src/context/request.context';
 
 @Injectable()
 export class CronService {
   private readonly logger = new Logger(CronService.name);
-  private prisma = new PrismaClient();
 
-  constructor(private readonly pagbankService: PagbankService) {}
+  /**
+   * O cliente do módulo, e não um `new PrismaClient()` próprio: o middleware
+   * de auditoria mora nele. Com o cliente solto, a reconciliação mudava status
+   * de pagamento sem deixar uma única linha de log — e é justamente ela que
+   * mexe no dinheiro sem ninguém pedir.
+   */
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pagbankService: PagbankService,
+  ) {}
 
   private PAGBANK_TOKEN = process.env.PAGBANK_TOKEN;
 
   @Cron(CronExpression.EVERY_3_HOURS)
-  async reconcilePayments() {
+  reconcilePayments() {
+    // dentro de um contexto próprio: é o que dá nome, id e origem CRON às
+    // escritas da rotina, separando-as de uma ação humana no log
+    return runAsJob('reconcilePayments', () => this.reconciliar());
+  }
+
+  private async reconciliar() {
     this.logger.log('⏳ Iniciando reconciliação de pagamentos...');
     // 1. Busca todos os pagamentos pendentes ou em analise no banco
     const pendentes = await this.prisma.payment.findMany({
@@ -124,13 +139,15 @@ export class CronService {
    * essas linhas fiquem paradas no banco depois de vencidas.
    */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
-  async purgeExpiredUserTokens() {
-    const { count } = await this.prisma.userToken.deleteMany({
-      where: { expiresAt: { lte: new Date() } },
-    });
+  purgeExpiredUserTokens() {
+    return runAsJob('purgeExpiredUserTokens', async () => {
+      const { count } = await this.prisma.userToken.deleteMany({
+        where: { expiresAt: { lte: new Date() } },
+      });
 
-    if (count > 0) {
-      this.logger.log(`🧹 ${count} token(s) vencido(s) removido(s)`);
-    }
+      if (count > 0) {
+        this.logger.log(`🧹 ${count} token(s) vencido(s) removido(s)`);
+      }
+    });
   }
 }

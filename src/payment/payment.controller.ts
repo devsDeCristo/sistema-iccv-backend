@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   Patch,
   Post,
   Put,
@@ -30,6 +31,7 @@ import {
   payloadCreatePaymentCheckoutDto,
 } from './dto/create-payment-checkout.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
+import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('payments')
@@ -70,6 +72,32 @@ export class PaymentController {
   }
 
   // ===============================
+  // Trilha do dinheiro do evento
+  // ===============================
+  /**
+   * Antes de `events/:idEvent/users/:idUser/payments` não faz diferença — os
+   * caminhos não se sobrepõem —, mas fica junto da listagem de pagamentos,
+   * que é a tela de onde se chega aqui.
+   *
+   * O recorte por igreja vem do `EventTenantGuard`: quem não administra a
+   * igreja do evento não passa, e o financeiro de uma igreja não enxerga o
+   * caixa da outra.
+   */
+  @ApiOperation({
+    summary: 'Histórico de alterações no dinheiro do evento',
+    description:
+      'Toda mudança em cobrança e checkout, inclusive as feitas pela reconciliação automática e pelo retorno do PagBank.',
+  })
+  @Roles(...ADMIN_AREA_ROLES)
+  @Get('events/:idEvent/payments/logs')
+  findLogsByEvent(
+    @Param('idEvent') eventId: string,
+    @Query() query: ListPaymentLogsDto,
+  ) {
+    return this.paymentService.findPaymentLogs(eventId, query);
+  }
+
+  // ===============================
   // Pagamentos por usuário no evento
   // ===============================
   @ApiOperation({ summary: 'Get payments by user in event' })
@@ -87,7 +115,10 @@ export class PaymentController {
   @Get('users/:idUser/payments')
   async findByUser(@Param('idUser') userId: string, @Req() req: any) {
     await this.paymentService.assertCanSeePayments(req.user?.userId, userId);
-    return this.paymentService.findUserEventsWithRoles(userId, req.user?.userId);
+    return this.paymentService.findUserEventsWithRoles(
+      userId,
+      req.user?.userId,
+    );
   }
 
   // ===============================

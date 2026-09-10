@@ -439,6 +439,82 @@ model Log {
   @@map("logs")
 }
 
+/// Trilha do dinheiro, separada de `Log` porque a pergunta é outra.
+///
+/// `Log` responde "quem mexeu no sistema" e guarda o registro inteiro em JSON.
+/// Aqui a pergunta é "o que aconteceu com esta cobrança", e a resposta precisa
+/// caber na linha: valor, status, e de onde veio a mudança. Uma consulta por
+/// evento ou por pessoa não pode depender de abrir JSON nem de um join que
+/// morre quando a inscrição é apagada.
+///
+/// Uma linha por cobrança afetada, e não por comando: o `updateMany` que a
+/// reconciliação dispara mexe em várias, e "o que aconteceu com a minha" é a
+/// pergunta que o financeiro faz.
+model PaymentLog {
+  id String @id @default(uuid())
+
+  /// A cobrança afetada. Sem relação declarada de propósito: apagar a cobrança
+  /// não pode levar o histórico junto — é justamente aí que ele importa.
+  paymentId String?
+
+  /// Quem deve e por qual evento, copiados na hora da gravação. O join com
+  /// `payments` deixa de existir quando a inscrição é cancelada, e é a consulta
+  /// por evento que o financeiro mais faz.
+  userId  String?
+  eventId String?
+
+  /// Tabela e operação do Prisma, para a origem técnica não se perder
+  model    String
+  action   String
+  entityId String?
+
+  /// O dinheiro antes e depois. Nulo quando a operação não mexeu no valor.
+  amountBefore Float?
+  amountAfter  Float?
+
+  /// Texto e não enum: `Payment` usa `PaymentStatus` e `PaymentCheckout` usa
+  /// `CheckoutStatus`, e a mesma coluna guarda os dois.
+  statusBefore String?
+  statusAfter  String?
+
+  /// De onde veio a mudança — a coluna que o `Log` genérico não tem e que aqui
+  /// é a primeira pergunta: foi alguém ou foi a máquina?
+  source PaymentLogSource
+
+  /// Quem executou. Nulo no cron e no retorno do PagBank: ali não há pessoa.
+  actorId String?
+
+  /// A rota, quando nasceu de uma requisição; o nome da rotina, quando é cron
+  operation String?
+
+  /// Amarra as escritas de uma mesma operação, igual em `Log`
+  requestId String?
+
+  /// O que mudou campo a campo, para o que não cabe nas colunas acima
+  changes Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([paymentId, createdAt(sort: Desc)])
+  @@index([eventId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("payment_logs")
+}
+
+/// De onde partiu a mudança no dinheiro.
+enum PaymentLogSource {
+  /// Uma pessoa identificada, agindo pela API
+  PANEL
+  /// Retorno do PagBank
+  WEBHOOK
+  /// Rotina automática — hoje, a reconciliação de pagamentos
+  CRON
+  /// Escrita sem pessoa identificada: a inscrição que gera a cobrança, e o
+  /// que roda fora de qualquer requisição
+  SYSTEM
+}
+
 enum TeamRole {
   MEMBER
   LEADER

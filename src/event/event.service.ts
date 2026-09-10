@@ -366,15 +366,26 @@ export class EventService {
           userId,
           eventId,
           roleRegistrationId: role.id,
-          payment: {
-            create: {
-              amount: role.price,
-              status:
-                role.price > 0 ? PaymentStatus.WAITING : PaymentStatus.PAID,
-              method: role.price > 0 ? PaymentMethod.OTHER : PaymentMethod.CASH,
-              receivedFrom: PaymentReceived.SYSTEM,
-            },
-          },
+        },
+      });
+
+      /**
+       * A cobrança nasce em comando próprio, e não aninhada na inscrição.
+       *
+       * O middleware do Prisma só enxerga a operação de cima: criada por
+       * dentro, ela nunca chegava ao log. Eram 661 cobranças no banco e zero
+       * registros de criação — o nascimento do débito, que é o começo da
+       * história do dinheiro, era o único momento invisível.
+       */
+      await tx.payment.create({
+        data: {
+          userId,
+          eventId,
+          roleRegistrationId: role.id,
+          amount: role.price,
+          status: role.price > 0 ? PaymentStatus.WAITING : PaymentStatus.PAID,
+          method: role.price > 0 ? PaymentMethod.OTHER : PaymentMethod.CASH,
+          receivedFrom: PaymentReceived.SYSTEM,
         },
       });
 
