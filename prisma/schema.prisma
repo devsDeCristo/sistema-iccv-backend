@@ -414,6 +414,15 @@ model Log {
   /// mostraria cada uma como um evento separado.
   requestId String?
 
+  /// O que a pessoa mandou o sistema fazer, no molde da rota:
+  /// `POST /events/:idEvent/users/:idUser`. Com os ids fora, duas inscrições
+  /// diferentes contam como a mesma operação — é o que dá nome ao grupo e
+  /// permite filtrar por "inscrições" em vez de por tabela.
+  ///
+  /// Nulo no histórico anterior a esta coluna e no que não nasce de uma
+  /// requisição HTTP; aí o nome volta a ser deduzido da tabela principal.
+  operation String?
+
   /// Quem a ação atingiu, extraído do snapshot na hora da gravação. É lista
   /// porque um `deleteMany` derruba o vínculo de várias pessoas de uma vez.
   /// Sem esta coluna o filtro por usuário da tela de atividades teria que
@@ -424,6 +433,7 @@ model Log {
 
   @@index([createdAt(sort: Desc)])
   @@index([requestId])
+  @@index([operation, createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
   @@index([targetUserIds(ops: ArrayOps)], type: Gin)
   @@map("logs")

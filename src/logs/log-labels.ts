@@ -80,3 +80,79 @@ export function actionLabel(action: string, hasChanges = true): string {
 export function modelLabel(model: string): string {
   return MODEL_LABELS[model] ?? model;
 }
+
+/**
+ * Nome da operação, pela rota que a executou.
+ *
+ * A tabela responde "o que mudou"; a rota responde "o que a pessoa mandou
+ * fazer" — e as duas coisas não são a mesma. Uma inscrição, um cancelamento e
+ * uma chamada da lista de espera escrevem nas mesmas duas tabelas, e até aqui
+ * as três chegavam à tela com o mesmo nome.
+ *
+ * A chave é o molde da rota, sem os ids: é o que faz duas inscrições contarem
+ * como a mesma operação. Rota fora do mapa cai no próprio caminho — some da
+ * lista de filtros, mas nunca vira uma linha sem nome.
+ */
+export const OPERATION_LABELS: Record<string, string> = {
+  // Cadastro
+  'POST /users': 'Cadastro de pessoa',
+  'PUT /users/:id': 'Edição de cadastro',
+  'POST /users/:id/profile-photo': 'Troca de foto do perfil',
+
+  // Senha
+  'POST /auth/password/forgot': 'Pedido de redefinição de senha',
+  'POST /auth/password/verify-code': 'Conferência do código de redefinição',
+  'POST /auth/password/reset': 'Redefinição de senha',
+
+  // Evento
+  'POST /events': 'Criação de evento',
+  'PUT /events/:id': 'Edição de evento',
+  'DELETE /events/:id': 'Exclusão de evento',
+
+  // Inscrição
+  'POST /events/:idEvent/users/:idUser': 'Inscrição no evento',
+  'PUT /events/:idEvent/users/:idUser': 'Alteração de inscrição',
+  'DELETE /events/:idEvent/users/:idUser/rule/:roleRegistrationId':
+    'Cancelamento de inscrição',
+  'DELETE /events/:idEvent/waitlist/users/:idUser/rule/:roleRegistrationId':
+    'Saída da lista de espera',
+  'PUT /events/:eventId/waitlist/move': 'Chamada da lista de espera',
+
+  // Dinheiro
+  'POST /events/:idEvent/users/:idUser/payments': 'Abertura de cobrança',
+  'PUT /payments/:paymentId': 'Baixa de pagamento',
+  'PATCH /payments/:paymentId/refund': 'Estorno de pagamento',
+  'POST /webhooks/pagbank/checkouts': 'Retorno do PagBank (cobrança)',
+  'POST /webhooks/pagbank/payments': 'Retorno do PagBank (pagamento)',
+
+  // Equipe e quarto
+  'POST /events/:idEvent/teams': 'Criação de equipe',
+  'PUT /events/:idEvent/teams/:idTeam': 'Montagem de equipe',
+  'DELETE /events/:idEvent/teams/:id': 'Exclusão de equipe',
+  'POST /events/:idEvent/bedrooms': 'Criação de quarto',
+  'PUT /events/:idEvent/bedrooms/:idBedrooms': 'Alocação em quarto',
+  'DELETE /events/:idEvent/bedrooms/:id': 'Exclusão de quarto',
+
+  // Check-in
+  'POST /events/:eventId/checkin/:userId/badge': 'Entrega de crachá',
+  'POST /events/:eventId/checkin/:userId/undo-badge': 'Estorno do crachá',
+  'POST /events/:eventId/checkin/call-next': 'Chamada do próximo da fila',
+  'POST /events/:eventId/checkin/:userId/call': 'Chamada para a foto',
+  'POST /events/:eventId/checkin/:userId/complete': 'Conclusão do check-in',
+  'POST /events/:eventId/checkin/:userId/undo': 'Volta de etapa do check-in',
+
+  // Igreja e notícia
+  'POST /churches': 'Criação de igreja',
+  'PUT /churches/:id': 'Edição de igreja',
+  'DELETE /churches/:id': 'Exclusão de igreja',
+  'POST /news': 'Publicação de notícia',
+  'PUT /news/:id': 'Edição de notícia',
+  'POST /news/:id/whatsapp': 'Reenvio de notícia no WhatsApp',
+  'DELETE /news/:id': 'Exclusão de notícia',
+};
+
+export function operationLabel(operation: string | null): string | null {
+  if (!operation) return null;
+
+  return OPERATION_LABELS[operation] ?? operation;
+}

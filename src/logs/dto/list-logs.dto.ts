@@ -1,6 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class ListLogsDto {
   @ApiPropertyOptional({
@@ -10,7 +17,9 @@ export class ListLogsDto {
   @IsDateString()
   from?: string;
 
-  @ApiPropertyOptional({ description: 'Fim do período. Ausente, vai até agora.' })
+  @ApiPropertyOptional({
+    description: 'Fim do período. Ausente, vai até agora.',
+  })
   @IsOptional()
   @IsDateString()
   to?: string;
@@ -32,6 +41,14 @@ export class ListLogsDto {
   @IsOptional()
   @IsString()
   action?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Operação executada, no molde da rota (ex.: POST /events/:idEvent/users/:idUser). O catálogo está em GET /logs/operations.',
+  })
+  @IsOptional()
+  @IsString()
+  operation?: string;
 
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()

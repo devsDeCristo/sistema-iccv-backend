@@ -23,6 +23,16 @@ export class LogsController {
     return this.logsService.list(query);
   }
 
+  /**
+   * Antes do `:id`: declarada depois, a rota de detalhe engoliria `operations`
+   * como se fosse um id.
+   */
+  @ApiOperation({ summary: 'Operações conhecidas, para o filtro da tela' })
+  @Get('operations')
+  operations() {
+    return this.logsService.operations();
+  }
+
   @ApiOperation({ summary: 'Detalhe de uma atividade, com o antes e o depois' })
   @Get(':id')
   findOne(@Param('id') id: string) {

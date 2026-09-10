@@ -8,6 +8,11 @@ export interface RequestContext {
    * que amarra essas linhas como um evento só na tela de atividades.
    */
   requestId?: string;
+  /**
+   * O que foi pedido, no molde da rota: `POST /events/:idEvent/users/:idUser`.
+   * O `requestId` diz que as escritas são da mesma ação; isto diz qual ação.
+   */
+  operation?: string;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();
@@ -22,4 +27,8 @@ export function getCurrentUserId(): string | undefined {
 
 export function getCurrentRequestId(): string | undefined {
   return getRequestContext().requestId;
+}
+
+export function getCurrentOperation(): string | undefined {
+  return getRequestContext().operation;
 }

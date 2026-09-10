@@ -100,6 +100,30 @@ function nothingChanged(before: any, after: any): boolean {
 }
 
 /**
+ * O "depois" de um `updateMany`, calculado em vez de relido.
+ *
+ * Dentro de uma transação interativa a releitura roda **por fora** dela e
+ * devolve o estado antigo: o log conclui que nada mudou e a escrita some da
+ * auditoria sem deixar rastro. O `updateMany` com campos de valor simples é
+ * previsível — é o "antes" com esses campos por cima —, então aqui a conta é
+ * exata.
+ *
+ * Devolve nulo quando o pedido traz operador (`{ increment: 1 }` e afins): aí
+ * o resultado depende do banco e chutá-lo seria gravar um "depois" inventado.
+ */
+function applyUpdateData(before: any, data: any): any[] | null {
+  if (!Array.isArray(before) || !data || typeof data !== 'object') return null;
+
+  const simples = Object.values(data).every(
+    (valor) =>
+      valor === null || valor instanceof Date || typeof valor !== 'object',
+  );
+  if (!simples) return null;
+
+  return before.map((row) => ({ ...row, ...data }));
+}
+
+/**
  * Quem a ação atingiu, para o filtro por usuário da tela de atividades. No
  * model `User` o alvo é o próprio registro; nos demais é o `userId` do
  * snapshot. Operações em lote gravam array, e aí cada item conta.
@@ -176,6 +200,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       const store = requestContext.getStore();
       const userId = store?.userId ?? null;
       const requestId = store?.requestId ?? null;
+      const operation = store?.operation ?? null;
 
       let before: any = null;
       let after: any = null;
@@ -239,9 +264,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       }
 
       if (params.action === 'update') {
-        after = await delegate.findUnique({
-          where: params.args.where,
-        });
+        // o próprio resultado, e não uma releitura: dentro de uma transação
+        // interativa a releitura roda por fora e devolve o estado anterior —
+        // o log dava "nada mudou" e a alteração sumia da auditoria. De quebra
+        // é uma consulta a menos por escrita.
+        after = result;
         entityId = after?.id ?? JSON.stringify(params.args.where);
       }
 
@@ -251,7 +278,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       }
 
       if (params.action === 'createMany') {
-        if (createdWheres.length > 0) {
+        if (params.runInTransaction) {
+          // a releitura de fora da transação não enxerga o que acabou de ser
+          // criado e devolvia lista vazia; o próprio pedido já traz os campos
+          // gravados, com os ids que o passo 2 injetou
+          after = params.args.data;
+        } else if (createdWheres.length > 0) {
           after = await delegate.findMany({
             where: {
               OR: createdWheres,
@@ -265,7 +297,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       if (params.action === 'updateMany') {
         const ids = before?.map((r: any) => r.id).filter(Boolean) ?? [];
 
-        if (ids.length > 0) {
+        const calculado = params.runInTransaction
+          ? applyUpdateData(before, params.args.data)
+          : null;
+
+        if (calculado) {
+          after = calculado;
+        } else if (ids.length > 0) {
           after = await delegate.findMany({
             where: { id: { in: ids } },
           });
@@ -302,6 +340,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
           after: redigido.after ?? undefined,
           userId,
           requestId,
+          operation,
           targetUserIds: extractTargetUserIds(model, entityId, before, after),
         },
       });

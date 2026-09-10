@@ -3,7 +3,13 @@ import { Log, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma';
 import { ListLogsDto } from './dto/list-logs.dto';
 import { buildChanges } from './log-diff';
-import { actionLabel, isMainModel, modelLabel } from './log-labels';
+import {
+  actionLabel,
+  isMainModel,
+  modelLabel,
+  OPERATION_LABELS,
+  operationLabel,
+} from './log-labels';
 
 type Person = { id: string; name: string; photoUrl: string | null };
 
@@ -96,6 +102,19 @@ export class LogsService {
     };
   }
 
+  /**
+   * O catálogo de operações, para o filtro da tela.
+   *
+   * Vem da API e não de uma cópia no front: a lista muda quando uma rota nasce
+   * ou muda de caminho, e duas listas mantidas à mão divergem na primeira vez
+   * que alguém esquecer de mexer nas duas.
+   */
+  operations() {
+    return Object.entries(OPERATION_LABELS)
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }
+
   async findOne(chave: string) {
     const rows = await this.prisma.$queryRaw<Log[]>`
       SELECT * FROM "logs" WHERE ${GROUP_KEY} = ${chave}
@@ -135,6 +154,13 @@ export class LogsService {
 
     const tabelas = new Set(entries.map((entry) => entry.model));
 
+    /**
+     * Todas as linhas do grupo vêm da mesma requisição, então a operação é uma
+     * só. O `find` existe para o histórico anterior à coluna, que tem a linha
+     * mas não tem a rota: ali o grupo continua se apresentando pela tabela.
+     */
+    const operation = rows.find((row) => row.operation)?.operation ?? null;
+
     return {
       id: chave,
       // a mais recente do grupo: é o instante em que a ação terminou
@@ -142,6 +168,10 @@ export class LogsService {
       actorName: principal.actorName,
       actorPhotoUrl: principal.actorPhotoUrl,
       targets: [...atingidos.values()],
+      /** a rota que executou a ação; nulo no histórico antigo */
+      operation,
+      /** o nome da ação, quando a rota é conhecida */
+      operationLabel: operationLabel(operation),
       action: principal.action,
       actionLabel: principal.actionLabel,
       model: principal.model,
@@ -194,6 +224,9 @@ export class LogsService {
     }
     if (query.action) {
       conditions.push(Prisma.sql`"action" = ${query.action}`);
+    }
+    if (query.operation) {
+      conditions.push(Prisma.sql`"operation" = ${query.operation}`);
     }
 
     // "Envolvido": o que a pessoa fez e o que fizeram com ela, num campo só.
@@ -268,16 +301,14 @@ export class LogsService {
    */
   private targetsOf(row: Log, people: Map<string, Person>): Person[] {
     const targets = targetsRaw(row).map(
-      (id): Person =>
-        people.get(id) ?? { id, name: '', photoUrl: null },
+      (id): Person => people.get(id) ?? { id, name: '', photoUrl: null },
     );
 
     const semNome = targets.filter((target) => !target.name);
     if (semNome.length > 0) {
       const snapshot = (row.after ?? row.before) as any;
       const first = Array.isArray(snapshot) ? snapshot[0] : snapshot;
-      const nomeNoSnapshot =
-        row.model === 'User' ? first?.fullName : undefined;
+      const nomeNoSnapshot = row.model === 'User' ? first?.fullName : undefined;
 
       semNome.forEach((target) => {
         target.name =
