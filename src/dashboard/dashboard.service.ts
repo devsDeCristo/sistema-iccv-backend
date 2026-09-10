@@ -767,9 +767,10 @@ export class DashboardService {
   /**
    * A tesouraria da igreja — a home de quem cuida do dinheiro.
    *
-   * O número que importa aqui não é quantos se inscreveram, e sim quanto falta
-   * entrar e **de quem**. Saber que há R$ 48 mil em aberto não faz ninguém
-   * agir; saber que são 151 pessoas, e quais, faz.
+   * O número que importa aqui não é quantos se inscreveram, e sim quanto
+   * falta entrar e de quantas pessoas: "R$ 48 mil em aberto" não dá o tamanho
+   * do trabalho; "151 pessoas para cobrar" dá. Os nomes ficam na listagem de
+   * pagamentos, que é onde se cobra — repeti-los aqui só adiantava oito.
    *
    * Uma limitação honesta: o sistema não registra despesa. `Payment` só
    * guarda entrada, então "saída" aqui é o que foi estornado — não há como
@@ -784,12 +785,12 @@ export class DashboardService {
     const ids = eventos.map((evento) => evento.id);
     if (!ids.length) {
       return {
-        debtors: { people: 0, charges: 0, amount: 0, top: [] },
+        debtors: { people: 0, charges: 0, amount: 0 },
         refunded: { count: 0, amount: 0 },
       };
     }
 
-    const [resumo, maiores, estornado] = await Promise.all([
+    const [resumo, estornado] = await Promise.all([
       this.prisma.$queryRaw<
         { pessoas: number; cobrancas: number; total: number }[]
       >`
@@ -799,33 +800,6 @@ export class DashboardService {
         FROM "payments"
         WHERE "status" = 'WAITING' AND "eventId" IN (${Prisma.join(ids)})
       `,
-      /**
-       * Os maiores devedores, do valor mais alto para o mais baixo e, no
-       * empate, do mais antigo. Uma cobrança de R$ 430 parada há 34 dias é
-       * outra conversa que uma de ontem.
-       */
-      this.prisma.payment.findMany({
-        where: { status: PaymentStatus.WAITING, eventId: { in: ids } },
-        orderBy: [{ amount: 'desc' }, { createdAt: 'asc' }],
-        take: 8,
-        select: {
-          amount: true,
-          createdAt: true,
-          eventId: true,
-          eventUserRole: {
-            select: {
-              eventOnUsers: {
-                select: {
-                  user: {
-                    select: { id: true, fullName: true, profilePhotoUrl: true },
-                  },
-                  event: { select: { id: true, name: true } },
-                },
-              },
-            },
-          },
-        },
-      }),
       this.prisma.payment.aggregate({
         where: { status: PaymentStatus.REFUNDED, eventId: { in: ids } },
         _count: { _all: true },
@@ -833,37 +807,11 @@ export class DashboardService {
       }),
     ]);
 
-    const hoje = new Date();
-
     return {
       debtors: {
         people: resumo[0]?.pessoas ?? 0,
         charges: resumo[0]?.cobrancas ?? 0,
         amount: resumo[0]?.total ?? 0,
-        top: maiores
-          .map((cobranca) => {
-            const vinculo = cobranca.eventUserRole?.eventOnUsers;
-            if (!vinculo) return null;
-
-            return {
-              userId: vinculo.user.id,
-              name: vinculo.user.fullName,
-              photoUrl: vinculo.user.profilePhotoUrl,
-              eventId: vinculo.event.id,
-              eventName: vinculo.event.name,
-              amount: cobranca.amount,
-              /** Dias desde que a cobrança foi criada */
-              days: Math.max(
-                0,
-                Math.floor(
-                  (hoje.getTime() - cobranca.createdAt.getTime()) / 86400000,
-                ),
-              ),
-            };
-          })
-          .filter(
-            (linha): linha is NonNullable<typeof linha> => linha !== null,
-          ),
       },
       /** Única "saída" que o sistema conhece: o sistema não registra despesa */
       refunded: {
