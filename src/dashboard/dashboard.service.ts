@@ -140,6 +140,14 @@ export class DashboardService {
     const insights = ehDev ? await this.indicadores() : null;
 
     /**
+     * O super admin não cuida do funcionamento: ele cuida do conjunto. O
+     * panorama responde as duas perguntas dele — como estão as igrejas e como
+     * está a base de pessoas.
+     */
+    const panorama =
+      perfil === Role.SUPER_ADMIN ? await this.panoramaDoSistema() : null;
+
+    /**
      * O cartão em foco é de quem tem um evento na mão.
      *
      * Super admin e dev não têm: o evento mais próximo do sistema é de uma
@@ -166,17 +174,20 @@ export class DashboardService {
       spotlight: emFoco,
       pending: this.pendencias([emFoco, ...outros], perfil, todasAsIgrejas),
       /**
-       * A home do dev é de operação: gráficos, igrejas e atividade. A lista de
-       * eventos abertos sai porque a de igrejas já mostra o evento em foco de
-       * cada uma, e quem acabou de se inscrever numa igreja é assunto de quem
-       * administra aquela igreja — não de quem cuida do sistema.
+       * Quem atravessa todas as igrejas não recebe os blocos de operação.
+       *
+       * A lista de eventos abertos sai porque a de igrejas já mostra o evento
+       * em foco de cada uma, e quem acabou de se inscrever numa igreja é
+       * assunto de quem administra aquela igreja. Super admin olha o conjunto
+       * — igrejas e pessoas —, e o dev, o funcionamento.
        *
        * `outros` continua sendo calculado acima: as pendências saem dele.
        */
-      otherEvents: ehDev ? null : outros,
-      recentRegistrations: ehDev ? null : recentRegistrations,
+      otherEvents: todasAsIgrejas ? null : outros,
+      recentRegistrations: todasAsIgrejas ? null : recentRegistrations,
       news,
       byChurch: todasAsIgrejas ? await this.igrejasDoSistema() : null,
+      panorama,
       insights,
     };
   }
@@ -515,9 +526,28 @@ export class DashboardService {
    */
   private async igrejasDoSistema() {
     const igrejas = await this.prisma.church.findMany({
-      select: { id: true, name: true, _count: { select: { users: true } } },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { users: true, events: true } },
+      },
       orderBy: { name: 'asc' },
     });
+
+    // inscritos por igreja: atravessa evento → inscrição, que o `groupBy` do
+    // client não faz
+    const inscritos = await this.prisma.$queryRaw<
+      { churchId: string; total: number }[]
+    >`
+      SELECT e."churchId", count(*)::int AS total
+      FROM "EventOnUsers" inscricao
+      JOIN "events" e ON e."id" = inscricao."eventId"
+      GROUP BY e."churchId"
+    `;
+
+    const inscritosPorIgreja = new Map(
+      inscritos.map((linha) => [linha.churchId, linha.total]),
+    );
 
     const abertos = await this.prisma.event.findMany({
       where: { status: { in: ABERTOS }, endDate: { gte: hoje() } },
@@ -546,6 +576,9 @@ export class DashboardService {
         name: igreja.name,
         /** Quem entra no painel dela — inscrito não pertence a igreja nenhuma */
         admins: igreja._count.users,
+        totalEvents: igreja._count.events,
+        /** Inscrições em eventos dela, somando toda a história */
+        registrations: inscritosPorIgreja.get(igreja.id) ?? 0,
         openEvents: abertos.filter((aberto) => aberto.church.id === igreja.id)
           .length,
         spotlight: evento
@@ -629,6 +662,137 @@ export class DashboardService {
       })),
       drafts,
     };
+  }
+
+  /**
+   * O panorama do super admin: as igrejas e a base de pessoas.
+   *
+   * Ele não opera evento nem cuida do funcionamento — o painel dele responde
+   * "quantas igrejas existem e como elas vão" e "quem são as pessoas do
+   * sistema". Por isso nada aqui é de um evento em particular.
+   */
+  private async panoramaDoSistema() {
+    const inicioDoMes = new Date();
+    inicioDoMes.setDate(1);
+    inicioDoMes.setHours(0, 0, 0, 0);
+
+    const primeiroMes = new Date(inicioDoMes);
+    primeiroMes.setMonth(primeiroMes.getMonth() - 11);
+
+    const trintaDias = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      total,
+      novosNoMes,
+      porMes,
+      porPerfil,
+      semInscricao,
+      noPainel,
+      acoesPorIgreja,
+    ] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.user.count({ where: { createdAt: { gte: inicioDoMes } } }),
+      this.prisma.$queryRaw<{ mes: string; total: number }[]>`
+          SELECT to_char(date_trunc('month', ${emHoraLocal(
+            'createdAt',
+          )}), 'YYYY-MM') AS mes,
+                 count(*)::int AS total
+          FROM "users"
+          WHERE "createdAt" >= ${primeiroMes}
+          GROUP BY 1 ORDER BY 1
+        `,
+      this.prisma.user.groupBy({
+        by: ['role'],
+        _count: { _all: true },
+      }),
+      /**
+       * Cadastrou-se e nunca entrou em evento nenhum.
+       *
+       * É o número que diz se o cadastro está virando participação. Uma base
+       * que cresce sem que ninguém se inscreva não é crescimento — e é
+       * exatamente o tipo de coisa que só aparece olhando o sistema inteiro.
+       */
+      this.prisma.user.count({
+        where: { events: { none: {} }, waitlists: { none: {} } },
+      }),
+      /**
+       * Gente com vínculo de igreja — e não "gente que entra no painel".
+       *
+       * Super admin e dev não têm vínculo nenhum de propósito: eles
+       * atravessam todas as igrejas. Somar os dois grupos num número só daria
+       * um total que não bate com nenhuma das duas perguntas.
+       *
+       * Conta pessoas, não vínculos: quem é admin de duas igrejas é uma.
+       */
+      this.prisma.user.count({ where: { churchRoles: { some: {} } } }),
+      /**
+       * Ações do time de cada igreja: escritas feitas por quem tem vínculo
+       * com ela — admin e financeiro.
+       *
+       * A igreja sai do **autor**, e não da coisa mexida. Tentar pelo alvo
+       * exigiria resolver o caminho até o evento model por model (equipe →
+       * evento, quarto → evento, cobrança → pagamento → evento…), e mesmo
+       * assim ficaria pela metade: `User` não pertence a igreja nenhuma.
+       *
+       * Quem não tem vínculo fica de fora, e isso é o esperado: super admin
+       * e dev atravessam todas as igrejas, então as ações deles não são de
+       * nenhuma. Rota pública (inscrição, redefinição de senha) idem.
+       */
+      this.prisma.$queryRaw<{ churchId: string; total: number }[]>`
+          SELECT v."churchId", count(*)::int AS total
+          FROM "logs" l
+          JOIN "user_church_roles" v ON v."userId" = l."userId"
+          WHERE l."createdAt" >= ${trintaDias}
+          GROUP BY v."churchId"
+        `,
+    ]);
+
+    return {
+      /** Ações registradas por igreja nos últimos 30 dias */
+      churchActivity: acoesPorIgreja,
+      activityWindowDays: 30,
+      users: {
+        total,
+        newThisMonth: novosNoMes,
+        byMonth: this.preencherMeses(porMes, primeiroMes),
+        byRole: porPerfil
+          .map((linha) => ({ role: linha.role, total: linha._count._all }))
+          .sort((a, b) => b.total - a.total),
+        /** Cadastrou-se e nunca entrou em evento nenhum, nem na lista de espera */
+        neverRegistered: semInscricao,
+        /** Vinculadas a alguma igreja. Super admin e dev ficam fora: não têm vínculo */
+        withChurchLink: noPainel,
+      },
+    };
+  }
+
+  /**
+   * Doze meses seguidos, incluindo os vazios.
+   *
+   * Mês sem movimento não some da série: o buraco é o dado. Sem preencher,
+   * doze meses com três movimentados viram três colunas coladas e a linha do
+   * tempo mente sobre o intervalo entre elas.
+   */
+  private preencherMeses(
+    linhas: { mes: string; total: number }[],
+    primeiroMes: Date,
+  ) {
+    const meses: { key: string; total: number }[] = [];
+
+    for (let i = 0; i < 12; i += 1) {
+      const data = new Date(primeiroMes);
+      data.setMonth(data.getMonth() + i);
+      const key = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(
+        2,
+        '0',
+      )}`;
+      meses.push({
+        key,
+        total: linhas.find((linha) => linha.mes === key)?.total ?? 0,
+      });
+    }
+
+    return meses;
   }
 
   /**
@@ -719,24 +883,7 @@ export class DashboardService {
         `,
       ]);
 
-    /**
-     * Mês sem inscrição nenhuma não some da série: o buraco é o dado. Sem
-     * preencher, doze meses com três movimentados viram três colunas coladas e
-     * a linha do tempo mente sobre o intervalo entre elas.
-     */
-    const meses: { key: string; total: number }[] = [];
-    for (let i = 0; i < 12; i += 1) {
-      const data = new Date(primeiroMes);
-      data.setMonth(data.getMonth() + i);
-      const key = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(
-        2,
-        '0',
-      )}`;
-      meses.push({
-        key,
-        total: porMes.find((linha) => linha.mes === key)?.total ?? 0,
-      });
-    }
+    const meses = this.preencherMeses(porMes, primeiroMes);
 
     const dias: { key: string; total: number }[] = [];
     for (let i = 0; i < 14; i += 1) {
