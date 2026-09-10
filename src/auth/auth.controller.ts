@@ -28,10 +28,16 @@ export class AuthController {
       },
     },
   })
-  async login(@Body() loginDto: { document: string; password: string }) {
+  async login(
+    @Body() loginDto: { document: string; password: string },
+    @Req() req: any,
+  ) {
+    // de onde veio a tentativa: é o que separa "alguém errou a senha duas
+    // vezes" de "uma máquina está varrendo documentos"
     const user = await this.authService.validateUser(
       loginDto.document,
       loginDto.password,
+      { ip: req.ip, userAgent: req.headers?.['user-agent'] },
     );
     this.logger.debug(
       `User ${user.id} - ${user.fullName} logged in successfully`,

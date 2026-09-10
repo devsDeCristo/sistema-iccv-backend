@@ -84,6 +84,7 @@ model User {
   checkins           Checkin[]
   news               News[]
   tokens             UserToken[]
+  loginAttempts      LoginAttempt[]
 
   @@map("users")
 }
@@ -120,6 +121,45 @@ model UserToken {
   @@index([userId, type])
   @@index([expiresAt])
   @@map("user_tokens")
+}
+
+/// Tentativa de entrada no sistema: uma linha por `POST /auth/login`, dando
+/// certo ou não.
+///
+/// Antes desta tabela o sistema não guardava **nada** sobre acesso — nem
+/// último login, nem tentativa. Dava para saber quem alterou um quarto, mas
+/// não quem entrou, e menos ainda quantas vezes alguém errou a senha na porta.
+///
+/// Guarda o documento digitado mesmo quando ele não é de ninguém: é
+/// exatamente isso que mostra alguém varrendo CPFs. Senha nunca é gravada, em
+/// claro nem em hash.
+model LoginAttempt {
+  id        String              @id @default(uuid())
+  /// O documento digitado, como veio. Fica preenchido também nas falhas.
+  document  String
+  /// Nulo quando o documento não bate com ninguém
+  userId    String?
+  user      User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  success   Boolean
+  /// Só nas falhas: separa senha errada de documento inexistente
+  reason    LoginFailureReason?
+  ip        String?
+  userAgent String?
+  createdAt DateTime            @default(now())
+
+  /// Atende o gráfico do painel, que varre uma janela de dias
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("login_attempts")
+}
+
+/// Por que a entrada foi recusada. Separar as duas importa: senha errada em
+/// massa numa conta é ataque a ela; documento inexistente em massa é varredura.
+enum LoginFailureReason {
+  /// Não existe usuário com o documento digitado
+  USER_NOT_FOUND
+  /// O usuário existe e a senha não confere
+  WRONG_PASSWORD
 }
 
 model Event {

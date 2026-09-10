@@ -16,6 +16,7 @@ import { NewsModule } from './news/news.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { LogsModule } from './logs/logs.module';
 import { ChurchModule } from './church/church.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestContextInterceptor } from './middleware/request-context.middleware';
 
@@ -37,6 +38,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     WhatsappModule,
     LogsModule,
     ChurchModule,
+    DashboardModule,
   ],
   controllers: [AuthController],
   providers: [

@@ -141,7 +141,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       // `WhatsappAuth` fica de fora junto com `Log`: são as chaves do Signal,
       // reescritas a cada mensagem trocada. Auditar isso encheria a tabela de
       // log e, pior, copiaria material criptográfico para dentro dela.
-      if (params.model === 'Log' || params.model === 'WhatsappAuth') {
+      //
+      // `LoginAttempt` sai pelo mesmo motivo do volume: ela **é** um registro,
+      // uma linha por tentativa de entrada. Auditar o registro geraria uma
+      // linha de log por login — e o log de auditoria existe para contar o que
+      // as pessoas mudam, não quantas vezes elas entram.
+      if (
+        params.model === 'Log' ||
+        params.model === 'WhatsappAuth' ||
+        params.model === 'LoginAttempt'
+      ) {
         return next(params);
       }
 
