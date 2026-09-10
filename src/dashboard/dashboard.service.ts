@@ -127,13 +127,20 @@ export class DashboardService {
     const veMural = !todasAsIgrejas && perfil !== Role.FINANCE;
 
     const ehDev = perfil === Role.DEV;
+    const ehFinanceiro = perfil === Role.FINANCE;
 
     const [abertos, churches, recentRegistrations, news] = await Promise.all([
       this.eventosAbertos(doRecorte),
       todasAsIgrejas ? null : this.minhasIgrejas(requester, churchIds),
-      this.inscricoesRecentes(doRecorte),
+      /**
+       * O financeiro não recebe a lista de quem entrou: para ele o que importa
+       * não é quem se inscreveu, e sim quem ainda não pagou.
+       */
+      ehFinanceiro ? null : this.inscricoesRecentes(doRecorte),
       veMural ? this.mural(churchIds) : null,
     ]);
+
+    const treasury = ehFinanceiro ? await this.tesouraria(doRecorte) : null;
 
     // os indicadores do sistema são do dev: é o perfil que cuida da operação
     // inteira, e é o único que já enxerga o registro de atividades
@@ -148,31 +155,40 @@ export class DashboardService {
       perfil === Role.SUPER_ADMIN ? await this.panoramaDoSistema() : null;
 
     /**
-     * O cartão em foco é de quem tem um evento na mão.
+     * Os eventos da igreja, todos do mesmo tamanho.
      *
-     * Super admin e dev não têm: o evento mais próximo do sistema é de uma
-     * igreja que não é deles, e dar a ele a tela inteira é destacar o que por
-     * acaso começa primeiro. Para esses dois todos os eventos abertos entram na
-     * lista, lado a lado e do mesmo tamanho.
+     * Nenhum ganha um cartão gigante: com um evento só ele ocupava meia tela
+     * para dizer o que cabe numa linha, e com dois o segundo virava nota de
+     * rodapé do primeiro.
      *
-     * Para admin e financeiro, sem nenhum evento aberto a tela não fica vazia:
-     * o último que encerrou é exatamente o que eles querem ver no dia seguinte
-     * ao evento — quantos vieram, quanto entrou, quem ficou na espera.
+     * Sem nenhum aberto a lista não fica vazia: o último que encerrou é
+     * exatamente o que o admin quer ver no dia seguinte ao evento — quantos
+     * vieram, quanto entrou, quem ficou na espera.
      */
-    const emFoco = todasAsIgrejas
-      ? null
+    /**
+     * Que eventos entram na home muda com quem pergunta.
+     *
+     * Para quem administra, o eixo é o que está em cartaz: o status diz o que
+     * ele marcou como ativo, e é isso que ele está tocando.
+     *
+     * Para o financeiro, status e data não significam nada. Cobrança de um
+     * cursilho de fevereiro, desligado há meses, continua sendo dinheiro a
+     * receber — e é justamente essa que ninguém lembra de cobrar. O eixo dele
+     * é ter saldo em aberto.
+     */
+    const daIgreja = ehFinanceiro
+      ? await this.eventosComSaldo(doRecorte)
       : abertos.length
-      ? abertos[0]
-      : await this.ultimoEncerrado(doRecorte);
-
-    const outros = abertos.filter((evento) => evento.id !== emFoco?.id);
+      ? abertos
+      : [await this.ultimoEncerrado(doRecorte)].filter(
+          (evento): evento is (typeof abertos)[number] => evento !== null,
+        );
 
     return {
       scope: todasAsIgrejas ? 'system' : 'church',
       role: perfil,
       churches,
-      spotlight: emFoco,
-      pending: this.pendencias([emFoco, ...outros], perfil, todasAsIgrejas),
+      pending: this.pendencias(daIgreja, perfil, todasAsIgrejas),
       /**
        * Quem atravessa todas as igrejas não recebe os blocos de operação.
        *
@@ -183,8 +199,9 @@ export class DashboardService {
        *
        * `outros` continua sendo calculado acima: as pendências saem dele.
        */
-      otherEvents: todasAsIgrejas ? null : outros,
+      events: todasAsIgrejas ? null : daIgreja,
       recentRegistrations: todasAsIgrejas ? null : recentRegistrations,
+      treasury,
       news,
       byChurch: todasAsIgrejas ? await this.igrejasDoSistema() : null,
       panorama,
@@ -193,24 +210,103 @@ export class DashboardService {
   }
 
   /**
-   * Os eventos abertos, já detalhados e na ordem em que interessam: o que está
-   * acontecendo primeiro, depois os que começam mais cedo. O primeiro da lista
-   * é o que fica em foco na tela.
+   * Os eventos que o painel considera ativos: os que estão em `ACTIVE` ou
+   * `TEST`, tenham eles terminado ou não.
+   *
+   * A data de fim **não** filtra aqui, e essa foi uma lição: filtrando por
+   * ela, um evento que a pessoa marcou como ativo sumia da home no dia
+   * seguinte ao fim, enquanto continuava ativo na tela de eventos. Pior — o
+   * dinheiro dele sumia junto, e um cursilho encerrado com R$ 15 mil a receber
+   * é exatamente o que o financeiro precisa ver.
+   *
+   * Quem diz se o evento está ativo é o status, que é o campo que a pessoa
+   * controla. Em que pé ele está quem diz é a fase, calculada pelas datas — e
+   * a tela mostra as duas coisas.
    */
   private async eventosAbertos(recorte: Prisma.EventWhereInput) {
     const eventos = await this.prisma.event.findMany({
-      where: { ...recorte, status: { in: ABERTOS }, endDate: { gte: hoje() } },
+      where: { ...recorte, status: { in: ABERTOS } },
       orderBy: { startDate: 'asc' },
       select: this.selectDoEvento(),
     });
 
     const detalhados = await this.detalhar(eventos);
 
-    // acontecendo agora ganha do que ainda vai começar; o resto mantém a ordem
-    // de início que veio do banco
+    /**
+     * A ordem da atenção: o que acontece agora, o que está por vir (do mais
+     * próximo) e, por último, o que já passou (do mais recente).
+     */
+    const peso = (fase: Fase) =>
+      fase === 'ongoing' ? 0 : fase === 'upcoming' ? 1 : 2;
+
     return detalhados.sort((a, b) => {
-      const peso = (fase: Fase) => (fase === 'ongoing' ? 0 : 1);
-      return peso(a.phase) - peso(b.phase);
+      const diferenca = peso(a.phase) - peso(b.phase);
+      if (diferenca !== 0) return diferenca;
+
+      // entre encerrados, o que acabou por último vem primeiro
+      if (a.phase === 'finished') {
+        return new Date(b.endDate).getTime() - new Date(a.endDate).getTime();
+      }
+
+      return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
+    });
+  }
+
+  /**
+   * Os eventos que o financeiro precisa ver: os ativos, mais **qualquer um**
+   * com dinheiro em aberto, esteja ele desligado ou encerrado há um ano.
+   *
+   * Filtrar por status aqui esconderia exatamente o que interessa. No banco
+   * desta igreja há um cursilho inativo de maio com R$ 24 mil a receber e
+   * outro, de fevereiro, com comprovantes nunca conferidos — os dois sumiam
+   * da tela de quem tem a função de cobrar.
+   *
+   * A ordem é pelo que falta entrar, do maior para o menor: é a fila de
+   * trabalho dele.
+   */
+  private async eventosComSaldo(recorte: Prisma.EventWhereInput) {
+    const doRecorte = await this.prisma.event.findMany({
+      where: recorte,
+      select: { id: true },
+    });
+
+    const ids = doRecorte.map((evento) => evento.id);
+
+    const comSaldo = ids.length
+      ? await this.prisma.payment.groupBy({
+          by: ['eventId'],
+          where: {
+            eventId: { in: ids },
+            status: {
+              in: [PaymentStatus.WAITING, PaymentStatus.IN_ANALYSIS],
+            },
+          },
+        })
+      : [];
+
+    const idsComSaldo = comSaldo
+      .map((linha) => linha.eventId)
+      .filter((id): id is string => id !== null);
+
+    const eventos = await this.prisma.event.findMany({
+      where: {
+        ...recorte,
+        OR: [{ status: { in: ABERTOS } }, { id: { in: idsComSaldo } }],
+      },
+      select: this.selectDoEvento(),
+    });
+
+    const detalhados = await this.detalhar(eventos);
+
+    const emAberto = (evento: (typeof detalhados)[number]) =>
+      evento.finance.waiting.amount + evento.finance.inAnalysis.amount;
+
+    return detalhados.sort((a, b) => {
+      const diferenca = emAberto(b) - emAberto(a);
+      if (diferenca !== 0) return diferenca;
+
+      // sem saldo dos dois lados, o mais recente primeiro
+      return new Date(b.endDate).getTime() - new Date(a.endDate).getTime();
     });
   }
 
@@ -433,10 +529,7 @@ export class DashboardService {
    * uma tarefa com endereço.
    */
   private pendencias(
-    eventos: (
-      | Awaited<ReturnType<DashboardService['detalhar']>>[number]
-      | null
-    )[],
+    eventos: Awaited<ReturnType<DashboardService['detalhar']>>,
     perfil: number | null,
     todasAsIgrejas: boolean,
   ) {
@@ -452,10 +545,11 @@ export class DashboardService {
     }[] = [];
 
     for (const evento of eventos) {
-      // evento encerrado não gera tarefa: conferir comprovante de quem já foi
-      // não muda mais nada na operação
-      if (!evento || evento.phase === 'finished') continue;
-
+      /**
+       * Comprovante de evento encerrado continua sendo tarefa: o dinheiro não
+       * deixa de existir porque o cursilho acabou. Só a lista de espera é que
+       * perde o sentido — e ela é barrada logo abaixo.
+       */
       if (evento.finance.inAnalysis.count > 0) {
         lista.push({
           kind: 'receipts',
@@ -479,7 +573,13 @@ export class DashboardService {
 
       const gerenciaInscricao = todasAsIgrejas || perfil !== Role.FINANCE;
 
-      if (gerenciaInscricao && evento.waitlist > 0 && livres > 0) {
+      // chamar alguém para um evento que já acabou não é tarefa de ninguém
+      if (
+        evento.phase !== 'finished' &&
+        gerenciaInscricao &&
+        evento.waitlist > 0 &&
+        livres > 0
+      ) {
         lista.push({
           kind: 'waitlist',
           eventId: evento.id,
@@ -661,6 +761,115 @@ export class DashboardService {
         eventName: noticia.event?.name ?? null,
       })),
       drafts,
+    };
+  }
+
+  /**
+   * A tesouraria da igreja — a home de quem cuida do dinheiro.
+   *
+   * O número que importa aqui não é quantos se inscreveram, e sim quanto falta
+   * entrar e **de quem**. Saber que há R$ 48 mil em aberto não faz ninguém
+   * agir; saber que são 151 pessoas, e quais, faz.
+   *
+   * Uma limitação honesta: o sistema não registra despesa. `Payment` só
+   * guarda entrada, então "saída" aqui é o que foi estornado — não há como
+   * montar um fluxo de caixa de verdade sem uma tabela de despesas.
+   */
+  private async tesouraria(recorte: Prisma.EventWhereInput) {
+    const eventos = await this.prisma.event.findMany({
+      where: recorte,
+      select: { id: true },
+    });
+
+    const ids = eventos.map((evento) => evento.id);
+    if (!ids.length) {
+      return {
+        debtors: { people: 0, charges: 0, amount: 0, top: [] },
+        refunded: { count: 0, amount: 0 },
+      };
+    }
+
+    const [resumo, maiores, estornado] = await Promise.all([
+      this.prisma.$queryRaw<
+        { pessoas: number; cobrancas: number; total: number }[]
+      >`
+        SELECT count(DISTINCT "userId")::int AS pessoas,
+               count(*)::int AS cobrancas,
+               COALESCE(sum("amount"), 0)::float8 AS total
+        FROM "payments"
+        WHERE "status" = 'WAITING' AND "eventId" IN (${Prisma.join(ids)})
+      `,
+      /**
+       * Os maiores devedores, do valor mais alto para o mais baixo e, no
+       * empate, do mais antigo. Uma cobrança de R$ 430 parada há 34 dias é
+       * outra conversa que uma de ontem.
+       */
+      this.prisma.payment.findMany({
+        where: { status: PaymentStatus.WAITING, eventId: { in: ids } },
+        orderBy: [{ amount: 'desc' }, { createdAt: 'asc' }],
+        take: 8,
+        select: {
+          amount: true,
+          createdAt: true,
+          eventId: true,
+          eventUserRole: {
+            select: {
+              eventOnUsers: {
+                select: {
+                  user: {
+                    select: { id: true, fullName: true, profilePhotoUrl: true },
+                  },
+                  event: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: { status: PaymentStatus.REFUNDED, eventId: { in: ids } },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const hoje = new Date();
+
+    return {
+      debtors: {
+        people: resumo[0]?.pessoas ?? 0,
+        charges: resumo[0]?.cobrancas ?? 0,
+        amount: resumo[0]?.total ?? 0,
+        top: maiores
+          .map((cobranca) => {
+            const vinculo = cobranca.eventUserRole?.eventOnUsers;
+            if (!vinculo) return null;
+
+            return {
+              userId: vinculo.user.id,
+              name: vinculo.user.fullName,
+              photoUrl: vinculo.user.profilePhotoUrl,
+              eventId: vinculo.event.id,
+              eventName: vinculo.event.name,
+              amount: cobranca.amount,
+              /** Dias desde que a cobrança foi criada */
+              days: Math.max(
+                0,
+                Math.floor(
+                  (hoje.getTime() - cobranca.createdAt.getTime()) / 86400000,
+                ),
+              ),
+            };
+          })
+          .filter(
+            (linha): linha is NonNullable<typeof linha> => linha !== null,
+          ),
+      },
+      /** Única "saída" que o sistema conhece: o sistema não registra despesa */
+      refunded: {
+        count: estornado._count._all,
+        amount: estornado._sum.amount ?? 0,
+      },
     };
   }
 
