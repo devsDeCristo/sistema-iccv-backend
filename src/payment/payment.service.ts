@@ -23,6 +23,29 @@ import { randomUUID } from 'crypto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
+/**
+ * Os estados que só se alcançam quando alguém declara, pela mão, que o
+ * dinheiro chegou ou está a caminho: baixa direta e comprovante anexado.
+ */
+const ENTRADAS_MANUAIS: PaymentStatus[] = [
+  PaymentStatus.PAID,
+  PaymentStatus.IN_ANALYSIS,
+];
+
+/**
+ * A edição pela tela é um lançamento manual, ou só um acerto de registro?
+ *
+ * `receivedFrom` diz **por onde o dinheiro entrou**, e não quem mexeu na
+ * linha. Recusar, cancelar, estornar ou corrigir um método não mudam a origem
+ * do dinheiro — e o carimbo incondicional que existia aqui apagava o fato de
+ * a cobrança ter vindo do gateway: um pagamento do PagBank, depois estornado,
+ * passava a se apresentar como lançamento manual para sempre, sem que nada
+ * guardasse a verdade anterior.
+ */
+function ehLancamentoManual(anterior: PaymentStatus, novo?: PaymentStatus) {
+  return !!novo && novo !== anterior && ENTRADAS_MANUAIS.includes(novo);
+}
+
 const ACCEPTED_RECEIPT_MIME_TYPES = [
   'image/png',
   'image/jpeg',
@@ -507,7 +530,10 @@ export class PaymentService {
       data: {
         status: payload.status,
         method: payload.method,
-        receivedFrom: PaymentReceived.EXTERNAL,
+        // só quando a mão de alguém trouxe o dinheiro; ver `ehLancamentoManual`
+        ...(ehLancamentoManual(payment.status, payload.status) && {
+          receivedFrom: PaymentReceived.EXTERNAL,
+        }),
         ...(payload.discountsAppliedId && {
           eventUserRole: {
             update: {
