@@ -7,7 +7,7 @@ import { PrismaService } from 'src/prisma';
 import { loadBaileys } from './baileys.loader';
 
 /**
- * Estado de autenticação do Baileys guardado no Postgres.
+ * Estado de autenticação do Baileys guardado no Postgres, **por igreja**.
  *
  * O equivalente pronto da biblioteca (`useMultiFileAuthState`) grava em disco,
  * o que não serve aqui: o container é recriado a cada deploy e a sessão iria
@@ -17,6 +17,11 @@ import { loadBaileys } from './baileys.loader';
  * O formato é o mesmo que a biblioteca usa em arquivo: JSON serializado com o
  * `BufferJSON`, que é quem sabe transformar Buffer e Uint8Array em texto e
  * trazer de volta.
+ *
+ * Todas as funções daqui pedem o `churchId` e nenhuma tem versão sem ele. É de
+ * propósito: a chave interna do Baileys (`creds`, `pre-key-3`) se repete entre
+ * as sessões, e uma consulta que esquecesse a igreja leria — ou sobrescreveria
+ * — a credencial da vizinha.
  */
 
 const CHAVE_CREDENCIAIS = 'creds';
@@ -32,11 +37,14 @@ export interface WhatsappAuthState {
 
 export async function useDatabaseAuthState(
   prisma: PrismaService,
+  churchId: string,
 ): Promise<WhatsappAuthState> {
   const { BufferJSON, initAuthCreds, proto } = await loadBaileys();
 
   const ler = async (id: string) => {
-    const linha = await prisma.whatsappAuth.findUnique({ where: { id } });
+    const linha = await prisma.whatsappAuth.findUnique({
+      where: { churchId_id: { churchId, id } },
+    });
 
     return linha ? JSON.parse(linha.data, BufferJSON.reviver) : null;
   };
@@ -45,14 +53,14 @@ export async function useDatabaseAuthState(
     const data = JSON.stringify(valor, BufferJSON.replacer);
 
     await prisma.whatsappAuth.upsert({
-      where: { id },
-      create: { id, data },
+      where: { churchId_id: { churchId, id } },
+      create: { churchId, id, data },
       update: { data },
     });
   };
 
   const apagar = async (id: string) => {
-    await prisma.whatsappAuth.deleteMany({ where: { id } });
+    await prisma.whatsappAuth.deleteMany({ where: { churchId, id } });
   };
 
   const creds: AuthenticationCreds =
@@ -106,9 +114,12 @@ export async function useDatabaseAuthState(
   };
 }
 
-/** Apaga a sessão inteira — usado quando o número é desconectado. */
-export async function clearDatabaseAuthState(prisma: PrismaService) {
-  await prisma.whatsappAuth.deleteMany({});
+/** Apaga a sessão de uma igreja — usado quando o número dela é desconectado. */
+export async function clearDatabaseAuthState(
+  prisma: PrismaService,
+  churchId: string,
+) {
+  await prisma.whatsappAuth.deleteMany({ where: { churchId } });
 }
 
 /**
@@ -119,11 +130,43 @@ export async function clearDatabaseAuthState(prisma: PrismaService) {
  * Subir com ele faria a API gerar QR atrás de ninguém, num laço sem fim — o que
  * vale é o `registered`, marcado só quando o celular confirma.
  */
-export async function hasStoredCredentials(prisma: PrismaService) {
+export async function hasStoredCredentials(
+  prisma: PrismaService,
+  churchId: string,
+) {
   const linha = await prisma.whatsappAuth.findUnique({
-    where: { id: CHAVE_CREDENCIAIS },
+    where: { churchId_id: { churchId, id: CHAVE_CREDENCIAIS } },
   });
 
+  return linhaEstaPareada(linha);
+}
+
+/**
+ * As igrejas que têm número pareado, para o serviço reconectar todas ao subir.
+ *
+ * Uma consulta só em vez de uma por igreja: com o tempo o sistema terá mais
+ * igrejas do que sessões, e perguntar uma a uma seria uma ida ao banco por
+ * igreja para descobrir, na maioria, que não há nada para reconectar.
+ */
+export async function churchIdsComSessao(
+  prisma: PrismaService,
+): Promise<string[]> {
+  const linhas = await prisma.whatsappAuth.findMany({
+    where: { id: CHAVE_CREDENCIAIS },
+    select: { churchId: true, data: true },
+  });
+
+  const pareadas: string[] = [];
+
+  for (const linha of linhas) {
+    if (await linhaEstaPareada(linha)) pareadas.push(linha.churchId);
+  }
+
+  return pareadas;
+}
+
+/** Ver a nota de `hasStoredCredentials`: o que vale é o `registered`. */
+async function linhaEstaPareada(linha: { data: string } | null) {
   if (!linha) return false;
 
   const { BufferJSON } = await loadBaileys();

@@ -297,10 +297,14 @@ export class NewsService {
   /**
    * Manda a notícia para cada grupo escolhido.
    *
-   * O ritmo não é decidido aqui: quem espaça as mensagens é a fila do
-   * `WhatsappService`, que vale para o canal inteiro. Este laço só percorre os
-   * destinos e anota o que aconteceu em cada um — pode demorar minutos, e tudo
-   * bem, porque roda em segundo plano.
+   * A notícia sai pelo número **da igreja que a publicou**. Cada uma pareia o
+   * seu (ver `WhatsappService`), e é `noticia.churchId` que diz por qual
+   * telefone o inscrito vai receber o aviso.
+   *
+   * O ritmo não é decidido aqui: quem espaça as mensagens é a fila da sessão
+   * daquela igreja. Este laço só percorre os destinos e anota o que aconteceu
+   * em cada um — pode demorar minutos, e tudo bem, porque roda em segundo
+   * plano.
    *
    * `force` só vem do reenvio manual. No disparo automático ele fica falso para
    * que republicar uma notícia não repita a mensagem em quem já recebeu.
@@ -325,6 +329,17 @@ export class NewsService {
     });
 
     if (!noticia) return { enviados: 0, falhas: 0, semLink: 0 };
+
+    // Sem igreja não há número por onde sair. Acontece no histórico anterior ao
+    // tenant; falhar calado aqui deixaria a notícia marcada como enviada.
+    if (!noticia.churchId) {
+      this.logger.warn(
+        `Notícia ${newsId} não tem igreja: não há número de WhatsApp por onde disparar.`,
+      );
+      return { enviados: 0, falhas: 0, semLink: 0 };
+    }
+
+    const churchId = noticia.churchId;
 
     const mensagem = this.montaMensagem(noticia, !!noticia.imageUrl);
     // Dois grupos de inscrição podem apontar para o mesmo grupo do WhatsApp; a
@@ -354,7 +369,10 @@ export class NewsService {
       }
 
       try {
-        const jid = await this.whatsapp.resolveGroupIdFromInvite(link);
+        const jid = await this.whatsapp.resolveGroupIdFromInvite(
+          churchId,
+          link,
+        );
 
         if (jidsAtendidos.has(jid)) {
           // outro grupo de inscrição já cobriu este mesmo grupo do WhatsApp
@@ -363,7 +381,12 @@ export class NewsService {
           continue;
         }
 
-        await this.whatsapp.sendToGroup(jid, mensagem, noticia.imageUrl);
+        await this.whatsapp.sendToGroup(
+          churchId,
+          jid,
+          mensagem,
+          noticia.imageUrl,
+        );
 
         jidsAtendidos.add(jid);
         enviados++;

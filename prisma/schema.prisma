@@ -19,6 +19,9 @@ model Church {
   /// Por onde esta igreja cobra. Ver `PaymentProviderConfig`: cada uma tem a
   /// própria conta no gateway, e o dinheiro do evento dela cai lá.
   gateways PaymentProviderConfig[]
+  /// A sessão de WhatsApp desta igreja. Cada uma pareia o próprio número —
+  /// ver `WhatsappAuth`.
+  whatsapp WhatsappAuth[]
 
   @@map("churches")
 }
@@ -760,10 +763,25 @@ model NewsOnGroupRoles {
 /// Fica no banco, e não em arquivo, porque o container é recriado a cada deploy:
 /// em disco a sessão morreria junto e alguém teria que parear o número de novo
 /// toda vez que subisse uma versão.
+/// Sessão do WhatsApp, uma por igreja.
+///
+/// Era uma só para o sistema inteiro, e isso obrigava todas as igrejas a
+/// disparar pelo mesmo número: quem parear ou desconectar mexia no aviso de
+/// todo mundo, e por isso a tela era do super admin. Agora cada igreja pareia
+/// o seu, e a notícia sai pelo número da igreja que a publicou.
+///
+/// O `id` é a chave que o Baileys usa (`creds`, `pre-key-3`,
+/// `session-5511…`), e ela só é única dentro de uma sessão — daí a chave
+/// composta. Sem o `churchId` na chave, a credencial de uma igreja
+/// sobrescreveria a da outra na primeira gravação.
 model WhatsappAuth {
-  id        String   @id
+  churchId  String
+  id        String
   data      String
   updatedAt DateTime @updatedAt
+  church    Church   @relation(fields: [churchId], references: [id], onDelete: Cascade)
 
+  @@id([churchId, id])
+  @@index([churchId])
   @@map("whatsapp_auth")
 }

@@ -9,6 +9,7 @@ import type { WASocket } from 'baileys';
 import { PrismaService } from 'src/prisma';
 import { loadBaileys } from './baileys.loader';
 import {
+  churchIdsComSessao,
   clearDatabaseAuthState,
   hasStoredCredentials,
   useDatabaseAuthState,
@@ -110,22 +111,29 @@ function formataLogDoBaileys(args: unknown[]): string {
 }
 
 /**
- * Sessão do WhatsApp via Baileys — biblioteca não oficial, que fala o mesmo
- * protocolo do WhatsApp Web. Na prática o sistema é mais um "aparelho
- * conectado" do número, como um navegador pareado.
+ * A sessão de **uma** igreja.
  *
- * Consequências que valem lembrar:
- * - só uma instância da API pode manter a sessão. Duas réplicas com a mesma
- *   credencial brigam pelo pareamento e derrubam uma à outra;
+ * Tudo o que era campo do serviço mora aqui: socket, situação, QR, fila de
+ * envio e tentativas de reconexão. A separação não é cosmética — cada igreja
+ * pareia um número diferente, e um estado compartilhado faria a queda da
+ * conexão de uma apagar o QR que a outra acabou de gerar.
+ *
+ * A fila de envio também é por igreja, e está certo assim: o que o WhatsApp
+ * vigia é o ritmo de **um** número. Duas igrejas disparando ao mesmo tempo são
+ * dois aparelhos diferentes conversando, não uma rajada.
+ *
+ * Baileys é biblioteca não oficial, que fala o mesmo protocolo do WhatsApp
+ * Web. Na prática o sistema é mais um "aparelho conectado" do número, como um
+ * navegador pareado. Consequências que valem lembrar:
+ * - só uma instância da API pode manter uma sessão. Duas réplicas com a mesma
+ *   credencial brigam pelo pareamento e derrubam uma à outra — isso continua
+ *   valendo por igreja, e não deixou de valer por haver várias;
  * - o número precisa continuar existindo e ser usado como número normal. Conta
  *   nova que só dispara mensagem é o padrão que o WhatsApp bloqueia;
  * - volume alto é o que chama atenção. O uso aqui é de poucas mensagens por
  *   semana, dentro de grupos onde as pessoas entraram por vontade própria.
  */
-@Injectable()
-export class WhatsappService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(WhatsappService.name);
-
+class SessaoDaIgreja {
   private socket: WASocket | null = null;
   private status: WhatsappStatus = 'DISCONNECTED';
   private qr: string | null = null;
@@ -147,22 +155,31 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private reconexao: NodeJS.Timeout | null = null;
   private encerrando = false;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly churchId: string,
+    private readonly prisma: PrismaService,
+    /** Prefixado com a igreja: com várias sessões, log sem dono não se lê. */
+    private readonly logger: Logger,
+  ) {}
 
-  async onModuleInit() {
-    // Só sobe sozinho se já existe número pareado. Sem sessão gravada, quem
-    // começa é o admin pela tela de configurações.
-    if (await hasStoredCredentials(this.prisma)) {
-      this.connect().catch((erro) =>
-        this.logger.error(`Falha ao retomar a sessão: ${erro.message}`),
-      );
-    }
+  /** Nada mais a fazer por esta igreja: o registro pode esquecê-la. */
+  get ociosa(): boolean {
+    return (
+      !this.socket && this.status === 'DISCONNECTED' && this.reconexao === null
+    );
   }
 
-  async onModuleDestroy() {
+  encerrar() {
     this.encerrando = true;
     this.cancelaReconexao();
     this.socket?.end(undefined);
+  }
+
+  /** Retoma a sessão ao subir, quando esta igreja já tem número pareado. */
+  async retomar() {
+    if (await hasStoredCredentials(this.prisma, this.churchId)) {
+      await this.connect();
+    }
   }
 
   getStatus(): WhatsappStatusPayload {
@@ -192,7 +209,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     const { fetchLatestBaileysVersion, makeWASocket } = await loadBaileys();
 
-    const { state, saveCreds } = await useDatabaseAuthState(this.prisma);
+    const { state, saveCreds } = await useDatabaseAuthState(
+      this.prisma,
+      this.churchId,
+    );
     // A versão do WhatsApp Web muda com frequência; pedir a atual evita o
     // "aparelho desatualizado" que derruba a conexão.
     const { version } = await fetchLatestBaileysVersion();
@@ -269,7 +289,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.socket?.end(undefined);
     this.socket = null;
 
-    if (!jaPareado) await clearDatabaseAuthState(this.prisma);
+    if (!jaPareado) await clearDatabaseAuthState(this.prisma, this.churchId);
 
     this.status = 'DISCONNECTED';
     this.qr = null;
@@ -304,7 +324,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.socket?.end(undefined);
     this.socket = null;
 
-    await clearDatabaseAuthState(this.prisma);
+    await clearDatabaseAuthState(this.prisma, this.churchId);
 
     this.status = 'DISCONNECTED';
     this.qr = null;
@@ -422,7 +442,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private exigeConexao(): WASocket {
     if (!this.socket || this.status !== 'CONNECTED') {
       throw new ServiceUnavailableException(
-        'WhatsApp desconectado. Conecte o número em Configurações > Disparadores.',
+        'WhatsApp desconectado. Conecte o número desta igreja em Configurações > Disparadores.',
       );
     }
 
@@ -474,7 +494,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         codigo === DisconnectReason.badSession;
 
       if (naoAdiantaTentar) {
-        await clearDatabaseAuthState(this.prisma);
+        await clearDatabaseAuthState(this.prisma, this.churchId);
         this.status = 'DISCONNECTED';
         this.lastError =
           'Sessão encerrada no WhatsApp. Pareie o número novamente.';
@@ -547,5 +567,181 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     };
 
     return logger;
+  }
+}
+
+/** O que a tela vê de uma igreja que nunca pareou número nenhum. */
+const SEM_SESSAO: WhatsappStatusPayload = {
+  status: 'DISCONNECTED',
+  phoneNumber: null,
+  pushName: null,
+  qr: null,
+  pairingCode: null,
+  connectedAt: null,
+  lastError: null,
+};
+
+/**
+ * O disparador de WhatsApp do sistema: uma sessão por igreja.
+ *
+ * Este serviço não conversa com o WhatsApp — ele guarda as sessões e entrega a
+ * certa para quem pede. Toda a conversa mora em `SessaoDaIgreja`, e a razão de
+ * existirem duas classes é que antes havia uma só e ela acumulava as duas
+ * coisas: enquanto a sessão era única no processo, "o serviço" e "a sessão"
+ * eram a mesma entidade e ninguém sentia falta da separação. Com um número por
+ * igreja, misturá-las voltaria a significar estado de uma vazando na outra.
+ *
+ * Nenhum método existe sem `churchId`. É a mesma decisão do
+ * `whatsapp-auth.store`, e pelo mesmo motivo: um disparo que esquecesse a
+ * igreja sairia pelo número da primeira que estivesse conectada, e o inscrito
+ * receberia o aviso de uma igreja pelo telefone de outra.
+ */
+@Injectable()
+export class WhatsappService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(WhatsappService.name);
+
+  /** igreja -> sessão. Só existe entrada para quem já pediu conexão. */
+  private readonly sessoes = new Map<string, SessaoDaIgreja>();
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Retoma, ao subir, as sessões das igrejas que já têm número pareado.
+   *
+   * Em paralelo e com o erro contido em cada uma: uma credencial estragada não
+   * pode impedir as outras igrejas de voltarem ao ar, e `Promise.all` com uma
+   * rejeição faria exatamente isso.
+   */
+  async onModuleInit() {
+    const igrejas = await churchIdsComSessao(this.prisma);
+
+    if (igrejas.length === 0) return;
+
+    this.logger.log(
+      `Retomando ${igrejas.length} sessão(ões) de WhatsApp ao subir`,
+    );
+
+    await Promise.all(
+      igrejas.map((churchId) =>
+        this.sessao(churchId)
+          .retomar()
+          .catch((erro) =>
+            this.logger.error(
+              `Falha ao retomar a sessão da igreja ${churchId}: ${erro.message}`,
+            ),
+          ),
+      ),
+    );
+  }
+
+  async onModuleDestroy() {
+    for (const sessao of this.sessoes.values()) sessao.encerrar();
+  }
+
+  /**
+   * Situação da sessão desta igreja.
+   *
+   * Não cria sessão: consultar a tela de uma igreja que nunca pareou nada não
+   * pode abrir conexão nenhuma — a consulta roda em intervalo curto enquanto a
+   * tela está aberta, e criar aqui deixaria um socket de pé para cada igreja
+   * que alguém abriu por curiosidade.
+   */
+  getStatus(churchId: string): WhatsappStatusPayload {
+    return this.sessoes.get(churchId)?.getStatus() ?? SEM_SESSAO;
+  }
+
+  async connect(churchId: string): Promise<WhatsappStatusPayload> {
+    const sessao = this.sessao(churchId);
+    await sessao.connect();
+    return sessao.getStatus();
+  }
+
+  async requestPairingCode(churchId: string, phoneNumber: string) {
+    return this.sessao(churchId).requestPairingCode(phoneNumber);
+  }
+
+  async cancelPairing(churchId: string): Promise<WhatsappStatusPayload> {
+    const sessao = this.sessoes.get(churchId);
+    if (!sessao) return SEM_SESSAO;
+
+    await sessao.cancelPairing();
+    this.descartaSeOciosa(churchId, sessao);
+
+    return sessao.getStatus();
+  }
+
+  async disconnect(churchId: string): Promise<WhatsappStatusPayload> {
+    const sessao = this.sessoes.get(churchId);
+
+    // Sem sessão viva ainda pode haver credencial gravada — de um processo
+    // anterior que não chegou a reconectar. Desconectar precisa limpá-la do
+    // mesmo jeito, senão o próximo start reabre o que o admin mandou fechar.
+    if (!sessao) {
+      await clearDatabaseAuthState(this.prisma, churchId);
+      return SEM_SESSAO;
+    }
+
+    await sessao.disconnect();
+    this.descartaSeOciosa(churchId, sessao);
+
+    return sessao.getStatus();
+  }
+
+  listGroups(churchId: string): Promise<WhatsappGroup[]> {
+    return this.exigeSessao(churchId).listGroups();
+  }
+
+  resolveGroupIdFromInvite(churchId: string, link: string): Promise<string> {
+    return this.exigeSessao(churchId).resolveGroupIdFromInvite(link);
+  }
+
+  sendToGroup(
+    churchId: string,
+    groupId: string,
+    text: string,
+    imageUrl?: string | null,
+  ) {
+    return this.exigeSessao(churchId).sendToGroup(groupId, text, imageUrl);
+  }
+
+  /** A sessão da igreja, criada na primeira vez que alguém precisa dela. */
+  private sessao(churchId: string): SessaoDaIgreja {
+    const existente = this.sessoes.get(churchId);
+    if (existente) return existente;
+
+    const nova = new SessaoDaIgreja(
+      churchId,
+      this.prisma,
+      new Logger(`${WhatsappService.name}[${churchId}]`),
+    );
+
+    this.sessoes.set(churchId, nova);
+
+    return nova;
+  }
+
+  /**
+   * Para quem vai **usar** a conexão, e não configurá-la.
+   *
+   * Recusa sem criar sessão: uma notícia publicada por uma igreja que nunca
+   * pareou número precisa falhar com a explicação, e não abrir uma conexão
+   * silenciosamente para descobrir, 20 segundos depois, que não há credencial.
+   */
+  private exigeSessao(churchId: string): SessaoDaIgreja {
+    const sessao = this.sessoes.get(churchId);
+
+    if (!sessao) {
+      throw new ServiceUnavailableException(
+        'Esta igreja ainda não conectou um número de WhatsApp. ' +
+          'Configurações > Disparadores.',
+      );
+    }
+
+    return sessao;
+  }
+
+  /** Sessão desconectada e sem reconexão agendada não precisa ocupar memória */
+  private descartaSeOciosa(churchId: string, sessao: SessaoDaIgreja) {
+    if (sessao.ociosa) this.sessoes.delete(churchId);
   }
 }
