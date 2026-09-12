@@ -7,8 +7,10 @@ import { TeamModule } from './team/team.module';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
 import { PasswordResetModule } from './auth/password-reset/password-reset.module';
-import { PagbankModule } from './gateways/pagbank/pagbank.module';
+import { GatewaysModule } from './gateways/gateways.module';
+import { CryptoModule } from './crypto/crypto.module';
 import { PaymentModule } from './payment/payment.module';
+import { PaymentProviderModule } from './payment-providers/payment-provider.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
 import { CheckinModule } from './checkin/checkin.module';
@@ -29,8 +31,10 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     TeamModule,
     AuthModule,
     PasswordResetModule,
-    PagbankModule,
+    CryptoModule,
+    GatewaysModule,
     PaymentModule,
+    PaymentProviderModule,
     WebhooksModule,
     CronModule,
     CheckinModule,

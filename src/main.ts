@@ -62,7 +62,26 @@ const protectSwagger = (req: Request, res: Response, next: NextFunction) => {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.use(json({ limit: '50mb' }));
+
+  /**
+   * Guarda o corpo cru junto do já interpretado.
+   *
+   * O PagBank e a Ton assinam os bytes exatos que enviaram; conferir a
+   * assinatura sobre um JSON reserializado não funciona, porque
+   * `JSON.stringify` reordena chaves e normaliza espaços. Sem isto, toda
+   * notificação legítima seria recusada.
+   *
+   * Só para as rotas de notificação: guardar 50MB de corpo cru em memória em
+   * toda requisição do sistema seria pagar caro por nada.
+   */
+  app.use(
+    json({
+      limit: '50mb',
+      verify: (req: any, _res, buf) => {
+        if (req.url?.startsWith('/webhooks/')) req.rawBody = buf;
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: '50mb' }));
   app.use(protectSwagger);
   const port = process.env.PORT;

@@ -1,0 +1,14 @@
+-- Quanto foi realmente pedido à casa, em centavos e já com o desconto abatido.
+--
+-- `amount` guarda a soma dos ingressos em reais e sem desconto — serve para o
+-- relatório, não para conferir a baixa. Sem um número comparável, a única prova
+-- de que o dinheiro entrou é a casa dizer que entrou, e numa das integrações
+-- essa frase é barata de forjar: a API de checkout da InfinitePay não tem
+-- autenticação, o `handle` da conta é público e o valor do link é escolhido por
+-- quem chama. Quem soubesse a referência da própria inscrição criava um link de
+-- um centavo com ela, pagava, e a cobrança de R$ 300 passava a responder "pago".
+--
+-- Nula no histórico: o valor enviado não foi guardado e não dá para
+-- reconstruí-lo. Linha sem o número pula a conferência — recusar tudo o que é
+-- antigo derrubaria pagamento legítimo em curso.
+ALTER TABLE "payment_checkouts" ADD COLUMN "chargedAmountCents" INTEGER;

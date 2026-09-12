@@ -17,6 +17,17 @@ import { randomUUID } from 'crypto';
 const REDACTED_FIELDS: Record<string, string[]> = {
   User: ['password'],
   UserToken: ['codeHash', 'ticketHash'],
+  /**
+   * A credencial de cobrança fica cifrada no banco justamente para não estar
+   * ao alcance de quem lê a tabela. Sem esta linha, o envelope inteiro seria
+   * copiado para `logs.before`/`logs.after` a cada salvar — e a tela de
+   * atividades, que o super admin abre, passaria a ser a cópia em claro do
+   * cofre que ninguém deveria abrir por ali.
+   *
+   * O hash do segredo do webhook sai junto: com ele em mãos dá para procurar
+   * a configuração correspondente e confirmar um segredo adivinhado.
+   */
+  PaymentProviderConfig: ['credentials', 'webhookSecretHash'],
 };
 
 /** Marca no lugar do segredo: registra que mudou, sem guardar o valor */

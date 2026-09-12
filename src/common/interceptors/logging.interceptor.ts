@@ -9,6 +9,28 @@ import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 
 /**
+ * O segredo da URL de notificação não pode chegar ao log.
+ *
+ * Ele vai no caminho porque nenhuma das casas de pagamento deixa cadastrar um
+ * cabeçalho próprio — só a URL. O preço disso é que a URL inteira vira material
+ * de credencial, e um log de aplicação costuma ser lido por muito mais gente do
+ * que o banco: `/webhooks/pagbank/<segredo>/payments` chegaria ali inteiro, e
+ * quem o lesse poderia marcar qualquer inscrição como paga.
+ *
+ * Apaga o terceiro trecho sempre que houver um quarto — é essa a posição do
+ * segredo. Casar com o formato exato `casa/segredo/canal` não bastava: o
+ * Express casa a rota com barra no fim, e `/webhooks/pagbank/<segredo>/payments/`
+ * escapava da conferência e ia inteiro para o log. O mesmo valia para qualquer
+ * sondagem com um trecho a mais, que cai no 404 e é registrada do mesmo jeito.
+ *
+ * As rotas antigas do PagBank têm dois trechos e não carregam segredo: elas
+ * não têm quarto trecho, então continuam legíveis.
+ */
+function esconderSegredos(path: string): string {
+  return path.replace(/^(\/webhooks\/[^/]+)\/[^/]+(?=\/)/, '$1/•••');
+}
+
+/**
  * Log de todas as requisições HTTP: quem chamou, de onde, qual rota, e o resultado.
  *
  * O padrão é simples: `[MÉTODO] /caminho - status | tempo`, com o usuário
@@ -22,7 +44,8 @@ export class LoggingInterceptor implements NestInterceptor {
     const request = context.switchToHttp().getRequest();
     const response = context.switchToHttp().getResponse();
 
-    const { method, path, query, user } = request;
+    const { method, query, user } = request;
+    const path = esconderSegredos(request.path);
     const userName = user?.username ?? user?.userId ?? null;
     const inicio = Date.now();
 

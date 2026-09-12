@@ -16,6 +16,9 @@ model Church {
   users  UserChurchRole[]
   events Event[]
   news   News[]
+  /// Por onde esta igreja cobra. Ver `PaymentProviderConfig`: cada uma tem a
+  /// própria conta no gateway, e o dinheiro do evento dela cai lá.
+  gateways PaymentProviderConfig[]
 
   @@map("churches")
 }
@@ -290,8 +293,107 @@ model PaymentCheckout {
   updatedAt   DateTime       @updatedAt
   payment     Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
+  /// Qual casa gerou este checkout.
+  ///
+  /// Com um gateway só a pergunta não existia. Com quatro, o `referenceId`
+  /// sozinho não diz a quem perguntar — e perguntar à casa errada devolve
+  /// "não existe": a reconciliação desistiria da cobrança e um pagamento pago
+  /// ficaria em WAITING para sempre.
+  ///
+  /// `PAGBANK` como padrão porque é o que existe em produção: toda linha
+  /// anterior a esta coluna nasceu lá.
+  provider PaymentProvider @default(PAGBANK)
+
+  /// A credencial usada. Fica nula quando ela é removida depois — o histórico
+  /// do checkout não pode sumir junto com a credencial que o gerou.
+  configId String?
+
+  /// Quanto foi pedido à casa, em centavos e já com o desconto abatido.
+  ///
+  /// `amount` guarda a soma dos ingressos em reais, sem desconto: serve para o
+  /// relatório e não para conferir o que voltou pago. Esta coluna é a outra
+  /// metade da baixa — sem ela, "a casa disse que pagou" é a única prova de
+  /// que o dinheiro entrou, e numa das integrações essa frase é barata de
+  /// forjar (ver `conferirValorPago`).
+  ///
+  /// Nula nos checkouts anteriores a esta coluna: não há como reconstruir o
+  /// valor enviado, e recusar o que é antigo derrubaria pagamento em curso.
+  chargedAmountCents Int?
+
   @@index([paymentId])
+  /// Atende a rota de webhook e a reconciliação, que chegam pelo par
+  /// referência + casa
+  @@index([provider, referenceId])
   @@map("payment_checkouts")
+}
+
+/// Como cada igreja cobra: qual casa processa o dinheiro e com que credencial.
+///
+/// Até aqui havia um token só, no `.env`, valendo para o sistema inteiro —
+/// duas igrejas no mesmo servidor cobravam na conta da primeira, e trocar de
+/// gateway era redeploy. Aqui a linha é por igreja e por casa: a igreja
+/// escolhe onde cobrar, coloca a credencial dela, e o dinheiro cai na conta
+/// dela.
+///
+/// Nenhuma credencial fica em claro. `credentials` guarda um envelope
+/// AES-256-GCM (ver `SecretCryptoService`) selado com `churchId` e `provider`
+/// como dado autenticado: um envelope copiado para a linha de outra igreja não
+/// abre, então nem quem escreve no banco consegue desviar a cobrança.
+model PaymentProviderConfig {
+  id       String          @id @default(uuid())
+  churchId String
+  provider PaymentProvider
+
+  /// Sandbox e produção têm URL e credencial diferentes nas quatro casas
+  mode PaymentProviderMode @default(PRODUCTION)
+
+  /// Desliga a cobrança sem apagar a credencial — é o que se usa quando a casa
+  /// está fora do ar e a igreja precisa voltar a receber pela mão.
+  enabled Boolean @default(false)
+
+  /// A casa que recebe os novos checkouts desta igreja. Uma só por igreja; a
+  /// troca acontece em transação, em `PaymentProviderService`.
+  isDefault Boolean @default(false)
+
+  /// Envelope cifrado com as credenciais. Não sai daqui em claro em lugar
+  /// nenhum: a API devolve `credentialsHint`, e a auditoria redige o campo.
+  credentials String
+
+  /// Qual chave do `.env` selou o envelope. Existe para a rotação acontecer
+  /// sem parar o sistema: a nova sela, a antiga ainda abre.
+  keyVersion Int @default(1)
+
+  /// O bastante para a pessoa reconhecer o que cadastrou ("••••4F2A") e de
+  /// menos para usar. É o que a tela de configurações mostra.
+  credentialsHint Json?
+
+  /// SHA-256 do segredo que vai na URL de notificação desta configuração.
+  ///
+  /// O segredo em claro existe em dois lugares: na tela, no instante em que é
+  /// gerado, e no cadastro do provedor. Não aqui — quem levar o banco não
+  /// consegue forjar um "pagamento aprovado" na URL de ninguém.
+  webhookSecretHash String @unique
+
+  /// Últimos caracteres do segredo, para conferir a URL cadastrada na casa
+  webhookSecretHint String?
+
+  /// Quando uma notificação desta configuração foi aceita pela última vez.
+  /// Alimenta o aviso de "credencial salva, mas nunca chegou retorno" — o
+  /// sintoma de URL cadastrada errada do lado de lá.
+  lastWebhookAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  updatedById String?
+
+  church Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  /// Uma linha por casa em cada igreja: a mesma cadastrada duas vezes só cria
+  /// dúvida sobre qual credencial está valendo
+  @@unique([churchId, provider])
+  @@index([churchId])
+  @@map("payment_provider_configs")
 }
 
 model Waitlist {
@@ -545,6 +647,28 @@ enum EventStatus {
   INACTIVE
   /// Ensaio antes de abrir ao público: só admin e super admin enxergam
   TEST
+}
+
+/// As casas que processam o dinheiro.
+///
+/// O nome é gravado em `PaymentCheckout.provider` e é a chave que o registry
+/// de `src/gateways` usa para escolher o adapter. Acrescentar uma casa é
+/// acrescentar um valor aqui e um adapter lá — nada mais no fluxo de cobrança
+/// muda.
+enum PaymentProvider {
+  PAGBANK
+  MERCADO_PAGO
+  INFINITEPAY
+  /// Ton é Stone: o checkout hospedado vem da API do grupo (Pagar.me v5)
+  TON
+}
+
+/// Ambiente da credencial. Não é preferência de tela: sandbox e produção têm
+/// URL, chave e assinatura diferentes nas quatro casas, e o adapter escolhe a
+/// base por aqui.
+enum PaymentProviderMode {
+  SANDBOX
+  PRODUCTION
 }
 
 enum PaymentReceived {

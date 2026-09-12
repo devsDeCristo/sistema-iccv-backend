@@ -1,86 +1,107 @@
-import { Injectable, HttpException } from '@nestjs/common';
-import axios, { AxiosInstance } from 'axios';
+import { Injectable, Logger } from '@nestjs/common';
+import { PaymentProviderMode } from '@prisma/client';
 import { CreatePagbankCheckoutDto } from './dto/create-checkout.dto';
+import { criarHttp, falhaDoGateway } from '../core/gateway-http';
+import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 
+/** Bases oficiais. O modo escolhe; a credencial de uma não vale na outra. */
+const BASES: Record<PaymentProviderMode, string> = {
+  PRODUCTION: 'https://api.pagseguro.com',
+  SANDBOX: 'https://sandbox.api.pagseguro.com',
+};
+
+export interface PagbankCredenciais {
+  token: string;
+  /** Só para ambiente próprio de teste; vazio usa a base oficial do modo */
+  baseUrl?: string;
+}
+
+/**
+ * A conversa com o PagBank. Os caminhos e os corpos são os mesmos de antes —
+ * o que mudou é de onde vem o token: da credencial da igreja, e não do `.env`.
+ */
 @Injectable()
 export class PagbankClient {
-  private http: AxiosInstance;
+  private readonly logger = new Logger(PagbankClient.name);
 
-  constructor() {
-    this.http = axios.create({
-      baseURL: process.env.URL_API_PAG_BANK,
-      timeout: 15000,
-      headers: {
-        Accept: '*/*',
-      },
-    });
-
-    // Interceptor para sempre injetar o token corretamente
-    this.http.interceptors.request.use((config) => {
-      config.headers.Authorization = `Bearer ${process.env.TOKEN_API_PAG_BANK?.trim()}`;
-      return config;
+  private http(cred: PagbankCredenciais, mode: PaymentProviderMode) {
+    return criarHttp(cred.baseUrl?.trim() || BASES[mode], {
+      headers: { Authorization: `Bearer ${cred.token.trim()}` },
     });
   }
 
-  async createCheckout(payload: CreatePagbankCheckoutDto) {
+  async createCheckout(
+    payload: CreatePagbankCheckoutDto,
+    cred: PagbankCredenciais,
+    mode: PaymentProviderMode,
+  ) {
     try {
-      const response = await this.http.post('/checkouts', payload);
-      return response.data;
+      const { data } = await this.http(cred, mode).post('/checkouts', payload);
+      return data;
     } catch (err: any) {
-      console.log(err);
-      throw new HttpException(
-        err.response?.data || 'Erro PagBank',
-        err.response?.status || 500,
-      );
+      falhaDoGateway(this.logger, 'PagBank', 'criar checkout', err);
     }
   }
 
-  async getCheckout(checkoutId: string) {
+  async inactivateCheckout(
+    checkoutId: string,
+    cred: PagbankCredenciais,
+    mode: PaymentProviderMode,
+  ) {
     try {
-      const response = await this.http.get(`/checkouts/${checkoutId}`);
-      return response.data;
-    } catch (err: any) {
-      throw new HttpException(
-        err.response?.data || 'Erro PagBank',
-        err.response?.status || 500,
-      );
-    }
-  }
-
-  async inactivateCheckout(checkoutId: string) {
-    try {
-      const response = await this.http.post(
+      const { data } = await this.http(cred, mode).post(
         `/checkouts/${checkoutId}/inactivate`,
       );
-      return response.data;
+      return data;
     } catch (err: any) {
-      throw new HttpException(
-        err.response?.data || 'Erro PagBank',
-        err.response?.status || 500,
-      );
+      falhaDoGateway(this.logger, 'PagBank', 'inativar checkout', err);
     }
   }
 
-  async getPaymentStatus(referenceId: string) {
+  /**
+   * As cobranças de uma referência.
+   *
+   * O 404 com `resource_not_found` não é falha: é o checkout que foi criado
+   * aqui e abandonado lá antes de virar cobrança. Quem chama precisa seguir em
+   * frente nesse caso, então ele vira um erro tipado em vez de um `if` sobre o
+   * formato do corpo do PagBank espalhado pelo serviço de pagamento.
+   */
+  async getCharges(
+    referenceId: string,
+    cred: PagbankCredenciais,
+    mode: PaymentProviderMode,
+  ): Promise<any[]> {
     try {
-      const response = await this.http.get('/charges', {
+      const { data } = await this.http(cred, mode).get('/charges', {
         params: { reference_id: referenceId },
       });
 
-      return response.data;
+      // A API devolve a lista direta; o envelope `{ charges: [...] }` aparece
+      // em algumas respostas e custa nada aceitar.
+      return Array.isArray(data) ? data : data?.charges ?? [];
     } catch (err: any) {
-      throw new HttpException(
-        err.response?.data || 'Erro PagBank',
-        err.response?.status || 500,
-      );
+      const naoExiste =
+        err?.response?.status === 404 ||
+        err?.response?.data?.error_messages?.[0]?.code === 'resource_not_found';
+
+      if (naoExiste) {
+        throw new GatewayResourceNotFoundError('PagBank', referenceId);
+      }
+
+      falhaDoGateway(this.logger, 'PagBank', 'consultar cobranças', err);
     }
   }
 
-  private logError(err: any) {
-    console.error('PagBank ERROR:', {
-      status: err.response?.status,
-      data: err.response?.data,
-      message: err.message,
+  /**
+   * Chamada barata só para dizer se o token é aceito.
+   *
+   * Uma consulta de cobrança com referência inexistente serve: o token errado
+   * responde 401, e o token certo responde 404 ou lista vazia — que é
+   * exatamente a informação procurada, sem criar nada na conta de ninguém.
+   */
+  async ping(cred: PagbankCredenciais, mode: PaymentProviderMode) {
+    await this.http(cred, mode).get('/charges', {
+      params: { reference_id: `ping-${Date.now()}` },
     });
   }
 }

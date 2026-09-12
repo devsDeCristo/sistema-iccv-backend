@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CronService } from './cron.service';
-import { PagbankService } from 'src/gateways/pagbank/pagbank.service';
-import { PagbankClient } from 'src/gateways/pagbank/pagbank.client';
+import { GatewaysModule } from 'src/gateways/gateways.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot()],
-  providers: [CronService, PagbankService, PagbankClient],
+  imports: [ScheduleModule.forRoot(), GatewaysModule],
+  providers: [CronService],
 })
 export class CronModule {}

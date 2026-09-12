@@ -12,13 +12,25 @@ import { SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
 import {
   CheckoutStatus,
   PaymentMethod,
+  PaymentProvider,
   PaymentReceived,
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
 import { CreatePaymentCheckoutDto } from './dto/create-payment-checkout.dto';
-import { CreatePagbankCheckoutDto } from 'src/gateways/pagbank/dto/create-checkout.dto';
-import { PagbankService } from 'src/gateways/pagbank/pagbank.service';
+import {
+  GatewayResolvido,
+  PaymentGatewayRegistry,
+} from 'src/gateways/core/payment-gateway.registry';
+import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
+import { HostedCheckoutRequest } from 'src/gateways/core/gateway.types';
+import { totalCobradoEmCentavos } from 'src/gateways/core/discount';
+import { conferirValorPago } from './amount-check';
+import {
+  CANAL_DE_CHECKOUT,
+  CANAL_DE_PAGAMENTO,
+  montarUrlDeWebhook,
+} from 'src/gateways/core/webhook-url';
 import { randomUUID } from 'crypto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
@@ -52,11 +64,22 @@ const ACCEPTED_RECEIPT_MIME_TYPES = [
   'application/pdf',
 ];
 
+/**
+ * De qual casa e de qual credencial veio o retorno que está sendo aplicado.
+ * Ver `PaymentService.filtroDaCasa`.
+ */
+export interface EscopoDaCasa {
+  provider: PaymentProvider;
+  configId: string;
+  /** A igreja dona da credencial que se autenticou. Ver `filtroDaCasa`. */
+  churchId: string;
+}
+
 @Injectable()
 export class PaymentService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly pagbankService: PagbankService,
+    private readonly registry: PaymentGatewayRegistry,
   ) {}
 
   private readonly logger = new Logger(PaymentService.name);
@@ -100,12 +123,62 @@ export class PaymentService {
     };
   }
 
-  async createCheckout(dto: CreatePaymentCheckoutDto) {
-    if (process.env.PAGBANK_PAYMENT_ENABLED !== 'true') {
+  /**
+   * Interruptor geral, acima da configuração de cada igreja.
+   *
+   * Existia como `PAGBANK_PAYMENT_ENABLED` e continua valendo pelo nome antigo:
+   * é o que se desliga quando o problema é do sistema e não de uma igreja. A
+   * lógica inverteu — antes era preciso ligar explicitamente, agora é preciso
+   * desligar —, e não afrouxa nada: sem casa cadastrada e ligada, a igreja
+   * continua sem cobrar, que é o que a ausência da variável significava.
+   */
+  private exigirPagamentoOnlineLigado() {
+    const desligado =
+      process.env.ONLINE_PAYMENT_ENABLED === 'false' ||
+      process.env.PAGBANK_PAYMENT_ENABLED === 'false';
+
+    if (desligado) {
       throw new ServiceUnavailableException(
         'Pagamentos online estão temporariamente indisponíveis. Contate o suporte!',
       );
     }
+  }
+
+  /**
+   * A casa que gerou um checkout, e não a que a igreja usa hoje.
+   *
+   * Trocar de gateway não pode cegar o sistema para o dinheiro que já saiu:
+   * perguntar o status de uma cobrança do PagBank com a credencial do Mercado
+   * Pago devolve "não existe", e a cobrança paga ficaria parada em WAITING.
+   *
+   * `configId` nulo é linha anterior a esta coluna — toda ela do PagBank, e é
+   * por isso que o `provider` tem default e a busca cai na configuração da
+   * igreja.
+   */
+  private async casaDoCheckout(
+    checkout: { configId: string | null; provider: PaymentProvider },
+    churchId: string,
+  ): Promise<GatewayResolvido> {
+    if (checkout.configId) {
+      return this.registry.porConfigId(checkout.configId);
+    }
+
+    const resolvido = await this.registry.porIgrejaEProvider(
+      churchId,
+      checkout.provider,
+    );
+
+    if (!resolvido) {
+      throw new ServiceUnavailableException(
+        `A integração ${checkout.provider} não está mais configurada nesta igreja.`,
+      );
+    }
+
+    return resolvido;
+  }
+
+  async createCheckout(dto: CreatePaymentCheckoutDto) {
+    this.exigirPagamentoOnlineLigado();
 
     const { userId, eventId, roleRegistrationId } = dto;
 
@@ -124,6 +197,11 @@ export class PaymentService {
         where: { id: eventId },
       });
       if (!event) throw new NotFoundException('Event not found');
+
+      // Quem cobra é a igreja do evento — é o evento que diz de quem é o
+      // dinheiro. Resolver aqui, antes de qualquer escrita, faz a igreja sem
+      // gateway configurado parar na porta em vez de no meio da transação.
+      const casaDaIgreja = await this.registry.paraIgreja(event.churchId);
 
       // Busca usuário
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -165,21 +243,30 @@ export class PaymentService {
       if (activeCheckouts.length > 0) {
         for (const checkout of activeCheckouts) {
           try {
-            const response = await this.pagbankService.getPaymentStatus(
+            const casa = await this.casaDoCheckout(checkout, event.churchId);
+            const charges = await casa.gateway.listCharges(
+              checkout.referenceId,
+              casa.context,
+            );
+
+            // Lista vazia é o mesmo caso do "não encontrado": o checkout saiu
+            // daqui e nunca virou cobrança lá. O `reduce` sem valor inicial
+            // estoura em lista vazia, e estourar aqui derrubaria a criação do
+            // checkout novo por causa de um que nem existe.
+            if (charges.length === 0) continue;
+
+            const chargeMaisRecente = charges.reduce((atual, item) =>
+              item.createdAt > atual.createdAt ? item : atual,
+            );
+
+            const statusConferido = conferirValorPago(
+              chargeMaisRecente.status,
+              chargeMaisRecente.paidAmountCents,
+              checkout.chargedAmountCents,
               checkout.referenceId,
             );
-            const chargeMaisRecente = response.reduce((atual, item) => {
-              return new Date(item.created_at) > new Date(atual.created_at)
-                ? item
-                : atual;
-            });
 
-            const pagbankStatus = chargeMaisRecente.status as PaymentStatus;
-            const method = chargeMaisRecente.payment_method
-              .type as PaymentMethod;
-            const payload = chargeMaisRecente;
-
-            if (pagbankStatus !== PaymentStatus.WAITING) {
+            if (statusConferido !== PaymentStatus.WAITING) {
               //atualiza no banco
               await this.prisma.paymentCheckout.updateMany({
                 where: { checkoutId: checkout.checkoutId },
@@ -187,22 +274,24 @@ export class PaymentService {
               });
               await this.prisma.payment.updateMany({
                 where: { id: checkout.paymentId },
-                data: { status: pagbankStatus, method, payload },
+                data: {
+                  status: statusConferido,
+                  method: chargeMaisRecente.method,
+                  payload: chargeMaisRecente.raw as Prisma.InputJsonValue,
+                },
               });
               throw new BadRequestException(
                 `Alguns itens possuem pagamentos em andamento. Por favor, atualize a página.`,
               );
             }
           } catch (error) {
-            if (
-              error.status === 404 &&
-              error.response?.error_messages[0].code === 'resource_not_found'
-            ) {
-              // mesmo com checkout ativo, nenhuma ordem foi criada na pagbank, então pode prosseguir
+            if (error instanceof GatewayResourceNotFoundError) {
+              // mesmo com checkout ativo, nenhuma ordem foi criada na casa,
+              // então pode prosseguir
               continue;
             }
             this.logger.error(
-              `Erro ao verificar status do pagamento na PagBank para referenceId ${checkout.referenceId}:`,
+              `Erro ao verificar status do pagamento em ${checkout.provider} para referenceId ${checkout.referenceId}:`,
               error,
             );
             throw error;
@@ -295,39 +384,49 @@ export class PaymentService {
 
       const { ddd, numero } = this.extrairDddENumero(user.cellphone);
       const dateExpiration = new Date(Date.now() + 1 * 60 * 60 * 1000); //1h
-      const backendUrl = process.env.URL_BACKEND?.replace(/\/$/, '');
       const frontendUrl = process.env.URL_FRONTEND?.replace(/\/$/, '');
-      const payload: CreatePagbankCheckoutDto = {
-        reference_id: randomUUID(),
-        soft_descriptor: 'Igreja de cristo',
-        expiration_date: dateExpiration.toISOString(),
-        payment_notification_urls: [`${backendUrl}/webhooks/pagbank/payments`],
-        notification_urls: [`${backendUrl}/webhooks/pagbank/checkouts`],
-        redirect_url: `${frontendUrl}/events/${eventId}`,
-        return_url: `${frontendUrl}/events/${eventId}`,
-        customer_modifiable: false,
+
+      // A URL de notificação carrega o segredo desta igreja nesta casa. Cada
+      // igreja tem o seu: um vazamento não vale para as outras, e a rota
+      // reconhece qual configuração está respondendo sem confiar no corpo.
+      const { gateway, context, config, webhookSecret } = casaDaIgreja;
+
+      const pedido: HostedCheckoutRequest = {
+        referenceId: randomUUID(),
+        eventId,
+        eventName: event.name,
+        softDescriptor: 'Igreja de cristo',
+        expiresAt: dateExpiration,
+        paymentNotificationUrl: montarUrlDeWebhook(
+          config.provider,
+          webhookSecret,
+          CANAL_DE_PAGAMENTO,
+        ),
+        checkoutNotificationUrl: montarUrlDeWebhook(
+          config.provider,
+          webhookSecret,
+          CANAL_DE_CHECKOUT,
+        ),
+        redirectUrl: `${frontendUrl}/events/${eventId}`,
         customer: {
           name: user.fullName,
           email: user.email,
-          tax_id: user.cpf,
+          taxId: user.cpf,
           phone: { country: '55', area: ddd, number: numero },
         },
-        discount_amount: totalDiscount * 100,
+        // Arredondado: o desconto é percentual sobre o preço, e um resultado
+        // como 1234.9999999 em centavos é recusado por casa que só aceita
+        // inteiro — e aceito como fração por quem converte na marra.
+        discountCents: Math.round(totalDiscount * 100),
         items: tickets
           .filter((t) => t.price > 0)
           .map((t) => ({
-            reference_id: t.id,
+            referenceId: t.id,
             description: t.description,
             name: `Ingresso ${event.name} - ${t.description}`,
             quantity: 1,
-            unit_amount: t.price * 100,
+            unitAmountCents: Math.round(t.price * 100),
           })),
-        payment_methods: [
-          { type: 'CREDIT_CARD' },
-          { type: 'DEBIT_CARD' },
-          { type: 'BOLETO' },
-          { type: 'PIX' },
-        ],
       };
 
       const checkoutIdsToInvalidate = [
@@ -337,23 +436,37 @@ export class PaymentService {
       // ============================
       // FASE 2 — Chamada externa (fora da transaction)
       // ============================
-      const result = await this.pagbankService.createCheckout(payload);
+      const result = await gateway.createCheckout(pedido, context);
 
-      if (result?.error) {
-        throw new BadRequestException('Error creating checkout in PagBank');
+      const linkPay = result.payUrl;
+
+      if (!linkPay) {
+        throw new BadRequestException(
+          `Não foi possível gerar o link de pagamento em ${gateway.descriptor.label}`,
+        );
       }
 
-      const linkPay =
-        result.links.find((l: any) => l.rel === 'PAY')?.href ?? '';
+      // Invalidar checkouts antigos na api (assíncrono).
+      // Cada um na casa que o criou: um checkout do PagBank não se invalida
+      // com a credencial do Mercado Pago.
+      const antigosPorId = new Map(
+        activeCheckouts.map((c) => [c.checkoutId, c]),
+      );
 
-      // Invalidar checkouts antigos na api (assíncrono)
       for (const checkoutId of checkoutIdsToInvalidate) {
-        this.pagbankService.inactivateCheckout(checkoutId).catch((err) => {
-          this.logger.error(
-            `Erro ao inativar checkout ${checkoutId} na PagBank:`,
-            JSON.stringify(err),
-          );
-        });
+        const antigo = antigosPorId.get(checkoutId);
+        if (!antigo) continue;
+
+        this.casaDoCheckout(antigo, event.churchId)
+          .then((casa) =>
+            casa.gateway.inactivateCheckout(checkoutId, casa.context),
+          )
+          .catch((err) => {
+            this.logger.error(
+              `Erro ao inativar checkout ${checkoutId} em ${antigo.provider}:`,
+              JSON.stringify(err?.message ?? err),
+            );
+          });
       }
 
       // ============================
@@ -376,11 +489,23 @@ export class PaymentService {
           await tx.paymentCheckout.createMany({
             data: unpaidPayments.map((payment) => ({
               paymentId: payment.id,
-              checkoutId: result.id,
+              checkoutId: result.checkoutId,
               link: linkPay,
-              referenceId: payload.reference_id,
+              referenceId: pedido.referenceId,
               status: CheckoutStatus.ACTIVE,
               amount: tickets.reduce((sum, t) => sum + t.price, 0),
+              // O que a casa foi mandada cobrar, já com o desconto. `amount`
+              // fica como está — soma dos ingressos, em reais, sem desconto —
+              // porque é o que os relatórios leem; a baixa precisa do outro
+              // número para conferir o que voltou pago.
+              chargedAmountCents: totalCobradoEmCentavos(
+                pedido.items,
+                pedido.discountCents,
+              ),
+              // De quem é este checkout. Sem os dois, o retorno da casa e a
+              // reconciliação teriam que adivinhar a quem perguntar.
+              provider: config.provider,
+              configId: config.id,
             })),
           });
 
@@ -411,17 +536,59 @@ export class PaymentService {
     }
   }
 
+  /**
+   * Recorte do retorno: a casa que se autenticou só mexe no que é dela.
+   *
+   * A referência é um uuid nosso e não se adivinha, mas isto não custa nada e
+   * fecha o caso em que ela é conhecida: uma notificação autenticada pela
+   * credencial de uma igreja não dá baixa em cobrança de outra.
+   *
+   * O ramo de `configId: null` é o histórico — checkouts anteriores à coluna,
+   * todos do PagBank.
+   */
+  private filtroDaCasa(escopo?: EscopoDaCasa) {
+    if (!escopo) return {};
+
+    return {
+      OR: [
+        { configId: escopo.configId },
+        /**
+         * Checkout anterior à coluna `configId` — todos do PagBank. Aqui não
+         * há credencial gravada para comparar, então o recorte tem que vir da
+         * igreja dona do evento.
+         *
+         * Sem ela, a casa bastava: um admin que configura o PagBank da sua
+         * igreja tem token e segredo de URL, e com eles assinaria um "pago"
+         * para a referência antiga de qualquer outra igreja. O uuid da
+         * referência não sai em resposta nenhuma e é o que segurava isso — mas
+         * segredo por obscuridade não é recorte.
+         */
+        {
+          configId: null,
+          provider: escopo.provider,
+          payment: {
+            eventUserRole: {
+              eventOnUsers: { event: { churchId: escopo.churchId } },
+            },
+          },
+        },
+      ],
+    };
+  }
+
   async updatePaymentWebhook(
     referenceId: string,
     status: PaymentStatus,
     method: PaymentMethod,
     payload: any,
+    escopo?: EscopoDaCasa,
+    pagoEmCentavos?: number | null,
   ) {
     try {
       await this.prisma.$transaction(
         async (tx) => {
           const paymentCheckout = await tx.paymentCheckout.findMany({
-            where: { referenceId },
+            where: { referenceId, ...this.filtroDaCasa(escopo) },
             include: { payment: true },
           });
           if (!paymentCheckout || paymentCheckout.length === 0) {
@@ -430,12 +597,21 @@ export class PaymentService {
           if (paymentCheckout[0].payment.status === PaymentStatus.PAID) {
             return; // idempotência
           }
+
+          // "Pago" só vale se o valor bate com o que foi cobrado
+          const statusConferido = conferirValorPago(
+            status,
+            pagoEmCentavos,
+            paymentCheckout[0].chargedAmountCents,
+            referenceId,
+          );
+
           // marcar como recebido
           await this.prisma.payment.updateMany({
             where: { id: { in: paymentCheckout.map((pc) => pc.payment.id) } },
             data: {
               method,
-              status,
+              status: statusConferido,
               payload,
             },
           });
@@ -458,17 +634,18 @@ export class PaymentService {
   async updatePaymentCheckoutWebhook(
     checkoutId: string,
     status: CheckoutStatus,
+    escopo?: EscopoDaCasa,
   ) {
     try {
       await this.prisma.$transaction(async (tx) => {
         const paymentCheckout = await tx.paymentCheckout.findMany({
-          where: { checkoutId },
+          where: { checkoutId, ...this.filtroDaCasa(escopo) },
         });
         if (!paymentCheckout || paymentCheckout.length === 0) {
           throw new NotFoundException('Payment checkout not found');
         }
         await tx.paymentCheckout.updateMany({
-          where: { checkoutId },
+          where: { checkoutId, ...this.filtroDaCasa(escopo) },
           data: { status },
         });
       });

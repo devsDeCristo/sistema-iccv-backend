@@ -1,9 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { CheckoutStatus, PaymentStatus } from '@prisma/client';
-import { PagbankService } from 'src/gateways/pagbank/pagbank.service';
+import { CheckoutStatus, PaymentProvider, PaymentStatus } from '@prisma/client';
 import { PrismaService } from 'src/prisma';
 import { runAsJob } from 'src/context/request.context';
+import {
+  GatewayResolvido,
+  PaymentGatewayRegistry,
+} from 'src/gateways/core/payment-gateway.registry';
+import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
+import { conferirValorPago } from 'src/payment/amount-check';
+
+/** Uma cobrança pendente e a casa a quem perguntar por ela */
+interface CobrancaPendente {
+  referenceId: string;
+  provider: PaymentProvider;
+  configId: string | null;
+  /** O que foi pedido à casa, para conferir o que voltou pago */
+  chargedAmountCents: number | null;
+  eventId: string | null;
+}
 
 @Injectable()
 export class CronService {
@@ -17,10 +32,8 @@ export class CronService {
    */
   constructor(
     private readonly prisma: PrismaService,
-    private readonly pagbankService: PagbankService,
+    private readonly registry: PaymentGatewayRegistry,
   ) {}
-
-  private PAGBANK_TOKEN = process.env.PAGBANK_TOKEN;
 
   @Cron(CronExpression.EVERY_3_HOURS)
   reconcilePayments() {
@@ -31,106 +44,186 @@ export class CronService {
 
   private async reconciliar() {
     this.logger.log('⏳ Iniciando reconciliação de pagamentos...');
-    // 1. Busca todos os pagamentos pendentes ou em analise no banco
+
+    // 1. Busca todos os pagamentos pendentes ou em análise no banco
     const pendentes = await this.prisma.payment.findMany({
       where: {
         status: { in: [PaymentStatus.WAITING, PaymentStatus.IN_ANALYSIS] },
         checkouts: { some: {} },
       },
       select: {
+        eventId: true,
         checkouts: {
-          orderBy: { createdAt: 'desc' }, // ou created_at dependendo do seu schema
+          orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { referenceId: true },
+          select: {
+            referenceId: true,
+            provider: true,
+            configId: true,
+            chargedAmountCents: true,
+          },
         },
       },
     });
 
-    const referenceIds = pendentes
-      .map((p) => p.checkouts.map((c) => c.referenceId))
-      .flat();
+    const cobrancas: CobrancaPendente[] = pendentes.flatMap((pagamento) =>
+      pagamento.checkouts.map((checkout) => ({
+        ...checkout,
+        eventId: pagamento.eventId,
+      })),
+    );
 
     this.logger.log(`Encontrados ${pendentes.length} pagamentos pendentes`);
 
-    // 2. Para cada pagamento, consulta o PagBank
-    for (const referenceId of referenceIds) {
+    // Uma credencial por configuração, e não uma por cobrança: sem isto a
+    // rotina abre o envelope cifrado uma vez por linha pendente.
+    const casas = new Map<string, GatewayResolvido | null>();
+
+    // 2. Para cada pagamento, consulta a casa que gerou o checkout
+    for (const cobranca of cobrancas) {
       try {
-        const response = await this.pagbankService.getPaymentStatus(
-          referenceId,
+        const casa = await this.casaDa(cobranca, casas);
+
+        if (!casa) {
+          this.logger.warn(
+            `Sem credencial de ${cobranca.provider} para ${cobranca.referenceId}; pulando.`,
+          );
+          continue;
+        }
+
+        const charges = await casa.gateway.listCharges(
+          cobranca.referenceId,
+          casa.context,
         );
 
-        const chargeMaisRecente = response.reduce((atual, item) => {
-          return new Date(item.created_at) > new Date(atual.created_at)
-            ? item
-            : atual;
-        });
+        if (charges.length === 0) continue;
 
-        const pagbankStatus = chargeMaisRecente.status as PaymentStatus;
+        const chargeMaisRecente = charges.reduce((atual, item) =>
+          item.createdAt > atual.createdAt ? item : atual,
+        );
 
         // Só prossegue se o status for diferente do que está no banco
         const pagamentoNoBanco = await this.prisma.payment.findFirst({
-          where: {
-            checkouts: { some: { referenceId } },
-          },
+          where: { checkouts: { some: { referenceId: cobranca.referenceId } } },
         });
 
         if (!pagamentoNoBanco) {
           this.logger.warn(
-            `Pagamento com referenceId ${referenceId} não encontrado no banco.`,
+            `Pagamento com referenceId ${cobranca.referenceId} não encontrado no banco.`,
           );
           continue;
         }
 
-        if (pagamentoNoBanco.status === pagbankStatus) {
+        // "Pago" só vale se o valor bate: a rotina roda sozinha e é justamente
+        // ela que confirmaria, sem ninguém olhando, uma cobrança quitada a
+        // menos do que devia.
+        const statusConferido = conferirValorPago(
+          chargeMaisRecente.status,
+          chargeMaisRecente.paidAmountCents,
+          cobranca.chargedAmountCents,
+          cobranca.referenceId,
+        );
+
+        if (pagamentoNoBanco.status === statusConferido) {
           this.logger.log(
-            `Pagamento ${referenceId} já está com status ${pagbankStatus}, pulando...`,
+            `Pagamento ${cobranca.referenceId} já está com status ${statusConferido}, pulando...`,
           );
           continue;
         }
-        const method = chargeMaisRecente.payment_method.type || null;
-        const payload = chargeMaisRecente;
 
         // 3. Atualiza o status no banco em payments e checkouts
         await this.prisma.$transaction(async (tx) => {
           await tx.payment.updateMany({
             where: {
-              checkouts: {
-                some: { referenceId },
-              },
+              checkouts: { some: { referenceId: cobranca.referenceId } },
             },
             data: {
-              status: pagbankStatus,
-              method,
-              payload: payload as any,
+              status: statusConferido,
+              method: chargeMaisRecente.method,
+              payload: chargeMaisRecente.raw as any,
             },
           });
-          if (pagbankStatus === PaymentStatus.PAID) {
+
+          if (statusConferido === PaymentStatus.PAID) {
             await tx.paymentCheckout.updateMany({
-              where: { referenceId },
-              data: {
-                status: CheckoutStatus.INACTIVE,
-              },
+              where: { referenceId: cobranca.referenceId },
+              data: { status: CheckoutStatus.INACTIVE },
             });
           }
         });
+
         this.logger.log(
-          `Pagamento ${referenceId} atualizado para ${pagbankStatus}`,
+          `Pagamento ${cobranca.referenceId} atualizado para ${statusConferido}`,
         );
       } catch (error) {
-        if (error.response && error.status === 404) {
+        if (error instanceof GatewayResourceNotFoundError) {
           this.logger.warn(
-            `Pagamento ${referenceId} não encontrado no PagBank.`,
+            `Pagamento ${cobranca.referenceId} não encontrado em ${cobranca.provider}.`,
           );
           continue;
         }
+
         this.logger.error(
-          `Erro ao consultar PagBank para referenceId ${referenceId}: ${error.message}`,
+          `Erro ao consultar ${cobranca.provider} para referenceId ${cobranca.referenceId}: ${error.message}`,
         );
         continue;
       }
     }
 
     this.logger.log('✅ Reconciliação finalizada');
+  }
+
+  /**
+   * A casa que gerou o checkout, com a credencial reaproveitada entre as
+   * cobranças da mesma configuração.
+   *
+   * O `null` também entra no cache: uma igreja que apagou a credencial tem
+   * todas as cobranças dela puladas, e sem guardar a ausência a rotina
+   * consultaria o banco uma vez por linha para descobrir o mesmo nada.
+   */
+  private async casaDa(
+    cobranca: CobrancaPendente,
+    cache: Map<string, GatewayResolvido | null>,
+  ): Promise<GatewayResolvido | null> {
+    const chave = cobranca.configId ?? `legado:${cobranca.eventId}`;
+
+    if (cache.has(chave)) return cache.get(chave)!;
+
+    const resolvido = await this.resolver(cobranca);
+    cache.set(chave, resolvido);
+
+    return resolvido;
+  }
+
+  private async resolver(
+    cobranca: CobrancaPendente,
+  ): Promise<GatewayResolvido | null> {
+    try {
+      if (cobranca.configId) {
+        return await this.registry.porConfigId(cobranca.configId);
+      }
+
+      // Checkout anterior à coluna `configId`: a credencial é a da igreja dona
+      // do evento, na casa em que ele nasceu (PagBank, por definição).
+      if (!cobranca.eventId) return null;
+
+      const event = await this.prisma.event.findUnique({
+        where: { id: cobranca.eventId },
+        select: { churchId: true },
+      });
+
+      if (!event) return null;
+
+      return await this.registry.porIgrejaEProvider(
+        event.churchId,
+        cobranca.provider,
+      );
+    } catch (erro: any) {
+      this.logger.warn(
+        `Não foi possível abrir a credencial de ${cobranca.provider}: ${erro?.message}`,
+      );
+      return null;
+    }
   }
 
   /**
