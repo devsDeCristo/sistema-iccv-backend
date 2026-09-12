@@ -24,9 +24,23 @@ export interface PagbankCredenciais {
 export class PagbankClient {
   private readonly logger = new Logger(PagbankClient.name);
 
+  // Accept curinga (o valor está logo abaixo), e não `application/json`.
+  //
+  // Não é preferência: o `GET /charges?reference_id=` do PagBank responde
+  // **406** quando o Accept pede `application/json`. As outras casas aceitam o
+  // cabeçalho específico, e é por isso que ele é o padrão do `criarHttp` — esta
+  // é a exceção, e por isso está escrita aqui e não lá.
+  //
+  // Foi assim que o cliente antigo sempre chamou. A reconciliação quebrou
+  // inteira quando isto virou `application/json` na reorganização das pastas, e
+  // quebrou calada: todo pagamento pendente voltava com erro de rede e nenhum
+  // recebia baixa.
   private http(cred: PagbankCredenciais, mode: PaymentProviderMode) {
     return criarHttp(cred.baseUrl?.trim() || BASES[mode], {
-      headers: { Authorization: `Bearer ${cred.token.trim()}` },
+      headers: {
+        Accept: '*/*',
+        Authorization: `Bearer ${cred.token.trim()}`,
+      },
     });
   }
 
