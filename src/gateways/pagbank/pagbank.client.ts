@@ -100,8 +100,9 @@ export class PagbankClient {
    * exatamente a informação procurada, sem criar nada na conta de ninguém.
    */
   async ping(cred: PagbankCredenciais, mode: PaymentProviderMode) {
-    await this.http(cred, mode).get('/charges', {
-      params: { reference_id: `ping-${Date.now()}` },
-    });
+    // A API de checkout permite consultar por ID, mas não listar cobranças
+    // por `reference_id`. Um ID inexistente em formato válido dá 404 para um
+    // token aceito e evita criar qualquer recurso na conta.
+    await this.http(cred, mode).get('/checkouts/CHEC_000000000000');
   }
 }
