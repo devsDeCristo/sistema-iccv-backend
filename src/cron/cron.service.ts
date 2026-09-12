@@ -73,14 +73,29 @@ export class CronService {
       })),
     );
 
-    this.logger.log(`Encontrados ${pendentes.length} pagamentos pendentes`);
+    // A igreja com o módulo de pagamento desligado fica de fora. Desligar o
+    // módulo tem que parar tudo, e a reconciliação é justamente a parte que
+    // continua rodando sozinha depois que ninguém está mais olhando a tela —
+    // sem este filtro ela seguiria consultando a casa e dando baixa numa
+    // igreja que, para o resto do sistema, não cobra mais.
+    const desligadas = await this.eventosComModuloDesligado(cobrancas);
+    const aReconciliar = cobrancas.filter(
+      (cobranca) => !cobranca.eventId || !desligadas.has(cobranca.eventId),
+    );
+
+    const puladas = cobrancas.length - aReconciliar.length;
+
+    this.logger.log(
+      `Encontrados ${pendentes.length} pagamentos pendentes` +
+        (puladas ? ` (${puladas} em igreja com o módulo desligado)` : ''),
+    );
 
     // Uma credencial por configuração, e não uma por cobrança: sem isto a
     // rotina abre o envelope cifrado uma vez por linha pendente.
     const casas = new Map<string, GatewayResolvido | null>();
 
     // 2. Para cada pagamento, consulta a casa que gerou o checkout
-    for (const cobranca of cobrancas) {
+    for (const cobranca of aReconciliar) {
       try {
         const casa = await this.casaDa(cobranca, casas);
 
@@ -171,6 +186,31 @@ export class CronService {
     }
 
     this.logger.log('✅ Reconciliação finalizada');
+  }
+
+  /**
+   * Os eventos cuja igreja está com o módulo de pagamento desligado.
+   *
+   * Uma consulta só, sobre os eventos que de fato têm cobrança pendente, em vez
+   * de uma por cobrança. Devolve os **desligados** e não os ligados de
+   * propósito: cobrança sem evento (`eventId` nulo) não tem igreja a consultar,
+   * e perguntar pelos ligados a deixaria de fora sem ninguém ter decidido isso.
+   */
+  private async eventosComModuloDesligado(
+    cobrancas: CobrancaPendente[],
+  ): Promise<Set<string>> {
+    const eventIds = [
+      ...new Set(cobrancas.map((c) => c.eventId).filter(Boolean)),
+    ] as string[];
+
+    if (!eventIds.length) return new Set();
+
+    const eventos = await this.prisma.event.findMany({
+      where: { id: { in: eventIds }, church: { modulePayment: false } },
+      select: { id: true },
+    });
+
+    return new Set(eventos.map((evento) => evento.id));
   }
 
   /**

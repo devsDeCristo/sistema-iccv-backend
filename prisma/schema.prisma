@@ -23,6 +23,23 @@ model Church {
   /// ver `WhatsappAuth`.
   whatsapp WhatsappAuth[]
 
+  /// O módulo de cobrança online está ligado para esta igreja?
+  ///
+  /// Substitui as duas variáveis de ambiente que faziam isso antes
+  /// (`PAGBANK_PAYMENT_ENABLED` no servidor, `VITE_MODULE_PAYMENT` na tela),
+  /// que eram globais: desligar uma delas tirava a cobrança de todas as
+  /// igrejas ao mesmo tempo, e não havia como uma cobrar e a outra não.
+  ///
+  /// Desligado, o sistema não abre checkout, a reconciliação pula as cobranças
+  /// desta igreja e a tela esconde tudo que fala de pagamento. Quem liga e
+  /// desliga é dev ou super admin — é decisão de plataforma, não de quem
+  /// administra a igreja, do mesmo jeito que a variável de ambiente era.
+  ///
+  /// Nasce ligado para as igrejas que já existem: era esse o valor da variável
+  /// global, e mudar o padrão na migração tiraria a cobrança de quem já cobra.
+  /// Igreja sem gateway cadastrado continua sem cobrar de qualquer forma.
+  modulePayment Boolean @default(true)
+
   @@map("churches")
 }
 

@@ -61,9 +61,13 @@ export class PaymentProviderService {
    * reconhecer o que está lá e insuficiente para usar em qualquer lugar.
    */
   async listar(churchId: string) {
-    const configs = await this.prisma.paymentProviderConfig.findMany({
-      where: { churchId },
-    });
+    const [igreja, configs] = await Promise.all([
+      this.prisma.church.findUnique({
+        where: { id: churchId },
+        select: { modulePayment: true },
+      }),
+      this.prisma.paymentProviderConfig.findMany({ where: { churchId } }),
+    ]);
 
     const porProvider = new Map(configs.map((c) => [c.provider, c]));
 
@@ -83,7 +87,41 @@ export class PaymentProviderService {
       };
     });
 
-    return { cofreDisponivel: this.crypto.disponivel, integracoes };
+    return {
+      cofreDisponivel: this.crypto.disponivel,
+      // Acima de tudo o que vem depois: com o módulo desligado a igreja não
+      // cobra, mesmo com casa cadastrada e certa.
+      modulePayment: igreja?.modulePayment ?? false,
+      integracoes,
+    };
+  }
+
+  /**
+   * Liga e desliga o módulo de cobrança de uma igreja.
+   *
+   * Substitui as variáveis de ambiente que faziam isso para o servidor inteiro,
+   * e por isso a rota é de dev e super admin: continua sendo decisão de
+   * plataforma. Quem administra a igreja escolhe por qual casa ela cobra, não
+   * se ela pode cobrar.
+   *
+   * Desligar não apaga credencial nenhuma. A igreja para de cobrar, a
+   * reconciliação para de olhar as cobranças dela, e religar devolve tudo do
+   * jeito que estava — o que importa quando isso é usado para pausar uma igreja
+   * por um mês, que é o caso comum.
+   */
+  async definirModulo(churchId: string, ativo: boolean) {
+    const igreja = await this.prisma.church.update({
+      where: { id: churchId },
+      data: { modulePayment: ativo },
+      select: { id: true, name: true, modulePayment: true },
+    });
+
+    return {
+      modulePayment: igreja.modulePayment,
+      message: igreja.modulePayment
+        ? `Cobrança online ligada para ${igreja.name}.`
+        : `Cobrança online desligada para ${igreja.name}.`,
+    };
   }
 
   /**

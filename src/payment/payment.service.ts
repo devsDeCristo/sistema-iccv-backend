@@ -124,22 +124,23 @@ export class PaymentService {
   }
 
   /**
-   * Interruptor geral, acima da configuração de cada igreja.
+   * O módulo de cobrança desta igreja está ligado?
    *
-   * Existia como `PAGBANK_PAYMENT_ENABLED` e continua valendo pelo nome antigo:
-   * é o que se desliga quando o problema é do sistema e não de uma igreja. A
-   * lógica inverteu — antes era preciso ligar explicitamente, agora é preciso
-   * desligar —, e não afrouxa nada: sem casa cadastrada e ligada, a igreja
-   * continua sem cobrar, que é o que a ausência da variável significava.
+   * Substitui o antigo `PAGBANK_PAYMENT_ENABLED`, que era do servidor inteiro:
+   * desligar tirava a cobrança de todas as igrejas de uma vez, e não havia como
+   * uma cobrar e a vizinha não. Agora é `Church.modulePayment`.
+   *
+   * Fica acima da configuração de gateway, e não junto: uma igreja pode ter a
+   * casa cadastrada e certa e ainda assim não cobrar, porque o módulo dela está
+   * desligado. A ordem importa — conferir a casa primeiro devolveria "nenhuma
+   * casa configurada" para quem na verdade está com o módulo fora.
    */
-  private exigirPagamentoOnlineLigado() {
-    const desligado =
-      process.env.ONLINE_PAYMENT_ENABLED === 'false' ||
-      process.env.PAGBANK_PAYMENT_ENABLED === 'false';
-
-    if (desligado) {
+  private exigirModuloDePagamento(church: {
+    modulePayment: boolean;
+  }) {
+    if (!church.modulePayment) {
       throw new ServiceUnavailableException(
-        'Pagamentos online estão temporariamente indisponíveis. Contate o suporte!',
+        'O pagamento online não está habilitado para esta igreja.',
       );
     }
   }
@@ -178,8 +179,6 @@ export class PaymentService {
   }
 
   async createCheckout(dto: CreatePaymentCheckoutDto) {
-    this.exigirPagamentoOnlineLigado();
-
     const { userId, eventId, roleRegistrationId } = dto;
 
     try {
@@ -192,11 +191,15 @@ export class PaymentService {
         throw new BadRequestException('No role registrations provided');
       }
 
-      // Busca evento
+      // Busca evento — junto do módulo da igreja dona dele, que é quem diz
+      // se esta igreja cobra online
       const event = await this.prisma.event.findUnique({
         where: { id: eventId },
+        include: { church: { select: { modulePayment: true } } },
       });
       if (!event) throw new NotFoundException('Event not found');
+
+      this.exigirModuloDePagamento(event.church);
 
       // Quem cobra é a igreja do evento — é o evento que diz de quem é o
       // dinheiro. Resolver aqui, antes de qualquer escrita, faz a igreja sem
@@ -989,6 +992,10 @@ export class PaymentService {
         id: true,
         name: true,
         data: true,
+        // O módulo da igreja dona do evento: é ele que decide se a tela mostra
+        // ou esconde tudo que fala de pagamento neste cartão. Sem vir daqui, a
+        // tela teria que perguntar igreja por igreja para montar a lista.
+        church: { select: { modulePayment: true } },
 
         users: {
           where: { userId },
@@ -1037,6 +1044,7 @@ export class PaymentService {
       eventId: event.id,
       eventName: event.name,
       data: event.data,
+      modulePayment: event.church.modulePayment,
 
       registeredRoles: event.users.flatMap((u) =>
         u.rolesRegistration.map((r) => ({

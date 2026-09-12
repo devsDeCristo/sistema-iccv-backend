@@ -91,6 +91,15 @@ export class PaymentGatewayRegistry {
 
   /** A igreja tem alguma casa ligada? Usado para não oferecer o botão de pagar. */
   async igrejaCobraOnline(churchId: string): Promise<boolean> {
+    // O módulo vem antes da casa: a igreja pode ter gateway cadastrado, certo e
+    // ligado e mesmo assim não cobrar, porque o módulo dela está desligado.
+    const igreja = await this.prisma.church.findUnique({
+      where: { id: churchId },
+      select: { modulePayment: true },
+    });
+
+    if (!igreja?.modulePayment) return false;
+
     const total = await this.prisma.paymentProviderConfig.count({
       where: { churchId, enabled: true, isDefault: true },
     });

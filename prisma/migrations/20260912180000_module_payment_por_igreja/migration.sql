@@ -1,0 +1,13 @@
+-- O módulo de cobrança online, agora por igreja.
+--
+-- Até aqui isso era duas variáveis de ambiente — `PAGBANK_PAYMENT_ENABLED` no
+-- servidor e `VITE_MODULE_PAYMENT` na tela — e as duas eram globais. Ou todas
+-- as igrejas cobravam, ou nenhuma cobrava; e como eram duas, dava para o
+-- servidor estar aceitando cobrança com a tela escondendo o botão, ou o
+-- contrário.
+--
+-- Padrão ligado, e não desligado: era esse o valor da variável global em
+-- produção, e nascer desligado tiraria a cobrança de quem já cobra hoje, sem
+-- ninguém pedir. A igreja que nunca cadastrou gateway continua sem cobrar de
+-- qualquer jeito — a flag não liga cobrança sozinha, só deixa de bloqueá-la.
+ALTER TABLE "churches" ADD COLUMN "modulePayment" BOOLEAN NOT NULL DEFAULT true;

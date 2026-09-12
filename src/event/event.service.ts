@@ -1489,6 +1489,10 @@ export class EventService {
       const event = await this.prisma.event.findUnique({
         where: { id },
         include: {
+          // O módulo de cobrança da igreja dona do evento. A tela de inscrição
+          // decide por ele se oferece pagamento ou confirma direto — antes isso
+          // vinha de uma variável de ambiente do front, igual para todas.
+          church: { select: { modulePayment: true } },
           groupRoles: {
             include: {
               roles: {

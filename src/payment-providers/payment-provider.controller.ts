@@ -17,9 +17,10 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { ChurchTenantGuard } from 'src/decorators/church-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_ROLES, SUPER_ADMIN_ROLES } from 'src/auth/roles';
 import { PaymentProviderService } from './payment-provider.service';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
+import { SetPaymentModuleDto } from './dto/set-payment-module.dto';
 import { ProviderSlugPipe } from './provider-slug.pipe';
 
 /**
@@ -68,6 +69,28 @@ export class PaymentProviderController {
     description:
       'Campo secreto enviado em branco mantém o valor já gravado — não é preciso redigitar o token para mudar de ambiente.',
   })
+  /**
+   * Liga e desliga o módulo de cobrança da igreja.
+   *
+   * `@Roles(...SUPER_ADMIN_ROLES)` sobrescreve o `ADMIN_ROLES` da classe: isto
+   * substitui uma variável de ambiente, que só quem opera o sistema mexia.
+   * Deixar o admin da igreja desligar daria a ele um jeito de parar a
+   * reconciliação das cobranças que ele mesmo abriu.
+   *
+   * Vem antes das rotas de `:provider` no arquivo por organização, não por
+   * necessidade: `module` é um segmento e `:provider/default` são dois, então
+   * não há como uma casar no lugar da outra.
+   */
+  @ApiOperation({ summary: 'Ligar ou desligar a cobrança online da igreja' })
+  @Roles(...SUPER_ADMIN_ROLES)
+  @Patch('churches/:churchId/payment-providers/module')
+  definirModulo(
+    @Param('churchId') churchId: string,
+    @Body() dto: SetPaymentModuleDto,
+  ) {
+    return this.service.definirModulo(churchId, dto.enabled);
+  }
+
   @Put('churches/:churchId/payment-providers/:provider')
   salvar(
     @Param('churchId') churchId: string,
