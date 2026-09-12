@@ -607,7 +607,16 @@ export class PaymentService {
           );
 
           // marcar como recebido
-          await this.prisma.payment.updateMany({
+          //
+          // `tx`, e não `this.prisma`: com o cliente de fora, estas duas
+          // escritas rodavam soltas, cada uma se confirmando por conta
+          // própria. A leitura acima continuava valendo dentro da transação e
+          // as escritas, fora — então o `return` de idempotência protegia
+          // contra reenvio, mas nada protegia contra falha no meio: um erro
+          // entre uma e outra deixava o pagamento marcado como pago com o
+          // checkout ainda ativo, e o próximo clique em "pagar" reabria a
+          // cobrança de quem já tinha pagado.
+          await tx.payment.updateMany({
             where: { id: { in: paymentCheckout.map((pc) => pc.payment.id) } },
             data: {
               method,
@@ -616,8 +625,8 @@ export class PaymentService {
             },
           });
           // inativar checkouts
-          await this.prisma.paymentCheckout.updateMany({
-            where: { referenceId },
+          await tx.paymentCheckout.updateMany({
+            where: { referenceId, ...this.filtroDaCasa(escopo) },
             data: { status: CheckoutStatus.INACTIVE },
           });
         },

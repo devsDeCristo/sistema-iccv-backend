@@ -194,25 +194,67 @@ function parearPorId(before: any, after: any) {
 }
 
 /**
+ * Operadores de escrita do Prisma. O que os separa de um valor comum é que o
+ * resultado deles depende do estado no banco (`{ increment: 1 }` precisa saber
+ * quanto era), enquanto um valor comum simplesmente substitui o que estava lá.
+ */
+const UPDATE_OPERATORS = new Set([
+  'set',
+  'increment',
+  'decrement',
+  'multiply',
+  'divide',
+  'push',
+]);
+
+/**
+ * O valor é atribuído inteiro, ou é uma instrução para o banco calcular?
+ *
+ * A distinção não é "é objeto ou não": campo `Json` recebe objeto e é
+ * atribuído inteiro, igual a um texto. Quem decide é o formato — só é operador
+ * o objeto cujas chaves são **todas** nomes de operador. `{ increment: 1 }` é;
+ * `{ payment_method: {...}, links: [...] }` não é, e nem de longe.
+ */
+function ehOperador(valor: unknown): boolean {
+  if (
+    valor === null ||
+    typeof valor !== 'object' ||
+    valor instanceof Date ||
+    Array.isArray(valor)
+  ) {
+    return false;
+  }
+
+  const chaves = Object.keys(valor as object);
+
+  // `{}` não é operador: é um Json vazio, e atribuí-lo é previsível
+  return chaves.length > 0 && chaves.every((c) => UPDATE_OPERATORS.has(c));
+}
+
+/**
  * O "depois" de um `updateMany`, calculado em vez de relido.
  *
  * Dentro de uma transação interativa a releitura roda **por fora** dela e
  * devolve o estado antigo: o log conclui que nada mudou e a escrita some da
- * auditoria sem deixar rastro. O `updateMany` com campos de valor simples é
+ * auditoria sem deixar rastro. O `updateMany` que só atribui valores é
  * previsível — é o "antes" com esses campos por cima —, então aqui a conta é
  * exata.
  *
- * Devolve nulo quando o pedido traz operador (`{ increment: 1 }` e afins): aí
- * o resultado depende do banco e chutá-lo seria gravar um "depois" inventado.
+ * Objeto contava como imprevisível até aqui, e isso apagava justamente o que
+ * mais importa auditar: toda baixa de pagamento carrega o retorno do gateway
+ * no campo `payload`, que é `Json`. Com ele no pedido a conta era abandonada, a
+ * releitura trazia o estado antigo, e a escrita sumia da auditoria e da trilha
+ * do dinheiro — a reconciliação automática mudava status sem deixar uma linha,
+ * e o retorno do gateway, ao virar transacional, faria o mesmo.
+ *
+ * Devolve nulo só quando o pedido traz operador de verdade (`{ increment: 1 }`
+ * e afins): aí o resultado depende do banco e chutá-lo seria gravar um
+ * "depois" inventado.
  */
-function applyUpdateData(before: any, data: any): any[] | null {
+export function applyUpdateData(before: any, data: any): any[] | null {
   if (!Array.isArray(before) || !data || typeof data !== 'object') return null;
 
-  const simples = Object.values(data).every(
-    (valor) =>
-      valor === null || valor instanceof Date || typeof valor !== 'object',
-  );
-  if (!simples) return null;
+  if (Object.values(data).some(ehOperador)) return null;
 
   return before.map((row) => ({ ...row, ...data }));
 }
