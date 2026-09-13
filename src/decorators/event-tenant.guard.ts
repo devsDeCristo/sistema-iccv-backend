@@ -124,6 +124,16 @@ export class EventTenantGuard implements CanActivate {
    * O evento aparece na URL como `:idEvent` ou `:eventId`. As rotas de
    * pagamento identificam o recurso só pelo `:paymentId`, então ali o evento
    * sai do próprio pagamento.
+   *
+   * `null` aqui significa **"esta rota não tem nada de igreja para recortar"**
+   * — o extrato do próprio usuário, a lista de descontos. Não significa "não
+   * consegui descobrir": esse caso levanta exceção, e é de propósito.
+   *
+   * `Payment.eventId` é opcional no banco. Devolver `null` para um pagamento
+   * sem evento fazia o guard liberar, e um admin de qualquer igreja dava baixa
+   * nele — provado contra o servidor de verdade: admin da igreja B marcou como
+   * pago um pagamento órfão. Nenhuma linha assim existe hoje, mas nada no
+   * schema impede que exista, e o modo de falhar era o aberto.
    */
   private async resolveEventId(request: any): Promise<string | null> {
     const fromParams = request.params?.idEvent ?? request.params?.eventId;
@@ -138,6 +148,12 @@ export class EventTenantGuard implements CanActivate {
 
       if (!payment) {
         throw new NotFoundException('Pagamento não encontrado');
+      }
+
+      if (!payment.eventId) {
+        throw new ForbiddenException(
+          'Este pagamento não está ligado a nenhum evento, e não há como saber de qual igreja ele é',
+        );
       }
 
       return payment.eventId;

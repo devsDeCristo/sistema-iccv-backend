@@ -103,14 +103,33 @@ export function tenantChurchIds(
   return churchIdsComPerfil(requester, roles);
 }
 
-/** Barra o acesso quando o recurso é de uma igreja que a pessoa não alcança. */
+/**
+ * Barra o acesso quando o recurso é de uma igreja que a pessoa não alcança.
+ *
+ * **Não usa `tenantChurchIds`**, e essa é a diferença que importa. Lá o `null`
+ * quer dizer "não há recorte a aplicar", e cobre dois casos opostos: o super
+ * admin, que alcança tudo, e o usuário comum, para quem a pergunta de igreja
+ * não faz sentido — o catálogo de eventos é aberto a ele.
+ *
+ * Isso serve para **filtrar** uma lista. Aqui a pergunta é outra: alguém está
+ * mexendo num recurso que pertence a uma igreja. O usuário comum não tem
+ * resposta boa para ela, e herdar o `null` de lá o fazia passar.
+ *
+ * Hoje isso não é alcançável: toda rota que chega aqui declara `@Roles`, e o
+ * `RolesGuard` barra o usuário comum antes. Mas a proteção ficava dependendo
+ * de o `@Roles` existir em toda rota futura — e uma rota nova que esquecesse o
+ * decorador abriria sem nada avisar. Com o super admin conferido explicitamente
+ * e ninguém mais atravessando, esquecer o `@Roles` passa a custar um 403, não
+ * um vazamento.
+ */
 export function assertChurchAccess(
   requester: TenantRequester | null | undefined,
   resourceChurchId: string | null | undefined,
   options?: { roles?: number[]; message?: string },
 ): void {
-  const ids = tenantChurchIds(requester, options?.roles);
-  if (ids === null) return;
+  if (isSuperAdmin(requester)) return;
+
+  const ids = churchIdsComPerfil(requester, options?.roles ?? CHURCH_ROLES);
 
   if (!resourceChurchId || !ids.includes(resourceChurchId)) {
     throw new ForbiddenException(

@@ -667,9 +667,15 @@ export class PaymentService {
     }
   }
 
-  async updatePaymentStatus(payload: UpdatePaymentStatusDto) {
+  /**
+   * @param paymentId vem do caminho da rota, nunca do corpo — ver o DTO.
+   */
+  async updatePaymentStatus(
+    paymentId: string,
+    payload: UpdatePaymentStatusDto,
+  ) {
     const payment = await this.prisma.payment.findUnique({
-      where: { id: payload.paymentId },
+      where: { id: paymentId },
       include: {
         eventUserRole: {
           include: {
@@ -708,14 +714,14 @@ export class PaymentService {
         await uploadImageFirebase(
           payload.receiptFile,
           `events/${eventId}/payments/receipt-${
-            payload.paymentId
+            paymentId
           }-${Date.now()}`,
         )
       ).url;
     }
 
     await this.prisma.payment.update({
-      where: { id: payload.paymentId },
+      where: { id: paymentId },
       data: {
         status: payload.status,
         method: payload.method,
@@ -750,7 +756,7 @@ export class PaymentService {
     await this.prisma.$transaction(async (tx) => {
       const activeCheckouts = await tx.paymentCheckout.findMany({
         where: {
-          paymentId: payload.paymentId,
+          paymentId: paymentId,
           status: CheckoutStatus.ACTIVE,
         },
       });
@@ -772,7 +778,7 @@ export class PaymentService {
 
     // await this.prisma.paymentCheckout.updateMany({
     //   where: {
-    //     paymentId: payload.paymentId,
+    //     paymentId: paymentId,
     //     status: CheckoutStatus.ACTIVE,
     //   },
     //   data: { status: CheckoutStatus.INACTIVE },

@@ -2,6 +2,10 @@
 
 Este documento registra como a integração PagBank foi estruturada e por que cada decisão foi tomada.
 
+Para o desenho geral da cobrança — o contrato dos adapters, o cofre de
+credenciais, o recorte por igreja e as armadilhas comuns às quatro casas —, ver
+[`pagamentos.md`](./pagamentos.md).
+
 ## Visão geral
 
 A integração cria checkouts hospedados pelo PagBank. O backend envia os dados do pedido para a API, recebe o checkout e devolve ao frontend o link de pagamento. O estado do pagamento é atualizado por webhook e por reconciliação periódica.
@@ -42,7 +46,13 @@ GET /checkouts/CHEC_000000000000
 
 O resultado esperado para um token válido é `404 checkout_not_found`: o PagBank recebeu a autenticação, mas o checkout fictício não existe. Um `401` ou `403` indica problema de autenticação ou permissão.
 
-Essa escolha substitui o uso de `GET /charges?reference_id=...`. A API do PagBank não trata essa chamada como uma verificação confiável para esse caso e pode responder `406 Not Acceptable`, mesmo quando o token é válido. Consultar um ID de checkout inexistente é barato, não altera a conta e usa um endpoint documentado para leitura.
+Essa escolha substitui o uso de `GET /charges?reference_id=...`, que responde `404` ou lista vazia conforme o caso e não distingue bem "token recusado" de "não achei nada". Consultar um ID de checkout inexistente é barato, não altera a conta e usa um endpoint documentado para leitura.
+
+> **Correção de uma versão anterior deste documento.** Aqui se afirmava que o
+> `GET /charges?reference_id=` "pode responder 406 mesmo com o token válido", como
+> se o endpoint fosse pouco confiável. Não é. O `406` vinha do cabeçalho `Accept`
+> — ver a seção de reconciliação abaixo. O endpoint funciona e é o que a
+> reconciliação usa.
 
 ## Checkout
 
@@ -72,6 +82,21 @@ Além da assinatura do PagBank, cada configuração possui um segredo próprio n
 ## Reconciliação e estados
 
 O webhook é o caminho rápido para atualizar o pagamento. A reconciliação consulta as cobranças pelo `reference_id` quando necessário, por exemplo quando uma notificação não chegou.
+
+### O cabeçalho `Accept` desta casa é o curinga
+
+O `GET /charges?reference_id=` responde **406 Not Acceptable** quando o `Accept`
+pede `application/json`. Precisa ser o curinga (`*` barra `*`), que é como o
+cliente sempre chamou.
+
+As outras três casas aceitam o cabeçalho específico, e por isso ele é o padrão
+de `criarHttp`. O PagBank é a exceção, e ela está declarada no
+`PagbankClient.http()`.
+
+Isto já quebrou a reconciliação inteira uma vez, ao centralizar os cabeçalhos
+numa reorganização de pastas — e quebrou calada: todo pagamento pendente voltava
+erro de rede e nenhum recebia baixa. `pagbank.client.spec.ts` trava o cabeçalho
+justamente porque nada no tipo, no lint ou no build pega isso.
 
 Quando há mais de uma cobrança para a referência, uma cobrança `PAID` tem prioridade. Sem uma cobrança paga, vale a mais recente. Assim, uma tentativa recusada que chegue depois de uma aprovação não desfaz um pagamento já confirmado.
 

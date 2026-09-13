@@ -91,6 +91,25 @@ describe('assertChurchAccess', () => {
   it('não barra o super admin', () => {
     expect(() => assertChurchAccess(superAdmin, IGREJA_B)).not.toThrow();
   });
+
+  /**
+   * O inscrito não atravessa, mesmo `tenantChurchIds` não o recortando.
+   *
+   * Lá o `null` dele quer dizer "a pergunta de igreja não se aplica" — o
+   * catálogo de eventos é aberto a ele. Aqui a pergunta é outra, sobre mexer
+   * num recurso de alguma igreja, e herdar aquele `null` o deixava passar.
+   *
+   * Não era alcançável: toda rota que chega aqui declara `@Roles`. Mas a
+   * proteção dependia de ninguém esquecer o decorador numa rota nova.
+   */
+  it('barra o inscrito, que não administra igreja nenhuma', () => {
+    expect(() => assertChurchAccess(inscrito, IGREJA_A)).toThrow();
+    expect(() => assertChurchAccess(inscrito, IGREJA_B)).toThrow();
+  });
+
+  it('barra quando o recurso não tem igreja', () => {
+    expect(() => assertChurchAccess(doisChapeus, null)).toThrow();
+  });
 });
 
 describe('userChurchScope', () => {

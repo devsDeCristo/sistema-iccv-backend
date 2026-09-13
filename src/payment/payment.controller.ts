@@ -140,10 +140,8 @@ export class PaymentController {
     },
     @Body() body: UpdatePaymentStatusDto,
   ) {
-    const receiptFile = files.receiptFile?.[0];
-    body.receiptFile = receiptFile;
-    body.paymentId = paymentId;
-    return this.paymentService.updatePaymentStatus(body);
+    body.receiptFile = files.receiptFile?.[0];
+    return this.paymentService.updatePaymentStatus(paymentId, body);
   }
 
   // ===============================

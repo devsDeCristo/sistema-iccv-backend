@@ -48,6 +48,8 @@ const EVENTOS: Record<string, { churchId: string }> = {
 
 const PAGAMENTOS: Record<string, { eventId: string | null }> = {
   'pag-b': { eventId: 'evento-b' },
+  // `Payment.eventId` é opcional no banco; ver o teste do órfão lá embaixo
+  'pag-orfao': { eventId: null },
 };
 
 const prismaFalso = {
@@ -208,6 +210,20 @@ describe('EventTenantGuard', () => {
   it('acha o evento pelo pagamento quando a rota só tem o id dele', async () => {
     await expect(
       guard.canActivate(contexto('admin-a', { paymentId: 'pag-b' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  /**
+   * Pagamento sem evento não tem igreja, e sem igreja não há o que conferir.
+   *
+   * O guard devolvia `true` nesse caso, e um admin de qualquer igreja marcava
+   * a cobrança como paga. Foi provado contra o servidor de verdade antes da
+   * correção: admin da igreja B deu baixa num pagamento órfão e o banco gravou
+   * `PAID`. Nenhuma linha assim existe hoje — o schema é que permite.
+   */
+  it('barra pagamento sem evento, em vez de liberar', async () => {
+    await expect(
+      guard.canActivate(contexto('admin-a', { paymentId: 'pag-orfao' })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
