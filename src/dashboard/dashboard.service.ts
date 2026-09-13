@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   CheckinStatus,
   EventStatus,
@@ -8,6 +8,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
+  assertChurchAccess,
   perfilNaIgreja,
   SELECT_TENANT,
   TenantRequester,
@@ -103,8 +104,13 @@ export class DashboardService {
    * A home tem dois formatos. Quem administra igreja (admin e financeiro) vê a
    * dela; quem atravessa todas (super admin e dev) vê o sistema, e mesmo lá a
    * leitura é por igreja, com o evento em foco de cada uma.
+   *
+   * `churchId` escolhe uma igreja em vez do recorte de quem pediu, e é o que
+   * dá à home da igreja uma porta além do `/admin/inicio`: o super admin abre
+   * a mesma página pela lista de igrejas. Ela é **a home da igreja**, e não a
+   * de um perfil — por isso o formato que sai daqui é o mesmo nas duas portas.
    */
-  async overview(requesterId?: string) {
+  async overview(requesterId?: string, churchId?: string) {
     const requester = requesterId
       ? await this.prisma.user.findUnique({
           where: { id: requesterId },
@@ -112,10 +118,39 @@ export class DashboardService {
         })
       : null;
 
+    /**
+     * Pedir uma igreja não é o mesmo que poder abri-la.
+     *
+     * O `churchId` chega pela URL, então quem decide é o vínculo de quem
+     * pediu: super admin atravessa todas, admin e financeiro só alcançam as
+     * suas. Sem esta linha, o parâmetro seria um jeito de qualquer admin ler o
+     * painel inteiro de outra igreja — inscritos, caixa e mural.
+     *
+     * A permissão é conferida **antes** da existência de propósito: responder
+     * "não existe" para uma igreja que a pessoa não alcança já contaria quais
+     * ids existem.
+     */
+    if (churchId) {
+      assertChurchAccess(requester, churchId, {
+        roles: ADMIN_AREA_ROLES,
+        message: 'Você não administra esta igreja',
+      });
+
+      const igreja = await this.prisma.church.findUnique({
+        where: { id: churchId },
+        select: { id: true },
+      });
+
+      if (!igreja) {
+        throw new NotFoundException('Igreja não encontrada');
+      }
+    }
+
     // `null` aqui é super admin/dev: nenhum recorte a aplicar. Lista vazia é
     // admin sem vínculo nenhum, que não alcança igreja alguma — e o `in: []`
     // logo abaixo é justamente o que fecha a porta para ele.
-    const churchIds = tenantChurchIds(requester, ADMIN_AREA_ROLES);
+    const doVinculo = tenantChurchIds(requester, ADMIN_AREA_ROLES);
+    const churchIds = churchId ? [churchId] : doVinculo;
     const todasAsIgrejas = churchIds === null;
     const perfil = requester?.role ?? null;
 
@@ -142,9 +177,15 @@ export class DashboardService {
 
     const treasury = ehFinanceiro ? await this.tesouraria(doRecorte) : null;
 
-    // os indicadores do sistema são do dev: é o perfil que cuida da operação
-    // inteira, e é o único que já enxerga o registro de atividades
-    const insights = ehDev ? await this.indicadores() : null;
+    /**
+     * Os indicadores do sistema são do dev: é o perfil que cuida da operação
+     * inteira, e é o único que já enxerga o registro de atividades.
+     *
+     * `todasAsIgrejas` junto porque o dev que abre a home de **uma** igreja
+     * foi ver aquela igreja. Sem isso, a página da igreja abriria com os
+     * gráficos de funcionamento do sistema inteiro em cima dela.
+     */
+    const insights = ehDev && todasAsIgrejas ? await this.indicadores() : null;
 
     /**
      * O super admin não cuida do funcionamento: ele cuida do conjunto. O
@@ -152,7 +193,9 @@ export class DashboardService {
      * está a base de pessoas.
      */
     const panorama =
-      perfil === Role.SUPER_ADMIN ? await this.panoramaDoSistema() : null;
+      perfil === Role.SUPER_ADMIN && todasAsIgrejas
+        ? await this.panoramaDoSistema()
+        : null;
 
     /**
      * Os eventos da igreja, todos do mesmo tamanho.

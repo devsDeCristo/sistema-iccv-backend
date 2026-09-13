@@ -1,10 +1,11 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import { DashboardService } from './dashboard.service';
+import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 /**
  * Tela de abertura do painel. A rota é uma só para os quatro perfis que entram
@@ -22,7 +23,7 @@ export class DashboardController {
 
   @ApiOperation({ summary: 'Resumo de abertura do painel administrativo' })
   @Get()
-  overview(@Req() req: any) {
-    return this.dashboardService.overview(req.user?.userId);
+  overview(@Req() req: any, @Query() query: DashboardQueryDto) {
+    return this.dashboardService.overview(req.user?.userId, query.churchId);
   }
 }
