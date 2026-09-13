@@ -85,6 +85,13 @@ jobs:
       - name: Atualizar o serviço no Swarm
         if: github.ref == 'refs/heads/main' && env.DEPLOY_HOST != ''
         uses: appleboy/ssh-action@v1
+        env:
+          # Cadastre em Settings > Secrets and variables > Actions > Secrets.
+          #
+          # Secret e não Variable, ao contrário do que o front faz com as dele:
+          # lá o valor vai para dentro do bundle e é público por natureza, aqui
+          # é a chave que abre as credenciais de cobrança de todas as igrejas.
+          PAYMENT_CREDENTIALS_KEY: ${{ secrets.PAYMENT_CREDENTIALS_KEY }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -92,14 +99,31 @@ jobs:
           # migrar pra chave depois: troque por `key:` com o conteúdo do
           # arquivo de chave privada, não com uma senha.
           password: ${{ secrets.DEPLOY_PASSWORD }}
+          # Leva a variável para dentro do script remoto. Sem isto o `script`
+          # roda na VM sem enxergar nada do ambiente do runner.
+          envs: PAYMENT_CREDENTIALS_KEY
           script: |
             set -e
+
+            # A chave das credenciais entra aqui, no deploy, e **não** como
+            # build-arg: build-arg vira camada da imagem, e este package é
+            # público — `docker pull` seguido de `docker history` entregaria a
+            # chave a qualquer um. No deploy ela fica só no serviço do Swarm.
+            #
+            # Vazia significa "secret ainda não cadastrado". Nesse caso o
+            # serviço fica com o que já tem: mandar `--env-add CHAVE=` apagaria
+            # a chave em uso e derrubaria o pagamento online de todas as
+            # igrejas num deploy que não tinha nada a ver com isso.
+            set -- --with-registry-auth --force
+            if [ -n "$PAYMENT_CREDENTIALS_KEY" ]; then
+              set -- "$@" --env-add "PAYMENT_CREDENTIALS_KEY=$PAYMENT_CREDENTIALS_KEY"
+            fi
+
             # O package é público, então o pull é anônimo e --with-registry-auth
             # não é necessário hoje. Fica pelo caso de fecharem o package: aí ele
             # repassa aos agentes do Swarm a credencial do ~/.docker/config.json.
             docker service update \
-              --with-registry-auth \
-              --force \
+              "$@" \
               --image ${{ env.IMAGE_LC }}:latest \
               sistema-eventos-iccv_api
 
