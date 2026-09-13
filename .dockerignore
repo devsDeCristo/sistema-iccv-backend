@@ -28,7 +28,16 @@ test
 Dockerfile
 .dockerignore
 docker-compose.yml
-README.md
+
+# Nenhum .md entra na imagem. Eles não servem em runtime e descrevem a
+# estrutura interna do sistema — docs/pagamentos.md, por exemplo, explica o
+# recorte por igreja, o cofre de credenciais e as armadilhas conhecidas. Isso é
+# material de quem desenvolve, não de quem roda o container.
+#
+# `**/` não é enfeite: no .dockerignore, `*.md` casa **só a raiz** do contexto.
+# Com a regra sem prefixo, README.md ficava de fora e docs/pagamentos.md entrava
+# — conferido construindo uma imagem de teste com as duas regras.
+**/*.md
 
 # arquivos de deploy: usados no servidor, não dentro da imagem
 deploy
