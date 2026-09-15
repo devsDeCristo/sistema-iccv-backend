@@ -115,6 +115,59 @@ export class LogsService {
       .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
   }
 
+  async loginAttempts(query: ListLogsDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? DEFAULT_LIMIT;
+    const from = query.from
+      ? new Date(query.from)
+      : new Date(Date.now() - DEFAULT_WINDOW_HOURS * 60 * 60 * 1000);
+    const to = query.to ? new Date(query.to) : undefined;
+    const where: Prisma.LoginAttemptWhereInput = {
+      createdAt: { gte: from, ...(to ? { lte: to } : {}) },
+      ...(query.userId ? { userId: query.userId } : {}),
+      ...(query.document ? { document: { contains: query.document } } : {}),
+      ...(query.success !== undefined ? { success: query.success } : {}),
+    };
+
+    const [items, total, summary] = await Promise.all([
+      this.prisma.loginAttempt.findMany({
+        where,
+        include: {
+          user: { select: { id: true, fullName: true, profilePhotoUrl: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.loginAttempt.count({ where }),
+      this.prisma.loginAttempt.groupBy({
+        by: ['success'],
+        where,
+        _count: { _all: true },
+      }),
+    ]);
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        user: item.user
+          ? {
+              id: item.user.id,
+              name: item.user.fullName,
+              photoUrl: item.user.profilePhotoUrl,
+            }
+          : null,
+      })),
+      total,
+      page,
+      limit,
+      summary: {
+        success: summary.find((item) => item.success)?._count._all ?? 0,
+        failure: summary.find((item) => !item.success)?._count._all ?? 0,
+      },
+    };
+  }
+
   async findOne(chave: string) {
     const rows = await this.prisma.$queryRaw<Log[]>`
       SELECT * FROM "logs" WHERE ${GROUP_KEY} = ${chave}

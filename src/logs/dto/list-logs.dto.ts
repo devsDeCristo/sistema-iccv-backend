@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsInt,
   IsOptional,
@@ -64,4 +65,17 @@ export class ListLogsDto {
   @Min(1)
   @Max(100)
   limit?: number;
+
+  @ApiPropertyOptional({ description: 'Filtra pelo documento digitado' })
+  @IsOptional()
+  @IsString()
+  document?: string;
+
+  @ApiPropertyOptional({ description: 'true para sucesso, false para falha' })
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  success?: boolean;
 }

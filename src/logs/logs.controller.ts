@@ -33,6 +33,12 @@ export class LogsController {
     return this.logsService.operations();
   }
 
+  @ApiOperation({ summary: 'Registro de tentativas de login' })
+  @Get('login-attempts')
+  loginAttempts(@Query() query: ListLogsDto) {
+    return this.logsService.loginAttempts(query);
+  }
+
   @ApiOperation({ summary: 'Detalhe de uma atividade, com o antes e o depois' })
   @Get(':id')
   findOne(@Param('id') id: string) {
