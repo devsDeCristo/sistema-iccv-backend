@@ -135,6 +135,30 @@ export class UserDTO {
   neighborhood: string;
 
   @ApiProperty({
+    example: 'Rua das Palmeiras',
+    description: 'Rua',
+  })
+  @IsString()
+  @IsOptional()
+  street?: string;
+
+  @ApiProperty({
+    example: '120-A',
+    description: 'Número do endereço. Texto: aceita "s/n" e número com letra.',
+  })
+  @IsString()
+  @IsOptional()
+  number?: string;
+
+  @ApiProperty({
+    example: '59000000',
+    description: 'CEP, somente dígitos',
+  })
+  @IsString()
+  @IsOptional()
+  zipCode?: string;
+
+  @ApiProperty({
     example: 'Natal',
     description: 'Cidade',
   })

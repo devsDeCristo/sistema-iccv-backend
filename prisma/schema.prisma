@@ -95,6 +95,14 @@ model User {
   worker             Boolean
   registrationNumber Int               @unique @default(autoincrement())
   neighborhood       String
+  /// Rua e número do endereço. Opcionais porque a coluna nasceu depois dos
+  /// cadastros que já estão em produção: exigir valor aqui obrigaria a inventar
+  /// um endereço para cada linha antiga só para a migração passar.
+  street             String?
+  number             String?
+  /// Só os 8 dígitos, sem hífen — a máscara é assunto da tela, como em `cpf`
+  /// e `cellphone`.
+  zipCode            String?
   badgeName          String?
   password           String            @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
   /// Vínculos de painel: em qual igreja a pessoa é admin e em qual é

@@ -29,6 +29,7 @@ const FIELD_LABELS: Record<string, string> = {
   method: 'Método',
   name: 'Nome',
   neighborhood: 'Bairro',
+  number: 'Número',
   note: 'Observação',
   notes: 'Observações',
   payload: 'Dados da transação',
@@ -41,10 +42,12 @@ const FIELD_LABELS: Record<string, string> = {
   startDate: 'Início',
   state: 'Estado',
   status: 'Status',
+  street: 'Rua',
   summary: 'Resumo',
   ticketHash: 'Ticket de redefinição',
   title: 'Título',
   worker: 'Obreiro',
+  zipCode: 'CEP',
 };
 
 export type LogChange = {
