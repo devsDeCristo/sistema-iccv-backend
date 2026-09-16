@@ -209,6 +209,23 @@ export class UserDTO {
   @MinLength(2)
   leadershipPosition?: string;
 
+  @ApiProperty({
+    example: 'Igreja Batista Central',
+    description:
+      'Igreja que a pessoa frequenta, em texto livre — não é uma igreja cadastrada no sistema',
+  })
+  @IsString()
+  @IsOptional()
+  congregation?: string;
+
+  @ApiProperty({
+    example: 'Pr. João Silva',
+    description: 'Nome do pastor da igreja que a pessoa frequenta',
+  })
+  @IsString()
+  @IsOptional()
+  pastorName?: string;
+
   @IsString()
   @IsOptional()
   eventId?: string;

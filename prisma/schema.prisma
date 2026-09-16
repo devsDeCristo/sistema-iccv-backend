@@ -84,6 +84,11 @@ model User {
   hypertensive       Boolean
   indicatedBy        String?
   leadershipPosition String?
+  /// Igreja que a pessoa frequenta, em texto livre. Não é `Church`: aquela é
+  /// a igreja que organiza eventos no sistema, e quem se inscreve pode vir de
+  /// uma congregação que nunca vai estar cadastrada aqui.
+  congregation       String?
+  pastorName         String?
   profession         String
   profilePhotoUrl    String?
   /// Perfil efetivo: 1 super admin, 5 usuário comum, ou o mais alto dos
