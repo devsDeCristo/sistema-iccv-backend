@@ -32,6 +32,7 @@ import {
 } from './dto/create-payment-checkout.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
+import { UpdateProductsDeliveryDto } from './dto/update-products-delivery.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('payments')
@@ -153,6 +154,28 @@ export class PaymentController {
   @Patch('payments/:paymentId/refund')
   refund(@Param('paymentId') paymentId: string) {
     return this.paymentService.refundPayment(paymentId);
+  }
+
+  // ===============================
+  // Entrega dos produtos
+  // ===============================
+  @ApiOperation({
+    summary: 'Registrar ou desfazer a entrega dos produtos de uma compra',
+    description:
+      'Só compra paga pode ser marcada como entregue; desfazer vale em qualquer status.',
+  })
+  @Roles(...ADMIN_AREA_ROLES)
+  @Patch('payments/:paymentId/products-delivery')
+  updateProductsDelivery(
+    @Param('paymentId') paymentId: string,
+    @Body() body: UpdateProductsDeliveryDto,
+    @Req() req: any,
+  ) {
+    return this.paymentService.updateProductsDelivery(
+      paymentId,
+      body.delivered,
+      req.user?.userId,
+    );
   }
 
   // ===============================

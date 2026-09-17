@@ -347,6 +347,16 @@ model Payment {
   productItems       PaymentProductItem[]
   eventUserRole      EventOnUsersRolesRegistration? @relation(fields: [userId, eventId, roleRegistrationId], references: [userId, eventId, roleRegistrationId], onDelete: Cascade)
 
+  /// Quando os produtos desta compra foram entregues. Nulo é o normal: ainda
+  /// não foram, ou a compra nem tem produto.
+  ///
+  /// A entrega é da compra inteira, e não de cada item: quem leva duas camisas
+  /// paga uma vez e recebe as duas na mão, de uma vez só.
+  productsDeliveredAt   DateTime?
+  /// Quem registrou a entrega. Id solto, como em `minorApprovalReviewedById`:
+  /// o registro não pode sumir se o administrador for removido depois.
+  productsDeliveredById String?
+
   @@unique([userId, eventId, roleRegistrationId])
   @@index([eventId])
   @@map("payments")

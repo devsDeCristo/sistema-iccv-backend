@@ -1079,6 +1079,61 @@ export class PaymentService {
     });
   }
   /**
+   * Registra (ou desfaz) a entrega dos produtos de uma compra.
+   *
+   * A entrega é da compra inteira: quem leva duas camisas paga uma vez e
+   * recebe as duas de uma vez.
+   *
+   * Só compra paga pode ser entregue — entregar antes de receber é justamente
+   * o que o controle existe para impedir. Desfazer, ao contrário, vale em
+   * qualquer status: é a correção de um registro errado, e quando um pagamento
+   * é estornado a entrega precisa poder voltar atrás.
+   */
+  async updateProductsDelivery(
+    paymentId: string,
+    delivered: boolean,
+    adminId?: string,
+  ) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        status: true,
+        _count: { select: { productItems: true } },
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    if (payment._count.productItems === 0) {
+      throw new BadRequestException(
+        'Esta compra não tem produtos para entregar',
+      );
+    }
+
+    if (delivered && payment.status !== PaymentStatus.PAID) {
+      throw new BadRequestException(
+        'Só dá para registrar a entrega depois que o pagamento estiver pago',
+      );
+    }
+
+    return this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        productsDeliveredAt: delivered ? new Date() : null,
+        productsDeliveredById: delivered ? adminId ?? null : null,
+      },
+      select: {
+        id: true,
+        productsDeliveredAt: true,
+        productsDeliveredById: true,
+      },
+    });
+  }
+
+  /**
    * @param requesterId quem pediu o extrato. O admin de uma igreja não pode
    * ver o que a pessoa deve nas outras: sem este recorte bastava o id de um
    * inscrito para ler a vida financeira dele no sistema inteiro.

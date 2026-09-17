@@ -38,6 +38,8 @@ const FIELD_LABELS: Record<string, string> = {
   payload: 'Dados da transação',
   price: 'Preço',
   profession: 'Profissão',
+  productsDeliveredAt: 'Entrega dos produtos',
+  productsDeliveredById: 'Entrega registrada por',
   profilePhotoUrl: 'Foto de perfil',
   quantity: 'Quantidade',
   receivedFrom: 'Origem',
