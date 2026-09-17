@@ -267,6 +267,23 @@ export class EventController {
   }
 
   @ApiOperation({
+    summary: 'Buy event products for a confirmed registration',
+    description:
+      'Chamado depois da inscrição e antes do checkout. Os itens entram no pagamento do ingresso e seguem no mesmo link de pagamento.',
+  })
+  @Post(':idEvent/users/:idUser/products')
+  buyProducts(
+    @Param('idUser') idUser: string,
+    @Param('idEvent') idEvent: string,
+    @Body() body: ProductPurchaseDto,
+    @Req() req: any,
+  ) {
+    return this.eventService.comprarProdutos(idUser, idEvent, body, {
+      requesterId: req.user?.userId,
+    });
+  }
+
+  @ApiOperation({
     summary: 'Attach/replace the signed guardian authorization term',
   })
   @Post(':idEvent/users/:idUser/guardian-term')
