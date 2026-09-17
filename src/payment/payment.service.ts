@@ -75,6 +75,29 @@ export interface EscopoDaCasa {
   churchId: string;
 }
 
+/** Quem pagou, do jeito que a lista de pagamentos do painel mostra */
+const SELECT_PESSOA_DO_PAGAMENTO = {
+  id: true,
+  fullName: true,
+  email: true,
+  cpf: true,
+  profilePhotoUrl: true,
+} satisfies Prisma.UserSelect;
+
+/** O que se mostra de um produto comprado: o que é, quanto e por quanto */
+const SELECT_ITEM_DE_PRODUTO = {
+  id: true,
+  quantity: true,
+  unitPrice: true,
+  variant: {
+    select: {
+      id: true,
+      name: true,
+      product: { select: { id: true, name: true } },
+    },
+  },
+} satisfies Prisma.PaymentProductItemSelect;
+
 @Injectable()
 export class PaymentService {
   constructor(
@@ -180,6 +203,7 @@ export class PaymentService {
 
   async createCheckout(dto: CreatePaymentCheckoutDto) {
     const { userId, eventId, roleRegistrationId } = dto;
+    const paymentIds = dto.paymentIds ?? [];
 
     try {
       // ============================
@@ -187,7 +211,7 @@ export class PaymentService {
       // ============================
 
       // Verifica se há registros
-      if (roleRegistrationId.length === 0) {
+      if (roleRegistrationId.length === 0 && paymentIds.length === 0) {
         throw new BadRequestException('No role registrations provided');
       }
 
@@ -215,11 +239,23 @@ export class PaymentService {
         where: {
           userId,
           eventId,
-          roleRegistrationId: { in: roleRegistrationId },
+          // ingressos pela regra; compras avulsas de produto, que não têm
+          // regra, pelo id — sempre dentro do mesmo usuário e evento
+          OR: [
+            { roleRegistrationId: { in: roleRegistrationId } },
+            { id: { in: paymentIds } },
+          ],
         },
         include: {
           checkouts: true,
           eventUserRole: { select: { role: true, discount: true } },
+          productItems: {
+            include: {
+              variant: {
+                select: { name: true, product: { select: { name: true } } },
+              },
+            },
+          },
         },
       });
 
@@ -360,14 +396,18 @@ export class PaymentService {
       }
 
       // ---------- prepara dados para novo checkout ----------
-      const tickets = unpaidPayments.map((p) => {
-        const role = p.eventUserRole?.role;
-        return {
-          id: role?.id ?? 'unknown',
-          description: role?.description ?? 'Ingresso',
-          price: role?.price ?? 0,
-        };
-      });
+      // só pagamento com ingresso vira item de ingresso: a compra avulsa de
+      // produto não tem regra, e viraria um "Ingresso" de R$ 0
+      const tickets = unpaidPayments
+        .filter((p) => p.eventUserRole?.role)
+        .map((p) => {
+          const role = p.eventUserRole?.role;
+          return {
+            id: role?.id ?? 'unknown',
+            description: role?.description ?? 'Ingresso',
+            price: role?.price ?? 0,
+          };
+        });
 
       // Calcula desconto
       const totalDiscount = unpaidPayments.reduce((acc, payment) => {
@@ -381,7 +421,30 @@ export class PaymentService {
         return acc;
       }, 0);
 
-      if (!tickets.length) {
+      /**
+       * Os produtos: os que foram junto do ingresso e as compras avulsas, com
+       * o preço gravado no momento da compra — não o de agora, que o admin
+       * pode ter mudado depois.
+       *
+       * O desconto continua sendo só do ingresso (`totalDiscount` lê o preço
+       * da regra). Nas casas sem campo de desconto ele é espalhado entre todos
+       * os itens por `aplicarDesconto`, mas o total abatido é o mesmo.
+       */
+      const produtos = unpaidPayments.flatMap((p) =>
+        p.productItems.map((item) => ({
+          referenceId: item.variantId,
+          description: `${item.variant.product.name} - ${item.variant.name}`,
+          name: `${item.variant.product.name} (${item.variant.name})`,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+      );
+      const totalDosProdutos = produtos.reduce(
+        (soma, produto) => soma + produto.unitPrice * produto.quantity,
+        0,
+      );
+
+      if (!tickets.length && !produtos.length) {
         throw new BadRequestException('No tickets found for payment');
       }
 
@@ -421,15 +484,26 @@ export class PaymentService {
         // como 1234.9999999 em centavos é recusado por casa que só aceita
         // inteiro — e aceito como fração por quem converte na marra.
         discountCents: Math.round(totalDiscount * 100),
-        items: tickets
-          .filter((t) => t.price > 0)
-          .map((t) => ({
-            referenceId: t.id,
-            description: t.description,
-            name: `Ingresso ${event.name} - ${t.description}`,
-            quantity: 1,
-            unitAmountCents: Math.round(t.price * 100),
-          })),
+        items: [
+          ...tickets
+            .filter((t) => t.price > 0)
+            .map((t) => ({
+              referenceId: t.id,
+              description: t.description,
+              name: `Ingresso ${event.name} - ${t.description}`,
+              quantity: 1,
+              unitAmountCents: Math.round(t.price * 100),
+            })),
+          ...produtos
+            .filter((produto) => produto.unitPrice > 0)
+            .map((produto) => ({
+              referenceId: produto.referenceId,
+              description: produto.description,
+              name: produto.name,
+              quantity: produto.quantity,
+              unitAmountCents: Math.round(produto.unitPrice * 100),
+            })),
+        ],
       };
 
       const checkoutIdsToInvalidate = [
@@ -496,7 +570,10 @@ export class PaymentService {
               link: linkPay,
               referenceId: pedido.referenceId,
               status: CheckoutStatus.ACTIVE,
-              amount: tickets.reduce((sum, t) => sum + t.price, 0),
+              // ingressos + produtos, sem desconto — o mesmo que os
+              // pagamentos somam em `amount`
+              amount:
+                tickets.reduce((sum, t) => sum + t.price, 0) + totalDosProdutos,
               // O que a casa foi mandada cobrar, já com o desconto. `amount`
               // fica como está — soma dos ingressos, em reais, sem desconto —
               // porque é o que os relatórios leem; a baixa precisa do outro
@@ -697,7 +774,9 @@ export class PaymentService {
         'Não é possível alterar um pagamento já pago, exceto para reembolso',
       );
     }
-    const eventId = payment.eventUserRole?.eventOnUsers?.event?.id;
+    // compra avulsa de produto não tem inscrição: o evento vem do pagamento
+    const eventId =
+      payment.eventUserRole?.eventOnUsers?.event?.id ?? payment.eventId;
     let url: string | undefined;
     let fileType: string | undefined;
     if (payload.receiptFile) {
@@ -729,13 +808,16 @@ export class PaymentService {
         ...(ehLancamentoManual(payment.status, payload.status) && {
           receivedFrom: PaymentReceived.EXTERNAL,
         }),
-        ...(payload.discountsAppliedId && {
-          eventUserRole: {
-            update: {
-              discountId: payload?.discountsAppliedId || null,
+        // desconto é da inscrição; compra avulsa de produto não tem onde
+        // guardar, e o update aninhado estouraria sem a relação
+        ...(payload.discountsAppliedId &&
+          payment.roleRegistrationId && {
+            eventUserRole: {
+              update: {
+                discountId: payload?.discountsAppliedId || null,
+              },
             },
-          },
-        }),
+          }),
         payload: {
           ...(typeof payment.payload === 'object' && payment.payload !== null
             ? payment.payload
@@ -860,9 +942,16 @@ export class PaymentService {
     return new Map(pessoas.map((p) => [p.id, p.fullName.trim()]));
   }
 
+  /**
+   * Uma linha por pagamento: cada inscrição (com os produtos que foram junto)
+   * e cada compra avulsa de produto.
+   *
+   * `purchaseType` diz qual é qual. A compra avulsa não tem grupo nem regra,
+   * e é por ele que o painel a separa numa aba própria.
+   */
   async findPaymentsByEvent(eventId?: string, userId?: string) {
-    return this.prisma.eventOnUsers
-      .findMany({
+    const [inscricoes, comprasAvulsas] = await Promise.all([
+      this.prisma.eventOnUsers.findMany({
         where: {
           ...(eventId && { eventId }),
           ...(userId && { userId }),
@@ -871,21 +960,25 @@ export class PaymentService {
           rolesRegistration: {
             select: {
               discount: { select: { id: true } },
-              payment: true,
+              payment: {
+                include: {
+                  // quem compra o quê: é por aqui que a organização separa
+                  // as camisas de cada um na entrega
+                  productItems: { select: SELECT_ITEM_DE_PRODUTO },
+                },
+              },
               role: {
-                select: { groupId: true, group: { select: { name: true } } },
+                select: {
+                  groupId: true,
+                  description: true,
+                  group: { select: { name: true } },
+                },
               },
             },
           },
 
           user: {
-            select: {
-              id: true,
-              fullName: true,
-              email: true,
-              cpf: true,
-              profilePhotoUrl: true,
-            },
+            select: SELECT_PESSOA_DO_PAGAMENTO,
           }, // se não tiver eventid, traz os dados do evento tb
           event: eventId
             ? false
@@ -897,20 +990,50 @@ export class PaymentService {
                 },
               },
         },
-      })
-      .then((eventOnUsers) => {
-        return eventOnUsers.flatMap((eou) =>
-          eou.rolesRegistration
-            .filter((rr) => rr.payment) // evita null
-            .map((rr) => ({
-              ...eou.user,
-              ...rr.payment, // cada pagamento vira um item separado
-              groupId: rr.role?.groupId,
-              groupName: rr.role?.group?.name,
-              discountsAppliedId: rr.discount?.id,
-            })),
-        );
-      });
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          ...(eventId && { eventId }),
+          ...(userId && { userId }),
+          roleRegistrationId: null,
+          productItems: { some: {} },
+        },
+        include: { productItems: { select: SELECT_ITEM_DE_PRODUTO } },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const linhasDeInscricao = inscricoes.flatMap((eou) =>
+      eou.rolesRegistration
+        .filter((rr) => rr.payment) // evita null
+        .map((rr) => ({
+          ...eou.user,
+          ...rr.payment, // cada pagamento vira um item separado
+          purchaseType: 'REGISTRATION' as const,
+          groupId: rr.role?.groupId,
+          groupName: rr.role?.group?.name,
+          roleName: rr.role?.description,
+          discountsAppliedId: rr.discount?.id,
+        })),
+    );
+
+    if (!comprasAvulsas.length) return linhasDeInscricao;
+
+    // o pagamento guarda só o id da pessoa: os dados dela vêm numa consulta
+    // só, para a página inteira
+    const pessoas = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(comprasAvulsas.map((p) => p.userId!))] } },
+      select: SELECT_PESSOA_DO_PAGAMENTO,
+    });
+    const pessoaPorId = new Map(pessoas.map((pessoa) => [pessoa.id, pessoa]));
+
+    const linhasAvulsas = comprasAvulsas.map((compra) => ({
+      ...pessoaPorId.get(compra.userId!),
+      ...compra,
+      purchaseType: 'PRODUCTS' as const,
+    }));
+
+    return [...linhasDeInscricao, ...linhasAvulsas];
   }
 
   async findPaymentsByUser(userId: string, eventId?: string) {
@@ -1020,6 +1143,7 @@ export class PaymentService {
                   select: {
                     status: true,
                     method: true,
+                    productItems: { select: SELECT_ITEM_DE_PRODUTO },
                   },
                 },
               },
@@ -1046,6 +1170,29 @@ export class PaymentService {
       },
     });
 
+    // compras avulsas de produto: não passam pela inscrição, então não vêm no
+    // `select` acima
+    const comprasAvulsas = events.length
+      ? await this.prisma.payment.findMany({
+          where: {
+            userId,
+            eventId: { in: events.map((event) => event.id) },
+            roleRegistrationId: null,
+            productItems: { some: {} },
+          },
+          select: {
+            id: true,
+            eventId: true,
+            status: true,
+            method: true,
+            amount: true,
+            createdAt: true,
+            productItems: { select: SELECT_ITEM_DE_PRODUTO },
+          },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [];
+
     return events.map((event) => ({
       eventId: event.id,
       eventName: event.name,
@@ -1060,8 +1207,13 @@ export class PaymentService {
           price: r.role.price,
           paymentStatus: r.payment?.status ?? 'WAITING',
           paymentMethod: r.payment?.method ?? null,
+          products: r.payment?.productItems ?? [],
         })),
       ),
+
+      productPurchases: comprasAvulsas
+        .filter((compra) => compra.eventId === event.id)
+        .map(({ eventId: _evento, ...compra }) => compra),
 
       waitlistRoles: event.waitlist.map((w) => ({
         roleId: w.rolesRegistration!.id,

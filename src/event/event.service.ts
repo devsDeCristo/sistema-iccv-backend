@@ -12,6 +12,7 @@ import {
 import * as sharp from 'sharp';
 
 import {
+  CheckoutStatus,
   Event,
   EventStatus,
   PaymentMethod,
@@ -20,7 +21,16 @@ import {
   Prisma,
   PrismaService,
 } from '../prisma';
-import { EventDto } from './dto/event.dto';
+import { EventDto, ProductPurchaseDto } from './dto/event.dto';
+import {
+  ProdutoRecebido,
+  STATUS_QUE_LIBERAM_ESTOQUE,
+  conferirEstoque,
+  disponivel,
+  montarPedido,
+  validarFoto,
+  validarProdutos,
+} from './event-products';
 import { ADMIN_AREA_ROLES, isAdminRole, Role } from 'src/auth/roles';
 import {
   SELECT_TENANT,
@@ -42,6 +52,7 @@ import {
 
 type EventWithGroupRole = Prisma.EventGetPayload<{
   include: {
+    products: { include: { variants: true } };
     groupRoles: {
       include: {
         roles: {
@@ -206,6 +217,217 @@ export class EventService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Compra de produtos do evento. Só para quem tem inscrição confirmada: quem
+   * está apenas na lista de espera não compra — nem na inscrição, nem depois.
+   *
+   * Duas formas, conforme `attachToRegistration`:
+   *
+   * - **Junto da inscrição** (a oferta logo depois de se inscrever): os itens
+   *   entram no pagamento do ingresso, se ele ainda está em aberto, e vão no
+   *   mesmo checkout — pagar o ingresso é pagar os produtos.
+   * - **Compra avulsa** (pela página do evento, ou quando o ingresso já não
+   *   aceita itens): vira um pagamento próprio, sem ingresso. Precisa ser
+   *   separado porque o ingresso pode já estar pago, e somar produto num
+   *   pagamento quitado deixaria o valor devido escondido atrás de um "pago".
+   *
+   * Nos dois casos baixa manual, estorno, dashboard e reconciliação continuam
+   * valendo: para eles é só mais um pagamento do evento.
+   */
+  async comprarProdutos(
+    userId: string,
+    eventId: string,
+    body: ProductPurchaseDto,
+    options?: { requesterId?: string; attempt?: number },
+  ) {
+    const MAX_RETRIES = 5;
+    const attempt = options?.attempt ?? 1;
+
+    if (options?.requesterId) {
+      await this.assertEventIsVisible(eventId, options.requesterId);
+      await this.assertPodeInscrever(options.requesterId, userId);
+    }
+
+    const pedido = montarPedido(body.items);
+
+    try {
+      // Serializable pelo mesmo motivo da inscrição: duas pessoas levando a
+      // última camisa P ao mesmo tempo leriam as duas "resta 1"
+      return await this.prisma.$transaction(
+        (tx) =>
+          this._comprarProdutosTx(
+            tx,
+            userId,
+            eventId,
+            pedido,
+            body.attachToRegistration ?? false,
+          ),
+        { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 },
+      );
+    } catch (error: any) {
+      const isSerializationConflict =
+        error?.code === '40001' || error?.code === 'P2034';
+
+      if (isSerializationConflict && attempt <= MAX_RETRIES) {
+        return this.comprarProdutos(userId, eventId, body, {
+          // as travas de acesso já passaram na primeira tentativa
+          attempt: attempt + 1,
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  private async _comprarProdutosTx(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    eventId: string,
+    pedido: Map<string, number>,
+    juntoDaInscricao: boolean,
+  ) {
+    const variantIds = [...pedido.keys()];
+
+    const [variantes, inscricoesConfirmadas] = await Promise.all([
+      tx.eventProductVariant.findMany({
+        where: { id: { in: variantIds }, product: { eventId } },
+        include: { product: { select: { name: true, price: true } } },
+      }),
+      tx.eventOnUsersRolesRegistration.count({ where: { userId, eventId } }),
+    ]);
+
+    if (!inscricoesConfirmadas) {
+      throw new ForbiddenException(
+        'Só quem tem inscrição confirmada no evento pode comprar os produtos',
+      );
+    }
+
+    if (variantes.length !== variantIds.length) {
+      throw new BadRequestException('Produto inválido para este evento');
+    }
+
+    conferirEstoque(
+      variantes.map((variante) => ({
+        id: variante.id,
+        name: variante.name,
+        stock: variante.stock,
+        productName: variante.product.name,
+      })),
+      await this.vendidosPorVariante(eventId, tx, variantIds),
+      pedido,
+    );
+
+    // em centavos: somar reais em ponto flutuante deixa 0,1 + 0,2 no banco
+    const totalEmCentavos = variantes.reduce(
+      (soma, variante) =>
+        soma +
+        Math.round(variante.product.price * 100) * pedido.get(variante.id)!,
+      0,
+    );
+
+    const ingresso = juntoDaInscricao
+      ? await this.ingressoQueAceitaProdutos(tx, userId, eventId)
+      : null;
+
+    let pagamento: { id: string; roleRegistrationId: string | null };
+    let valor: number;
+
+    if (ingresso) {
+      valor = (Math.round(ingresso.amount * 100) + totalEmCentavos) / 100;
+
+      pagamento = await tx.payment.update({
+        where: { id: ingresso.id },
+        data: {
+          amount: valor,
+          // o ingresso gratuito nasce pago; com produto, volta a esperar
+          ...(ingresso.status === PaymentStatus.PAID &&
+            totalEmCentavos > 0 && {
+              status: PaymentStatus.WAITING,
+              method: PaymentMethod.OTHER,
+            }),
+        },
+        select: { id: true, roleRegistrationId: true },
+      });
+    } else {
+      valor = totalEmCentavos / 100;
+
+      /**
+       * Pagamento sem ingresso: `roleRegistrationId` nulo. O único do
+       * pagamento é (usuário, evento, regra), e no Postgres nulos não colidem,
+       * então a mesma pessoa pode ter quantas compras avulsas quiser.
+       */
+      pagamento = await tx.payment.create({
+        data: {
+          userId,
+          eventId,
+          amount: valor,
+          status:
+            totalEmCentavos > 0 ? PaymentStatus.WAITING : PaymentStatus.PAID,
+          method:
+            totalEmCentavos > 0 ? PaymentMethod.OTHER : PaymentMethod.CASH,
+          receivedFrom: PaymentReceived.SYSTEM,
+        },
+        select: { id: true, roleRegistrationId: true },
+      });
+    }
+
+    for (const variante of variantes) {
+      await tx.paymentProductItem.create({
+        data: {
+          paymentId: pagamento.id,
+          variantId: variante.id,
+          quantity: pedido.get(variante.id)!,
+          // o preço de agora fica gravado: mudar o produto depois não muda
+          // o que esta pessoa escolheu pagar
+          unitPrice: variante.product.price,
+        },
+      });
+    }
+
+    return {
+      paymentId: pagamento.id,
+      roleRegistrationId: pagamento.roleRegistrationId,
+      /** verdadeiro quando virou um pagamento próprio, sem ingresso */
+      separatePayment: !ingresso,
+      productsTotal: totalEmCentavos / 100,
+      amount: valor,
+    };
+  }
+
+  /**
+   * O ingresso que ainda pode receber produtos: em aberto, sem checkout ativo
+   * e sem produto dentro. Um checkout ativo já tem o valor fechado na casa de
+   * pagamento — somar produto nele faria a pessoa pagar o link antigo e a
+   * conferência de valor (`chargedAmountCents`) recusar a baixa. E um ingresso
+   * que já recebeu produtos não recebe de novo: a segunda compra é outra
+   * compra, e aparece como tal.
+   *
+   * O ingresso gratuito nasce pago e também serve.
+   */
+  private async ingressoQueAceitaProdutos(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    eventId: string,
+  ) {
+    const ingressos = await tx.payment.findMany({
+      where: {
+        userId,
+        eventId,
+        roleRegistrationId: { not: null },
+        productItems: { none: {} },
+        checkouts: { none: { status: CheckoutStatus.ACTIVE } },
+        OR: [
+          { status: PaymentStatus.WAITING },
+          { status: PaymentStatus.PAID, amount: 0 },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 1,
+    });
+
+    return ingressos[0] ?? null;
   }
 
   private async _registerUserInEventTx(
@@ -957,6 +1179,7 @@ export class EventService {
   private async handlerReturnEvent(
     event: EventWithGroupRole,
     embedImages = false,
+    vendidos: Map<string, number> = new Map(),
   ) {
     const eventData = (event.data ?? {}) as Record<string, any>;
 
@@ -982,7 +1205,181 @@ export class EventService {
           };
         }),
       })),
+      // `sold` para o painel (trava de remoção), `available` para a tela de
+      // compra — nulo é sem limite
+      products: event.products.map((produto) => ({
+        ...produto,
+        variants: produto.variants.map((variante) => {
+          const sold = vendidos.get(variante.id) ?? 0;
+          return {
+            ...variante,
+            sold,
+            available: disponivel(variante.stock, sold),
+          };
+        }),
+      })),
     };
+  }
+
+  /**
+   * Unidades reservadas por variante do evento: a soma dos itens de
+   * pagamentos que ainda valem. Não há contador gravado, e é de propósito —
+   * cancelar, estornar ou remover a inscrição devolve a unidade sem que algum
+   * caminho do código precise lembrar de devolver.
+   */
+  private async vendidosPorVariante(
+    eventId: string,
+    tx: PrismaService | Prisma.TransactionClient = this.prisma,
+    variantIds?: string[],
+  ) {
+    const linhas = await tx.paymentProductItem.groupBy({
+      by: ['variantId'],
+      where: {
+        variant: { product: { eventId } },
+        ...(variantIds && { variantId: { in: variantIds } }),
+        payment: { status: { notIn: STATUS_QUE_LIBERAM_ESTOQUE } },
+      },
+      _sum: { quantity: true },
+    });
+
+    return new Map(
+      linhas.map((linha) => [linha.variantId, linha._sum.quantity ?? 0]),
+    );
+  }
+
+  /**
+   * O diff de produtos da edição, no mesmo formato do de grupos: remove o que
+   * sumiu, atualiza o que veio com id e cria o que veio sem.
+   *
+   * Produto ou variante que já teve item comprado não sai — nem com a compra
+   * cancelada. A linha do item aponta para a variante (e o banco trava com
+   * Restrict), e é ela que diz o que a pessoa escolheu.
+   */
+  private async operacoesDeProdutos(
+    eventId: string,
+    recebidos: ProdutoRecebido[],
+  ): Promise<Prisma.PrismaPromise<unknown>[]> {
+    validarProdutos(recebidos);
+
+    const atuais = await this.prisma.eventProduct.findMany({
+      where: { eventId },
+      include: {
+        variants: { include: { _count: { select: { items: true } } } },
+      },
+    });
+
+    const atuaisPorId = new Map(atuais.map((produto) => [produto.id, produto]));
+    const idsRecebidos = new Set(recebidos.map((p) => p.id).filter(Boolean));
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
+
+    for (const produto of atuais) {
+      if (idsRecebidos.has(produto.id)) continue;
+
+      if (produto.variants.some((variante) => variante._count.items > 0)) {
+        throw new BadRequestException(
+          `O produto "${produto.name}" já foi comprado e não pode ser removido`,
+        );
+      }
+
+      ops.push(this.prisma.eventProduct.delete({ where: { id: produto.id } }));
+    }
+
+    for (const produto of recebidos) {
+      const dados = {
+        name: produto.name.trim(),
+        description: produto.description?.trim() || null,
+        price: produto.price,
+      };
+
+      if (!produto.id) {
+        ops.push(
+          this.prisma.eventProduct.create({
+            data: {
+              ...dados,
+              eventId,
+              image: validarFoto(produto.image) ?? null,
+              variants: {
+                create: produto.variants.map((variante) => ({
+                  name: variante.name.trim(),
+                  stock: variante.stock ?? null,
+                })),
+              },
+            },
+          }),
+        );
+        continue;
+      }
+
+      const atual = atuaisPorId.get(produto.id);
+
+      /**
+       * Mesmo cuidado das regras: o id vem do corpo, e sem conferir que o
+       * produto é deste evento um admin mudaria preço e foto de produto de
+       * outra igreja mandando o id dele.
+       */
+      if (!atual) {
+        throw new BadRequestException('Produto não pertence a este evento');
+      }
+
+      const foto = validarFoto(produto.image);
+
+      ops.push(
+        this.prisma.eventProduct.update({
+          where: { id: atual.id },
+          data: { ...dados, ...(foto !== undefined && { image: foto }) },
+        }),
+      );
+
+      const variantesAtuais = new Map(atual.variants.map((v) => [v.id, v]));
+      const idsDeVariantes = new Set(
+        produto.variants.map((v) => v.id).filter(Boolean),
+      );
+
+      for (const variante of atual.variants) {
+        if (idsDeVariantes.has(variante.id)) continue;
+
+        if (variante._count.items > 0) {
+          throw new BadRequestException(
+            `A variante "${variante.name}" de "${atual.name}" já foi comprada e não pode ser removida`,
+          );
+        }
+
+        ops.push(
+          this.prisma.eventProductVariant.delete({
+            where: { id: variante.id },
+          }),
+        );
+      }
+
+      for (const variante of produto.variants) {
+        const dadosDaVariante = {
+          name: variante.name.trim(),
+          stock: variante.stock ?? null,
+        };
+
+        if (!variante.id) {
+          ops.push(
+            this.prisma.eventProductVariant.create({
+              data: { ...dadosDaVariante, productId: atual.id },
+            }),
+          );
+          continue;
+        }
+
+        if (!variantesAtuais.has(variante.id)) {
+          throw new BadRequestException('Variante não pertence a este produto');
+        }
+
+        ops.push(
+          this.prisma.eventProductVariant.update({
+            where: { id: variante.id },
+            data: dadosDaVariante,
+          }),
+        );
+      }
+    }
+
+    return ops;
   }
 
   // private async saveLogosFirebase(
@@ -1136,6 +1533,11 @@ export class EventService {
       throw new BadRequestException('Evento deve estar vinculado a uma igreja');
     }
 
+    // antes de qualquer escrita: produto mal cadastrado não pode deixar um
+    // evento pela metade, nem subir como erro 500 lá de dentro da transação
+    validarProdutos(data.products ?? []);
+    (data.products ?? []).forEach((produto) => validarFoto(produto.image));
+
     try {
       data.endDate = new Date(data.endDate);
       data.startDate = new Date(data.startDate);
@@ -1164,6 +1566,20 @@ export class EventService {
                     create: gr.roles.map((r) => ({
                       price: r.price,
                       description: r.description,
+                    })),
+                  },
+                })),
+              },
+              products: {
+                create: (data.products ?? []).map((produto) => ({
+                  name: produto.name.trim(),
+                  description: produto.description?.trim() || null,
+                  price: produto.price,
+                  image: validarFoto(produto.image) ?? null,
+                  variants: {
+                    create: produto.variants.map((variante) => ({
+                      name: variante.name.trim(),
+                      stock: variante.stock ?? null,
                     })),
                   },
                 })),
@@ -1502,6 +1918,10 @@ export class EventService {
               },
             },
           },
+          products: {
+            include: { variants: { orderBy: { name: 'asc' } } },
+            orderBy: { createdAt: 'asc' },
+          },
         },
       });
 
@@ -1526,7 +1946,11 @@ export class EventService {
         throw new NotFoundException('Event does not exist');
       }
 
-      return this.handlerReturnEvent(event, options.embedImages ?? false);
+      return this.handlerReturnEvent(
+        event,
+        options.embedImages ?? false,
+        await this.vendidosPorVariante(id),
+      );
     } catch (error) {
       throw error;
     }
@@ -1790,6 +2214,12 @@ export class EventService {
           }
         }
       }
+    }
+
+    // `undefined` é cliente que não conhece produtos: não mexe em nada. Lista
+    // vazia é o admin removendo todos, e cai na mesma trava de vendidos.
+    if (updateEvent.products !== undefined) {
+      ops.push(...(await this.operacoesDeProdutos(id, updateEvent.products)));
     }
 
     // Executa TODAS as operações em uma transaction segura

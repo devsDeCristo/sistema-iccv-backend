@@ -222,6 +222,7 @@ model Event {
   waitlist   Waitlist[]
   checkins   Checkin[]
   news       News[]
+  products   EventProduct[]
 
   @@index([churchId])
   @@map("events")
@@ -307,6 +308,9 @@ model Payment {
   userId             String?
   payload            Json?
   checkouts          PaymentCheckout[]
+  /// Produtos comprados junto deste ingresso. Somam em `amount` e entram no
+  /// mesmo checkout: pagar o ingresso é pagar os produtos dele.
+  productItems       PaymentProductItem[]
   eventUserRole      EventOnUsersRolesRegistration? @relation(fields: [userId, eventId, roleRegistrationId], references: [userId, eventId, roleRegistrationId], onDelete: Cascade)
 
   @@unique([userId, eventId, roleRegistrationId])
@@ -814,4 +818,70 @@ model WhatsappAuth {
   @@id([churchId, id])
   @@index([churchId])
   @@map("whatsapp_auth")
+}
+
+/// Produto vendido na inscrição do evento — camisa, caneca, livro.
+///
+/// Espelha o par grupo/regra: o produto é o que se oferece e as variantes são
+/// as escolhas dentro dele. O preço fica aqui, e não na variante, porque a
+/// camisa P e a GG custam o mesmo; quem precisar de preços diferentes cria
+/// outro produto.
+model EventProduct {
+  id          String                @id @default(uuid())
+  eventId     String
+  event       Event                 @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Float
+  /// Foto como data URL (`data:image/webp;base64,...`), gravada no próprio
+  /// banco. Chega reduzida pelo front e tem teto de tamanho no servidor: é
+  /// devolvida inteira em toda abertura do evento. Fica fora do log de
+  /// atividades (`REDACTED_FIELDS`), que registra só que ela mudou.
+  image       String?
+  variants    EventProductVariant[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([eventId])
+  @@map("event_products")
+}
+
+/// Uma escolha dentro do produto: o tamanho da camisa, a cor da caneca.
+model EventProductVariant {
+  id        String               @id @default(uuid())
+  productId String
+  product   EventProduct         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String
+  /// Unidades à venda; nulo é sem limite. O vendido não tem contador próprio:
+  /// sai da soma dos itens em pagamentos que ainda valem (ver
+  /// `STATUS_QUE_LIBERAM_ESTOQUE`), para que cancelar, estornar ou remover a
+  /// inscrição devolva a unidade sem ninguém lembrar de devolver.
+  stock     Int?
+  items     PaymentProductItem[]
+
+  @@index([productId])
+  @@map("event_product_variants")
+}
+
+/// Uma linha do carrinho: quantas unidades de uma variante, penduradas no
+/// pagamento de um ingresso.
+model PaymentProductItem {
+  id        String              @id @default(uuid())
+  paymentId String
+  /// Sai junto com o pagamento: remover a inscrição apaga a cobrança e com ela
+  /// a reserva de estoque.
+  payment   Payment             @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  variantId String
+  /// Restrict: variante vendida não some — o evento bloqueia a remoção antes,
+  /// e isto é a trava do banco para o caso de alguém passar por fora.
+  variant   EventProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  quantity  Int
+  /// Preço do produto no momento da compra. O admin pode mudar o preço
+  /// depois; o que a pessoa escolheu pagar não muda junto.
+  unitPrice Float
+  createdAt DateTime            @default(now())
+
+  @@unique([paymentId, variantId])
+  @@index([variantId])
+  @@map("payment_product_items")
 }

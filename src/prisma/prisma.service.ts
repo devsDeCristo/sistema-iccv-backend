@@ -28,6 +28,12 @@ const REDACTED_FIELDS: Record<string, string[]> = {
    * a configuração correspondente e confirmar um segredo adivinhado.
    */
   PaymentProviderConfig: ['credentials', 'webhookSecretHash'],
+  /**
+   * Não é segredo, é volume: a foto do produto é base64 de centenas de KB, e
+   * cada salvar do evento copiaria ela duas vezes para `logs`. O marcador
+   * registra que a foto mudou sem guardar a foto.
+   */
+  EventProduct: ['image'],
 };
 
 /** Marca no lugar do segredo: registra que mudou, sem guardar o valor */

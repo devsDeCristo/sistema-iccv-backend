@@ -13,7 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { EventService } from './event.service';
-import { EventDto, roleEventDto } from './dto/event.dto';
+import { EventDto, ProductPurchaseDto, roleEventDto } from './dto/event.dto';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -38,10 +38,18 @@ export class EventController {
   @Roles(...ADMIN_ROLES)
   @Post()
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'logoFile', maxCount: 1 },
-      { name: 'coverFile', maxCount: 1 },
-    ]),
+    FileFieldsInterceptor(
+      [
+        { name: 'logoFile', maxCount: 1 },
+        { name: 'coverFile', maxCount: 1 },
+      ],
+      {
+        // os produtos chegam como JSON num campo de texto, com as fotos em
+        // base64 dentro; o padrão do multer é 1 MB por campo, e poucas fotos
+        // já passam disso
+        limits: { fieldSize: 20 * 1024 * 1024 },
+      },
+    ),
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Create event' })
@@ -243,5 +251,22 @@ export class EventController {
       body.roleRegistrationId,
       { requesterId: req.user?.userId },
     );
+  }
+
+  @ApiOperation({
+    summary: 'Buy event products for a confirmed registration',
+    description:
+      'Chamado depois da inscrição e antes do checkout. Os itens entram no pagamento do ingresso e seguem no mesmo link de pagamento.',
+  })
+  @Post(':idEvent/users/:idUser/products')
+  buyProducts(
+    @Param('idUser') idUser: string,
+    @Param('idEvent') idEvent: string,
+    @Body() body: ProductPurchaseDto,
+    @Req() req: any,
+  ) {
+    return this.eventService.comprarProdutos(idUser, idEvent, body, {
+      requesterId: req.user?.userId,
+    });
   }
 }

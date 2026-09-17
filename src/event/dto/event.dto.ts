@@ -2,7 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { EventStatus, EventType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -10,8 +12,11 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
+import { QUANTIDADE_MAXIMA_POR_ITEM } from '../event-products';
 
 class RoleDto {
   @IsOptional()
@@ -58,6 +63,61 @@ class GroupRoleDto {
   @Type(() => RoleDto)
   roles: RoleDto[];
 }
+class ProductVariantDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  name: string;
+
+  @ApiProperty({
+    example: 30,
+    description: 'Unidades à venda. Nulo ou ausente é sem limite.',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  stock?: number | null;
+}
+
+class ProductDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @ApiProperty({ example: 60, description: 'Preço único para as variantes' })
+  @IsNumber()
+  @Min(0)
+  price: number;
+
+  @ApiProperty({
+    example: 'data:image/webp;base64,UklGR...',
+    description:
+      'Foto como data URL base64 (PNG, JPG ou WebP). Ausente mantém a atual; nulo ou vazio remove.',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  image?: string | null;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ProductVariantDto)
+  variants: ProductVariantDto[];
+}
+
 export class EventDto {
   @ApiProperty({
     example: 'Retiro 2023',
@@ -156,6 +216,44 @@ export class EventDto {
   groupRoles?: GroupRoleDto[];
 
   @ApiProperty({
+    description:
+      'Produtos vendidos na inscrição. Na edição, ausente não mexe nos produtos; lista vazia remove todos os que ainda não foram vendidos.',
+    required: false,
+    example: [
+      {
+        name: 'Camisa do evento',
+        price: 60,
+        variants: [{ name: 'P', stock: 30 }, { name: 'M' }],
+      },
+    ],
+  })
+  // multipart manda o JSON como texto; mesmo tratamento de `groupRoles`
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+
+    if (!Array.isArray(value)) return value;
+
+    return value.map((produto) => {
+      const dto = Object.assign(new ProductDto(), produto);
+      dto.variants = (produto?.variants ?? []).map((variante) =>
+        Object.assign(new ProductVariantDto(), variante),
+      );
+      return dto;
+    });
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductDto)
+  products?: ProductDto[];
+
+  @ApiProperty({
     example: { local: 'Auditório Principal', address: 'Rua XYZ, 123' },
     description: 'Dados adicionais do evento',
   })
@@ -206,4 +304,38 @@ export class roleEventDto {
   })
   @IsString({ each: true })
   roleRegistrationId: string[];
+}
+
+class ProductPurchaseItemDto {
+  @ApiProperty({ example: 'uuid-da-variante' })
+  @IsString()
+  variantId: string;
+
+  @ApiProperty({ example: 2, minimum: 1, maximum: QUANTIDADE_MAXIMA_POR_ITEM })
+  @IsInt()
+  @Min(1)
+  @Max(QUANTIDADE_MAXIMA_POR_ITEM)
+  quantity: number;
+}
+
+export class ProductPurchaseDto {
+  @ApiProperty({
+    required: false,
+    default: false,
+    description:
+      'Verdadeiro na oferta logo depois da inscrição: os itens entram no pagamento do ingresso se ele ainda estiver em aberto. Falso (ou ausente) cria uma compra separada.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  attachToRegistration?: boolean;
+
+  @ApiProperty({
+    type: [ProductPurchaseItemDto],
+    description: 'Variantes escolhidas e quantas unidades de cada',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ProductPurchaseItemDto)
+  items: ProductPurchaseItemDto[];
 }

@@ -1,0 +1,142 @@
+import { BadRequestException } from '@nestjs/common';
+import {
+  VarianteRecebida,
+  TAMANHO_MAXIMO_DA_FOTO,
+  conferirEstoque,
+  disponivel,
+  montarPedido,
+  validarFoto,
+  validarProdutos,
+} from './event-products';
+
+const camisa = (variants: VarianteRecebida[] = [{ name: 'P', stock: 10 }]) => ({
+  name: 'Camisa',
+  price: 50,
+  variants,
+});
+
+describe('validarFoto', () => {
+  it('distingue não mexer, remover e trocar', () => {
+    expect(validarFoto(undefined)).toBeUndefined();
+    expect(validarFoto(null)).toBeNull();
+    expect(validarFoto('')).toBeNull();
+    expect(validarFoto('data:image/webp;base64,AAAA')).toBe(
+      'data:image/webp;base64,AAAA',
+    );
+  });
+
+  it('recusa o que não é imagem em base64', () => {
+    // iria direto para um <img src> na tela de inscrição
+    expect(() => validarFoto('javascript:alert(1)')).toThrow(
+      BadRequestException,
+    );
+    expect(() => validarFoto('data:image/svg+xml;base64,AAAA')).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('recusa foto acima do teto', () => {
+    const grande = `data:image/png;base64,${'A'.repeat(
+      TAMANHO_MAXIMO_DA_FOTO,
+    )}`;
+    expect(() => validarFoto(grande)).toThrow(/grande demais/);
+  });
+});
+
+describe('validarProdutos', () => {
+  it('aceita produto com variante e estoque opcional', () => {
+    expect(() =>
+      validarProdutos([camisa([{ name: 'P', stock: 10 }, { name: 'G' }])]),
+    ).not.toThrow();
+  });
+
+  it('exige pelo menos uma variante', () => {
+    expect(() => validarProdutos([camisa([])])).toThrow(/pelo menos uma/);
+  });
+
+  it('recusa variante repetida sem diferenciar maiúscula', () => {
+    expect(() =>
+      validarProdutos([
+        camisa([
+          { name: 'P', stock: 1 },
+          { name: ' p ', stock: 2 },
+        ]),
+      ]),
+    ).toThrow(/duas vezes/);
+  });
+
+  it('recusa estoque negativo ou fracionado e preço negativo', () => {
+    expect(() =>
+      validarProdutos([camisa([{ name: 'P', stock: -1 }])]),
+    ).toThrow();
+    expect(() =>
+      validarProdutos([camisa([{ name: 'P', stock: 1.5 }])]),
+    ).toThrow();
+    expect(() => validarProdutos([{ ...camisa(), price: -1 }])).toThrow();
+  });
+});
+
+describe('montarPedido', () => {
+  it('monta a quantidade por variante', () => {
+    expect(
+      montarPedido([
+        { variantId: 'p', quantity: 2 },
+        { variantId: 'g', quantity: 1 },
+      ]),
+    ).toEqual(
+      new Map([
+        ['p', 2],
+        ['g', 1],
+      ]),
+    );
+  });
+
+  it('recusa pedido vazio, quantidade fora da faixa e variante repetida', () => {
+    expect(() => montarPedido([])).toThrow();
+    expect(() => montarPedido([{ variantId: 'p', quantity: 0 }])).toThrow();
+    expect(() => montarPedido([{ variantId: 'p', quantity: 21 }])).toThrow();
+    expect(() =>
+      montarPedido([
+        { variantId: 'p', quantity: 1 },
+        { variantId: 'p', quantity: 1 },
+      ]),
+    ).toThrow(/duas vezes/);
+  });
+});
+
+describe('conferirEstoque', () => {
+  const variantes = [
+    { id: 'p', name: 'P', stock: 5, productName: 'Camisa' },
+    { id: 'g', name: 'G', stock: null, productName: 'Camisa' },
+  ];
+
+  it('deixa passar o que cabe e o que não tem limite', () => {
+    expect(() =>
+      conferirEstoque(
+        variantes,
+        new Map([['p', 3]]),
+        new Map([
+          ['p', 2],
+          ['g', 500],
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it('diz quanto sobrou quando o pedido passa do restante', () => {
+    expect(() =>
+      conferirEstoque(variantes, new Map([['p', 3]]), new Map([['p', 3]])),
+    ).toThrow('Camisa (P): restam só 2 unidades');
+  });
+
+  it('diz que esgotou quando não sobrou nada', () => {
+    expect(() =>
+      conferirEstoque(variantes, new Map([['p', 5]]), new Map([['p', 1]])),
+    ).toThrow('Camisa (P) esgotou');
+  });
+
+  it('calcula o disponível sem ficar negativo', () => {
+    expect(disponivel(5, 7)).toBe(0);
+    expect(disponivel(null, 7)).toBeNull();
+  });
+});

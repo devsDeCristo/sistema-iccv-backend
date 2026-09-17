@@ -57,7 +57,8 @@ export class PaymentController {
     return this.paymentService.createCheckout({
       userId,
       eventId,
-      roleRegistrationId: body.roleRegistrationId,
+      roleRegistrationId: body.roleRegistrationId ?? [],
+      paymentIds: body.paymentIds ?? [],
     });
   }
 
