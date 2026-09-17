@@ -13,7 +13,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { EventService } from './event.service';
-import { EventDto, ProductPurchaseDto, roleEventDto } from './dto/event.dto';
+import {
+  EventDto,
+  ProductPurchaseDto,
+  GuardianApprovalDto,
+  roleEventDto,
+} from './dto/event.dto';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -42,6 +47,7 @@ export class EventController {
       [
         { name: 'logoFile', maxCount: 1 },
         { name: 'coverFile', maxCount: 1 },
+        { name: 'termFile', maxCount: 1 },
       ],
       {
         // os produtos chegam como JSON num campo de texto, com as fotos em
@@ -58,14 +64,17 @@ export class EventController {
     files: {
       logoFile?: Express.Multer.File[];
       coverFile?: Express.Multer.File[];
+      termFile?: Express.Multer.File[];
     },
     @Body() EventDto: EventDto,
     @Req() req: any,
   ) {
     const logoFile = files.logoFile?.[0];
     const coverFile = files.coverFile?.[0];
+    const termFile = files.termFile?.[0];
     EventDto.logoFile = logoFile;
     EventDto.coverFile = coverFile;
+    EventDto.termFile = termFile;
     return this.eventService.create(EventDto, req.user?.userId);
   }
 
@@ -125,6 +134,7 @@ export class EventController {
       [
         { name: 'logoFile', maxCount: 1 },
         { name: 'coverFile', maxCount: 1 },
+        { name: 'termFile', maxCount: 1 },
       ],
       {
         limits: {
@@ -139,6 +149,7 @@ export class EventController {
     files: {
       logoFile?: Express.Multer.File[];
       coverFile?: Express.Multer.File[];
+      termFile?: Express.Multer.File[];
     },
     @Param('id') id: string,
     @Body() updateEventDto: EventDto,
@@ -146,8 +157,10 @@ export class EventController {
   ) {
     const logoFile = files.logoFile?.[0];
     const coverFile = files.coverFile?.[0];
+    const termFile = files.termFile?.[0];
     updateEventDto.logoFile = logoFile;
     updateEventDto.coverFile = coverFile;
+    updateEventDto.termFile = termFile;
     return this.eventService.update(id, updateEventDto, req.user?.userId);
   }
 
@@ -254,19 +267,39 @@ export class EventController {
   }
 
   @ApiOperation({
-    summary: 'Buy event products for a confirmed registration',
-    description:
-      'Chamado depois da inscrição e antes do checkout. Os itens entram no pagamento do ingresso e seguem no mesmo link de pagamento.',
+    summary: 'Attach/replace the signed guardian authorization term',
   })
-  @Post(':idEvent/users/:idUser/products')
-  buyProducts(
-    @Param('idUser') idUser: string,
+  @Post(':idEvent/users/:idUser/guardian-term')
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'termFile', maxCount: 1 }]))
+  @ApiConsumes('multipart/form-data')
+  async uploadGuardianTerm(
     @Param('idEvent') idEvent: string,
-    @Body() body: ProductPurchaseDto,
+    @Param('idUser') idUser: string,
+    @UploadedFiles() files: { termFile?: Express.Multer.File[] },
     @Req() req: any,
   ) {
-    return this.eventService.comprarProdutos(idUser, idEvent, body, {
-      requesterId: req.user?.userId,
-    });
+    return this.eventService.uploadGuardianTerm(
+      idUser,
+      idEvent,
+      files.termFile?.[0],
+      req.user?.userId,
+    );
+  }
+
+  @ApiOperation({ summary: 'Approve or reject the guardian authorization' })
+  @Roles(...ADMIN_ROLES)
+  @Put(':idEvent/users/:idUser/guardian-approval')
+  async reviewGuardianApproval(
+    @Param('idEvent') idEvent: string,
+    @Param('idUser') idUser: string,
+    @Body() body: GuardianApprovalDto,
+    @Req() req: any,
+  ) {
+    return this.eventService.reviewGuardianApproval(
+      idUser,
+      idEvent,
+      body,
+      req.user?.userId,
+    );
   }
 }

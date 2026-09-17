@@ -226,6 +226,16 @@ export class UserDTO {
   @IsOptional()
   pastorName?: string;
 
+  @ApiProperty({
+    example: 'Maria Souza',
+    description:
+      'Nome do responsável, preenchido quando a pessoa é menor de 16 anos. ' +
+      'O telefone do responsável usa o campo emergencyContact.',
+  })
+  @IsString()
+  @IsOptional()
+  guardianName?: string;
+
   @IsString()
   @IsOptional()
   eventId?: string;

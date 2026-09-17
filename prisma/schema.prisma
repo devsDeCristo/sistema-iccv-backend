@@ -80,6 +80,9 @@ model User {
   updateAt           DateTime          @updatedAt
   city               String
   diabetes           Boolean
+  /// Contato de emergência; quando o usuário é menor de 16 anos, este é o
+  /// telefone do responsável (ver `guardianName`) — mesma coluna, dois nomes
+  /// de tela dependendo da idade.
   emergencyContact   String?
   hypertensive       Boolean
   indicatedBy        String?
@@ -109,6 +112,11 @@ model User {
   /// e `cellphone`.
   zipCode            String?
   badgeName          String?
+  /// Nome de quem responde pelo usuário quando ele é menor de 16 anos no
+  /// evento em que se inscreve. Texto livre — não é uma conta do sistema,
+  /// porque o responsável pode nunca ter se cadastrado aqui. O telefone do
+  /// responsável usa a mesma coluna de `emergencyContact` — é o mesmo dado.
+  guardianName       String?
   password           String            @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
   /// Vínculos de painel: em qual igreja a pessoa é admin e em qual é
   /// financeiro. É daqui que sai QUAL igreja ela alcança.
@@ -237,8 +245,34 @@ model EventOnUsers {
   user              User                            @relation(fields: [userId], references: [id])
   rolesRegistration EventOnUsersRolesRegistration[] @relation("EventOnUsersRoles")
 
+  /// Se o participante precisa de autorização dos pais para este evento —
+  /// decidido pela idade dele na data de início do evento, no momento em que
+  /// a inscrição é criada. `NOT_REQUIRED` é o caso comum (maior de idade).
+  minorApprovalStatus MinorApprovalStatus @default(NOT_REQUIRED)
+  /// Termo assinado, enviado pelo responsável. Some/reaparece a cada reenvio —
+  /// não há histórico de versões anteriores.
+  signedTermUrl                String?
+  minorApprovalReviewedById    String?
+  minorApprovalReviewedAt      DateTime?
+  /// Só em `REJECTED`; limpo quando o status muda para outra coisa.
+  minorApprovalRejectionReason String?
+
   @@id([userId, eventId])
   @@index([eventId])
+}
+
+/// Liberação de participante menor de 16 anos para um evento. Ver
+/// `EventOnUsers.minorApprovalStatus`.
+enum MinorApprovalStatus {
+  /// Maior de idade na data do evento — não precisa de termo
+  NOT_REQUIRED
+  /// Menor de idade; aguardando o responsável enviar o termo assinado ou o
+  /// admin revisar o que já foi enviado
+  PENDING
+  /// Admin conferiu o termo e liberou o participante
+  APPROVED
+  /// Admin recusou o termo enviado — o responsável pode reenviar
+  REJECTED
 }
 
 model EventOnUsersRolesRegistration {

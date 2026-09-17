@@ -15,13 +15,18 @@ import {
   CheckoutStatus,
   Event,
   EventStatus,
+  MinorApprovalStatus,
   PaymentMethod,
   PaymentReceived,
   PaymentStatus,
   Prisma,
   PrismaService,
 } from '../prisma';
-import { EventDto, ProductPurchaseDto } from './dto/event.dto';
+import {
+  EventDto,
+  ProductPurchaseDto,
+  GuardianApprovalDto,
+} from './dto/event.dto';
 import {
   ProdutoRecebido,
   STATUS_QUE_LIBERAM_ESTOQUE,
@@ -46,9 +51,12 @@ import {
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
+  resolveDocumentExtension,
   resolveImageExtension,
   uploadImageFirebase,
 } from 'src/utils/uploadImgFirebase';
+import { calculateAge } from 'src/utils/age';
+import { fileToDataUri } from 'src/utils/documentBase64';
 
 type EventWithGroupRole = Prisma.EventGetPayload<{
   include: {
@@ -442,7 +450,7 @@ export class EventService {
     const [user, event] = await Promise.all([
       tx.user.findUnique({
         where: { id: userId },
-        select: { id: true, fullName: true, email: true },
+        select: { id: true, fullName: true, email: true, birthday: true },
       }),
       tx.event.findUnique({
         where: { id: eventId },
@@ -458,6 +466,14 @@ export class EventService {
 
     if (!user) throw new NotFoundException('Usuario não encontrado');
     if (!event) throw new NotFoundException('Evento não encontrado');
+
+    // Elegibilidade de menor de idade é fixada na idade que o participante
+    // terá na data do evento, não na data em que se inscreve — quem se
+    // inscreve meses antes já sabe se vai precisar do termo.
+    const minorApprovalStatus: MinorApprovalStatus =
+      calculateAge(user.birthday, event.startDate) < 16
+        ? MinorApprovalStatus.PENDING
+        : MinorApprovalStatus.NOT_REQUIRED;
 
     // Nada de vincular a pessoa à igreja do evento: inscrito não pertence a
     // igreja nenhuma, e a mesma pessoa se inscreve em eventos de várias. O que
@@ -580,7 +596,7 @@ export class EventService {
       await tx.eventOnUsers.upsert({
         where: { userId_eventId: { userId, eventId } },
         update: {},
-        create: { userId, eventId },
+        create: { userId, eventId, minorApprovalStatus },
       });
 
       const registration = await tx.eventOnUsersRolesRegistration.create({
@@ -942,6 +958,12 @@ export class EventService {
         groupsRegistration: Array.from(groupsMap.values()),
         bedrooms,
         teams,
+        /** 🔹 Liberação de menor de idade para este evento — ver MinorApprovalStatus */
+        minorApprovalStatus: item.minorApprovalStatus,
+        signedTermUrl: item.signedTermUrl,
+        minorApprovalReviewedById: item.minorApprovalReviewedById,
+        minorApprovalReviewedAt: item.minorApprovalReviewedAt,
+        minorApprovalRejectionReason: item.minorApprovalRejectionReason,
       };
     });
   }
@@ -1461,6 +1483,9 @@ export class EventService {
     const logoExtension = data.logoFile
       ? resolveImageExtension(data.logoFile)
       : null;
+    // só valida — o termo não sobe para o Storage, então não precisa de
+    // extensão para montar path nenhum (ver comentário mais abaixo)
+    if (data.termFile) resolveDocumentExtension(data.termFile);
 
     const name = data.name?.trim();
 
@@ -1613,10 +1638,26 @@ export class EventService {
       const coverUrl = coverResult?.url ?? null;
       const logoUrl = logoResult?.url ?? null;
 
+      /**
+       * O termo fica salvo como base64 direto no banco, e não no Storage —
+       * são poucos arquivos por evento, e assim abrir o termo depois não
+       * depende de uma URL externa. Upload para o Storage seria:
+       *
+       * const termResult = data.termFile
+       *   ? await uploadImageFirebase(
+       *       data.termFile,
+       *       `events/${event.id}/term/term.${termExtension}`,
+       *     )
+       *   : null;
+       * const minorTermUrl = termResult?.url ?? null;
+       */
+      const minorTermUrl = data.termFile ? fileToDataUri(data.termFile) : null;
+
       const jsonData: Prisma.JsonObject = {
         ...((data.data as Prisma.JsonObject) ?? {}),
         coverUrl,
         logoUrl,
+        minorTermUrl,
       };
 
       // 3. Atualiza o evento com URLs
@@ -1977,6 +2018,8 @@ export class EventService {
     const logoExtension = updateEvent.logoFile
       ? resolveImageExtension(updateEvent.logoFile)
       : null;
+    // só valida — ver comentário sobre o termo em base64 mais abaixo
+    if (updateEvent.termFile) resolveDocumentExtension(updateEvent.termFile);
 
     const event = await this.prisma.event.findUnique({
       where: { id },
@@ -2037,6 +2080,7 @@ export class EventService {
     let coverUrl = event.data?.['coverUrl'] ?? null;
     let logoUrl = event.data?.['logoUrl'] ?? null;
     let logoUrlInverted = event.data?.['logoUrlInverted'] ?? null;
+    let minorTermUrl = event.data?.['minorTermUrl'] ?? null;
 
     const [coverResult, logoResult] = await Promise.all([
       updateEvent.coverFile
@@ -2055,6 +2099,21 @@ export class EventService {
 
     if (coverResult) coverUrl = coverResult.url;
     if (logoResult) logoUrl = logoResult.url;
+
+    /**
+     * Termo em base64 direto no banco — ver comentário equivalente em
+     * `create`. Upload para o Storage seria:
+     *
+     * const termResult = updateEvent.termFile
+     *   ? await uploadImageFirebase(
+     *       updateEvent.termFile,
+     *       `events/${event.id}/term/term.${termExtension}`,
+     *     )
+     *   : null;
+     * if (termResult) minorTermUrl = termResult.url;
+     */
+    if (updateEvent.termFile)
+      minorTermUrl = fileToDataUri(updateEvent.termFile);
 
     if (updateEvent.logoFile) {
       const blackBuffer = await sharp(updateEvent.logoFile.buffer)
@@ -2087,6 +2146,7 @@ export class EventService {
       coverUrl,
       logoUrl,
       logoUrlInverted,
+      minorTermUrl,
     } as Prisma.JsonObject;
 
     const startDate = new Date(updateEvent.startDate);
@@ -2401,6 +2461,117 @@ export class EventService {
       eventId: event.id,
       deleted,
     };
+  }
+
+  /**
+   * Anexa (ou reenvia, depois de uma recusa) o termo de autorização assinado
+   * pelo responsável. Quem chama é o próprio inscrito ou quem administra a
+   * igreja — a mesma regra de `registerUserInEvent`.
+   */
+  async uploadGuardianTerm(
+    userId: string,
+    eventId: string,
+    file: Express.Multer.File | undefined,
+    requesterId?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo foi enviado');
+    }
+
+    if (requesterId) {
+      await this.assertPodeInscrever(requesterId, userId);
+    }
+
+    const registration = await this.prisma.eventOnUsers.findUnique({
+      where: { userId_eventId: { userId, eventId } },
+      select: { minorApprovalStatus: true },
+    });
+
+    if (!registration) {
+      throw new NotFoundException('Inscrição não encontrada');
+    }
+
+    if (registration.minorApprovalStatus === MinorApprovalStatus.NOT_REQUIRED) {
+      throw new BadRequestException(
+        'Este participante não precisa de autorização de responsável',
+      );
+    }
+
+    resolveDocumentExtension(file); // só valida o mime type
+
+    /**
+     * Base64 direto no banco, e não Storage — cada termo assinado é um
+     * arquivo só, e assim abrir depois não depende de uma URL externa.
+     * Upload para o Storage seria:
+     *
+     * const extension = resolveDocumentExtension(file);
+     * const { url } = await uploadImageFirebase(
+     *   file,
+     *   `events/${eventId}/users/${userId}/guardian-term/term.${extension}`,
+     * );
+     */
+    const signedTermUrl = fileToDataUri(file);
+
+    return this.prisma.eventOnUsers.update({
+      where: { userId_eventId: { userId, eventId } },
+      data: {
+        signedTermUrl,
+        // reenvio (inclusive depois de uma recusa) volta a aguardar revisão
+        minorApprovalStatus: MinorApprovalStatus.PENDING,
+        minorApprovalRejectionReason: null,
+        minorApprovalReviewedById: null,
+        minorApprovalReviewedAt: null,
+      },
+    });
+  }
+
+  /** Admin aprova ou recusa a liberação de um participante menor de idade. */
+  async reviewGuardianApproval(
+    userId: string,
+    eventId: string,
+    body: GuardianApprovalDto,
+    requesterId?: string,
+  ) {
+    const registration = await this.prisma.eventOnUsers.findUnique({
+      where: { userId_eventId: { userId, eventId } },
+      select: { minorApprovalStatus: true, signedTermUrl: true },
+    });
+
+    if (!registration) {
+      throw new NotFoundException('Inscrição não encontrada');
+    }
+
+    if (registration.minorApprovalStatus === MinorApprovalStatus.NOT_REQUIRED) {
+      throw new BadRequestException(
+        'Este participante não precisa de autorização de responsável',
+      );
+    }
+
+    if (
+      body.status === MinorApprovalStatus.APPROVED &&
+      !registration.signedTermUrl
+    ) {
+      throw new BadRequestException(
+        'Anexe o termo assinado antes de aprovar a liberação',
+      );
+    }
+
+    if (body.status === MinorApprovalStatus.REJECTED && !body.reason?.trim()) {
+      throw new BadRequestException('Informe o motivo da recusa');
+    }
+
+    return this.prisma.eventOnUsers.update({
+      where: { userId_eventId: { userId, eventId } },
+      data: {
+        minorApprovalStatus: body.status,
+        minorApprovalReviewedById: requesterId ?? null,
+        minorApprovalReviewedAt: new Date(),
+        minorApprovalRejectionReason:
+          body.status === MinorApprovalStatus.REJECTED
+            ? body.reason!.trim()
+            : null,
+      },
+    });
   }
 
   async findUsers(eventId: string) {

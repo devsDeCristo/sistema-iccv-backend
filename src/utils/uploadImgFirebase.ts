@@ -29,6 +29,30 @@ export function resolveImageExtension(file: { mimetype?: string }): string {
   return extension;
 }
 
+/** Mime types aceitos em upload de documento -> extensão segura no storage */
+const ALLOWED_DOCUMENT_MIME_TYPES: Record<string, string> = {
+  ...ALLOWED_IMAGE_MIME_TYPES,
+  'application/pdf': 'pdf',
+};
+
+/**
+ * Mesma validação de `resolveImageExtension`, mas para documentos que também
+ * podem chegar em PDF — o termo de autorização e o termo assinado, que tanto
+ * são fotografados quanto escaneados.
+ */
+export function resolveDocumentExtension(file: { mimetype?: string }): string {
+  const mimetype = (file?.mimetype ?? '').toLowerCase().trim();
+  const extension = ALLOWED_DOCUMENT_MIME_TYPES[mimetype];
+
+  if (!extension) {
+    throw new BadRequestException(
+      `Tipo de arquivo não suportado: ${mimetype || 'desconhecido'}`,
+    );
+  }
+
+  return extension;
+}
+
 type UploadImageResponse = {
   url: string;
   path: string;

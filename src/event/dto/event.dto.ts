@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { EventStatus, EventType } from '@prisma/client';
+import { EventStatus, EventType, MinorApprovalStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -7,6 +7,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsObject,
@@ -289,6 +290,16 @@ export class EventDto {
   coverFile?: Express.Multer.File;
 
   @ApiProperty({
+    description:
+      'Termo de autorização em branco, para pais/responsáveis de menores de 16 anos baixarem, assinarem e reenviarem',
+    type: 'string',
+    format: 'binary',
+    required: false,
+  })
+  @IsOptional()
+  termFile?: Express.Multer.File;
+
+  @ApiProperty({
     example: 'church-id-uuid',
     description: 'ID da church/igreja (obrigatório para SuperAdmin)',
     required: false,
@@ -338,4 +349,21 @@ export class ProductPurchaseDto {
   @ValidateNested({ each: true })
   @Type(() => ProductPurchaseItemDto)
   items: ProductPurchaseItemDto[];
+}
+export class GuardianApprovalDto {
+  @ApiProperty({
+    enum: [MinorApprovalStatus.APPROVED, MinorApprovalStatus.REJECTED],
+    example: MinorApprovalStatus.APPROVED,
+  })
+  @IsIn([MinorApprovalStatus.APPROVED, MinorApprovalStatus.REJECTED])
+  status: MinorApprovalStatus;
+
+  @ApiProperty({
+    example: 'Termo ilegível, favor reenviar uma foto mais nítida',
+    description: 'Motivo da recusa — obrigatório quando status é REJECTED',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

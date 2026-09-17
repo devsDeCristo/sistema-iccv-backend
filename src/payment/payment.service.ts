@@ -1129,6 +1129,9 @@ export class PaymentService {
         users: {
           where: { userId },
           select: {
+            minorApprovalStatus: true,
+            signedTermUrl: true,
+            minorApprovalRejectionReason: true,
             rolesRegistration: {
               select: {
                 role: {
@@ -1198,6 +1201,13 @@ export class PaymentService {
       eventName: event.name,
       data: event.data,
       modulePayment: event.church.modulePayment,
+
+      /** 🔹 Liberação de menor de idade — NOT_REQUIRED quando não há inscrição do usuário neste evento */
+      minorApprovalStatus:
+        event.users[0]?.minorApprovalStatus ?? 'NOT_REQUIRED',
+      signedTermUrl: event.users[0]?.signedTermUrl ?? null,
+      minorApprovalRejectionReason:
+        event.users[0]?.minorApprovalRejectionReason ?? null,
 
       registeredRoles: event.users.flatMap((u) =>
         u.rolesRegistration.map((r) => ({
