@@ -75,6 +75,24 @@ export interface PaymentGateway {
   ): Promise<GatewayWebhookEvent>;
 
   /**
+   * O mesmo, mas sem acreditar no corpo: a notificação vira só um aviso de
+   * "olhe esta cobrança", e quem diz o que aconteceu é a API da casa, chamada
+   * com a nossa credencial.
+   *
+   * É o caminho de quando a assinatura não confere — e ele não afrouxa nada:
+   * um POST forjado no máximo faz o sistema perguntar à casa sobre uma
+   * referência, e a resposta dela é que decide. Forjar um pagamento exigiria
+   * que a própria casa afirmasse que ele existe.
+   *
+   * Opcional porque nem toda casa tem como reconferir. Quem não implementa
+   * segue como antes: assinatura inválida é notificação descartada.
+   */
+  parseWebhookViaApi?(
+    req: WebhookRequest,
+    ctx: GatewayContext,
+  ): Promise<GatewayWebhookEvent | null>;
+
+  /**
    * Bate na casa com a credencial cadastrada, para a tela poder dizer "está
    * valendo" em vez de a igreja descobrir no primeiro inscrito que tentou pagar.
    */

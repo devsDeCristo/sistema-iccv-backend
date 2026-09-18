@@ -53,7 +53,7 @@ export class PagbankGateway implements PaymentGateway {
         required: true,
         secret: true,
         placeholder: '········',
-        help: 'No portal do PagBank: Venda online › Integrações › Gerar token. O mesmo token assina as notificações.',
+        help: 'No portal do PagBank: Venda online › Integrações › Gerar token.',
       },
       {
         key: 'baseUrl',
@@ -145,23 +145,60 @@ export class PagbankGateway implements PaymentGateway {
 
   /**
    * `x-authenticity-token` = SHA-256 de `token-corpo`, com o corpo byte a byte
-   * como chegou.
+   * como chegou. É a fórmula da documentação do PagBank ("Confirmar
+   * autenticidade da notificação").
    *
    * Reserializar o JSON não funciona: `JSON.stringify` reordena chaves e some
    * com espaços, e o hash do corpo remontado não bate com o do corpo enviado.
    * Daí o `rawBody` no contrato do webhook.
+   *
+   * **O token que assina pode não ser este.** A documentação fala do "token da
+   * conta fornecido via iBanking", e não do token da API de pedidos que o
+   * `token` guarda — e na conta em uso o hash não confere, embora o mesmo token
+   * crie pedidos sem erro. Enquanto essa pergunta estiver aberta, quem sustenta
+   * a baixa é `parseWebhookViaApi`: a assinatura vira atalho, e não a única
+   * prova. O log abaixo é o que diz se a conta começou a bater.
    */
   verifyWebhook(req: WebhookRequest, ctx: GatewayContext): boolean {
     const recebido = cabecalho(req, 'x-authenticity-token');
-    if (!recebido) return false;
+    const token = (this.cred(ctx).token ?? '').trim();
 
     const esperado = createHash('sha256')
-      .update(`${this.cred(ctx).token.trim()}-${req.rawBody.toString('utf8')}`)
+      .update(`${token}-${req.rawBody.toString('utf8')}`)
       .digest('hex');
 
     // Comparação insensível a caixa: o PagBank envia em minúsculas, mas o
     // valor é hex e não há por que depender disso.
-    return recebido.toLowerCase() === esperado.toLowerCase();
+    const confere =
+      !!recebido && recebido.toLowerCase() === esperado.toLowerCase();
+
+    if (!confere) {
+      /**
+       * Quem chama recebe só 404, e é assim que tem que ser — a resposta não
+       * pode ajudar quem está tentando adivinhar. Mas para quem mantém, "não
+       * bateu" sozinho não diz onde procurar, e estes três números separam as
+       * causas sem revelar nada:
+       *
+       * - corpo em 0 bytes: o `rawBody` não chegou (parser de JSON registrado
+       *   depois do do Nest, ou rota fora de `/webhooks/`);
+       * - token em 0 caracteres: a credencial está gravada com outra chave que
+       *   não `token`, e o hash sai de uma string vazia;
+       * - os dois preenchidos e os prefixos diferentes: a casa assinou com um
+       *   token que não é o que está cadastrado aqui.
+       *
+       * Só os 8 primeiros caracteres de cada hash: dá para comparar de olho e
+       * não serve para forjar o resto.
+       */
+      const prefixoRecebido = recebido.slice(0, 8) || '(ausente)';
+
+      this.logger.warn(
+        `PagBank — assinatura não confere: corpo=${req.rawBody.length}B ` +
+          `token=${token.length}ch recebida=${prefixoRecebido} ` +
+          `esperada=${esperado.slice(0, 8)}`,
+      );
+    }
+
+    return confere;
   }
 
   /**
@@ -211,6 +248,65 @@ export class PagbankGateway implements PaymentGateway {
         payment_method: escolhida.payment_method,
         links: escolhida.links,
         codeTransaction: escolhida.id,
+      },
+    };
+  }
+
+  /**
+   * A notificação sem assinatura válida vira só um aviso: o corpo é lido para
+   * saber **qual** cobrança olhar, e o estado dela vem da API do PagBank.
+   *
+   * Existe porque a assinatura depende de a casa assinar com o mesmo token que
+   * está cadastrado aqui — e quando isso não acontece, o retorno legítimo era
+   * descartado e o pagamento entrava sem ninguém saber. Aqui o corpo perde o
+   * poder de afirmar qualquer coisa: dele só se aproveita a referência, que é
+   * um id sem valor por si.
+   *
+   * Devolve `null` quando não há o que reconferir — aviso de checkout (a API
+   * não responde por ele) ou notificação sem referência. Nesses casos quem
+   * chama recusa, como antes.
+   */
+  async parseWebhookViaApi(
+    req: WebhookRequest,
+    ctx: GatewayContext,
+  ): Promise<GatewayWebhookEvent | null> {
+    const body = req.body ?? {};
+    const referenceId: string | undefined =
+      body.reference_id ?? body.charges?.[0]?.reference_id;
+
+    if (!referenceId) return null;
+
+    const charges = await this.listCharges(referenceId, ctx);
+
+    if (charges.length === 0) {
+      this.logger.warn(
+        `PagBank — ${referenceId} não tem cobrança na API; notificação ignorada.`,
+      );
+      return { kind: 'ignored', reason: 'a casa não confirmou esta cobrança' };
+    }
+
+    // A mesma regra do corpo: PAID manda, e sem PAID vale a mais recente.
+    const pago = charges.find((c) => c.status === PaymentStatus.PAID);
+    const escolhida =
+      pago ??
+      [...charges].sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      )[0];
+
+    const bruta = escolhida.raw as any;
+
+    return {
+      kind: 'payment',
+      referenceId,
+      status: escolhida.status,
+      method: escolhida.method,
+      paidAmountCents: escolhida.paidAmountCents,
+      payload: {
+        payment_method: bruta?.payment_method,
+        links: bruta?.links,
+        codeTransaction: bruta?.id,
+        /** de onde veio este estado: a API, e não o corpo da notificação */
+        confirmadoNaFonte: true,
       },
     };
   }

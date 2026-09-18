@@ -1,5 +1,9 @@
 import { createHash, createHmac } from 'crypto';
-import { PaymentProvider, PaymentProviderMode } from '@prisma/client';
+import {
+  PaymentProvider,
+  PaymentProviderMode,
+  PaymentStatus,
+} from '@prisma/client';
 import { PagbankGateway } from './pagbank/pagbank.gateway';
 import { MercadoPagoGateway } from './mercadopago/mercadopago.gateway';
 import { InfinitePayGateway } from './infinitepay/infinitepay.gateway';
@@ -76,6 +80,91 @@ describe('PagBank — x-authenticity-token', () => {
     req.rawBody = Buffer.from(req.rawBody.toString('utf8') + ' ');
 
     expect(gateway.verifyWebhook(req, ctx)).toBe(false);
+  });
+});
+
+/**
+ * O caminho de quando a assinatura não confere.
+ *
+ * Ele existe porque a assinatura do PagBank depende de a casa assinar com o
+ * mesmo token cadastrado aqui — e quando isso não acontece, o retorno legítimo
+ * era descartado e o pagamento entrava sem ninguém saber. O que não pode
+ * acontecer é o corpo virar palavra final: por isso o estado vem sempre da API.
+ */
+describe('PagBank — confirmação na fonte', () => {
+  const ctx = contexto(PaymentProvider.PAGBANK, { token: 'tok-secreto' });
+
+  const cobranca = (status: string, criadaEm = '2026-09-17T21:00:00Z') => ({
+    id: 'CHAR_1',
+    status,
+    created_at: criadaEm,
+    payment_method: { type: 'PIX' },
+    amount: { summary: { paid: 28000 } },
+  });
+
+  const comCobrancas = (charges: any[]) => ({
+    getCharges: jest.fn().mockResolvedValue(charges),
+  });
+
+  it('usa o estado que a API devolve, não o que o corpo diz', async () => {
+    const client = comCobrancas([cobranca('WAITING')]);
+    const gateway = new PagbankGateway(client as any);
+
+    // o corpo alega PAID; a API diz que ainda está aguardando
+    const evento = await gateway.parseWebhookViaApi(
+      requisicao({ charges: [{ reference_id: 'ref-1', status: 'PAID' }] }),
+      ctx,
+    );
+
+    expect(client.getCharges).toHaveBeenCalledWith(
+      'ref-1',
+      expect.objectContaining({ token: 'tok-secreto' }),
+      ctx.mode,
+    );
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      referenceId: 'ref-1',
+      status: PaymentStatus.WAITING,
+      paidAmountCents: 28000,
+    });
+  });
+
+  it('aceita o pagamento quando é a API que afirma que entrou', async () => {
+    const gateway = new PagbankGateway(comCobrancas([cobranca('PAID')]) as any);
+
+    const evento = await gateway.parseWebhookViaApi(
+      requisicao({ reference_id: 'ref-1' }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      status: PaymentStatus.PAID,
+    });
+  });
+
+  it('ignora quando a casa não conhece a referência', async () => {
+    const gateway = new PagbankGateway(comCobrancas([]) as any);
+
+    const evento = await gateway.parseWebhookViaApi(
+      requisicao({ reference_id: 'ref-1' }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({ kind: 'ignored' });
+  });
+
+  it('não tem o que reconferir num aviso de checkout', async () => {
+    const client = comCobrancas([cobranca('PAID')]);
+    const gateway = new PagbankGateway(client as any);
+
+    const evento = await gateway.parseWebhookViaApi(
+      requisicao({ id: 'CHEC_1', status: 'PAID' }),
+      ctx,
+    );
+
+    expect(evento).toBeNull();
+    expect(client.getCharges).not.toHaveBeenCalled();
   });
 });
 

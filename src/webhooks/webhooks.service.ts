@@ -113,9 +113,33 @@ export class WebhooksService {
   ) {
     const { gateway, context, config } = resolvido;
 
-    if (!gateway.verifyWebhook(req, context)) {
+    const assinada = gateway.verifyWebhook(req, context);
+
+    if (!assinada) {
       this.logger.warn(
-        `Notificação ${config.provider} recusada: assinatura inválida (igreja ${config.churchId}).`,
+        `Notificação ${config.provider} sem assinatura válida (igreja ${config.churchId}): ` +
+          'o corpo não vale, reconferindo na API da casa.',
+      );
+    }
+
+    /**
+     * Com assinatura, o corpo vale e é ele que se traduz. Sem assinatura, a
+     * notificação não é jogada fora: ela vira um aviso de "olhe esta cobrança",
+     * e o estado vem da API da casa, chamada com a nossa credencial.
+     *
+     * A tranca continua de pé. O que muda é onde ela está: em vez de confiar
+     * num hash que depende de a casa assinar com o token que cadastramos, a
+     * afirmação de que o dinheiro entrou passa a vir de uma chamada autenticada
+     * nossa. Um POST forjado no máximo faz o sistema perguntar à casa sobre uma
+     * referência — e é a resposta dela que decide.
+     */
+    const evento = assinada
+      ? await gateway.parseWebhook(req, context)
+      : (await gateway.parseWebhookViaApi?.(req, context)) ?? null;
+
+    if (!evento) {
+      this.logger.warn(
+        `Notificação ${config.provider} recusada: assinatura inválida e sem confirmação na fonte (igreja ${config.churchId}).`,
       );
       throw new NotFoundException();
     }
@@ -124,8 +148,6 @@ export class WebhooksService {
     // "configurado mas nunca recebeu retorno" na tela de configurações — o
     // sintoma de URL cadastrada errada do lado de lá.
     await this.marcarRecebimento(config.id);
-
-    const evento = await gateway.parseWebhook(req, context);
     const escopo = {
       provider: config.provider,
       configId: config.id,

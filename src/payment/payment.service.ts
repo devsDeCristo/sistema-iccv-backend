@@ -704,11 +704,25 @@ export class PaymentService {
               payload,
             },
           });
-          // inativar checkouts
-          await tx.paymentCheckout.updateMany({
-            where: { referenceId, ...this.filtroDaCasa(escopo) },
-            data: { status: CheckoutStatus.INACTIVE },
-          });
+          /**
+           * O checkout fecha quando o dinheiro entra — e só então.
+           *
+           * Antes fechava em qualquer notificação, o que era inofensivo
+           * enquanto só o retorno de "pago" chegava aqui. Com o aviso de
+           * pedido criado também sendo aplicado, fechar nele derrubava o
+           * checkout de um Pix que ainda nem tinha sido pago: o próximo
+           * clique em "pagar" abriria uma segunda cobrança para a mesma
+           * inscrição, e quem pagasse as duas pagaria duas vezes.
+           *
+           * O retorno de "pago" continua achando a cobrança pelo
+           * `referenceId`, esteja o checkout ativo ou não.
+           */
+          if (statusConferido === PaymentStatus.PAID) {
+            await tx.paymentCheckout.updateMany({
+              where: { referenceId, ...this.filtroDaCasa(escopo) },
+              data: { status: CheckoutStatus.INACTIVE },
+            });
+          }
         },
         {
           timeout: 20000, // 20 segundos
