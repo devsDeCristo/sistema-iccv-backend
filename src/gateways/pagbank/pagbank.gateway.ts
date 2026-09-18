@@ -149,7 +149,7 @@ export class PagbankGateway implements PaymentGateway {
    * O `true` aqui não é "confio no corpo" — é "a prova está em outro lugar",
    * o mesmo desenho da InfinitePay. O segredo da URL já foi conferido pelo
    * registry antes de chegar aqui, e o que a notificação afirma é reconferido
-   * em `parseWebhook`, na API da casa, com a nossa credencial.
+   * em `parseWebhook`, na API do gateway, com a nossa credencial.
    *
    * Por que não pela assinatura: o `x-authenticity-token` é o SHA-256 de
    * `token-corpo` (documentação "Confirmar autenticidade da notificação"), mas
@@ -213,7 +213,10 @@ export class PagbankGateway implements PaymentGateway {
       this.logger.warn(
         `PagBank — ${referenceId} não tem cobrança na API; notificação ignorada.`,
       );
-      return { kind: 'ignored', reason: 'a casa não confirmou esta cobrança' };
+      return {
+        kind: 'ignored',
+        reason: 'o gateway não confirmou esta cobrança',
+      };
     }
 
     const pago = charges.find((c) => c.status === PaymentStatus.PAID);
