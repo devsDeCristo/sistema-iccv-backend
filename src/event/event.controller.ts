@@ -262,7 +262,7 @@ export class EventController {
       idUser,
       idEvent,
       body.roleRegistrationId,
-      { requesterId: req.user?.userId },
+      { requesterId: req.user?.userId, acceptedTerms: body.acceptedTerms },
     );
   }
 

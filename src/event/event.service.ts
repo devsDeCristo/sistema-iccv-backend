@@ -48,6 +48,7 @@ import {
   filtroDeEventoEmTeste,
   podeVerEventoEmTeste,
 } from './event-visibility';
+import { exigeAceiteDeTermo } from './event-terms';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
@@ -143,6 +144,8 @@ export class EventService {
       movingFromWaitlist?: boolean;
       /** quem disparou a inscrição pela API; ausente em chamadas internas */
       requesterId?: string;
+      /** aceite do termo do evento, marcado na tela de inscrição */
+      acceptedTerms?: boolean;
     },
   ) {
     const MAX_RETRIES = 5;
@@ -164,11 +167,19 @@ export class EventService {
       throw new BadRequestException('Role(s) inválido(s)');
     }
 
+    let aceitouTermo = false;
+
     // evento em teste não recebe inscrição de quem não enxerga o evento: sem
     // isso bastaria ter o id em mãos para entrar num evento ainda em ensaio
     if (options?.requesterId) {
       await this.assertEventIsVisible(eventId, options.requesterId);
       await this.assertPodeInscrever(options.requesterId, userId);
+      aceitouTermo = await this.assertTermoAceito(
+        eventId,
+        options.requesterId,
+        userId,
+        options.acceptedTerms,
+      );
     }
 
     try {
@@ -178,6 +189,7 @@ export class EventService {
             userId,
             eventId,
             registrationRoleIds,
+            aceitouTermo,
           )
         : await this.prisma.$transaction(
             async (trx) =>
@@ -186,6 +198,7 @@ export class EventService {
                 userId,
                 eventId,
                 registrationRoleIds,
+                aceitouTermo,
               ),
             { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 },
           );
@@ -443,6 +456,8 @@ export class EventService {
     userId: string,
     eventId: string,
     registrationRoleIds: string[],
+    /** aceite do termo do evento, já conferido por quem chamou */
+    aceitouTermo = false,
   ) {
     //-------------------------- verificações iniciais --------------------------//
     // 1️⃣ Verifica usuário e evento (em paralelo)
@@ -593,10 +608,14 @@ export class EventService {
 
       //caso tenha vaga, registra no evento e cria um role de inscrição */
 
+      // o carimbo só entra quando houve aceite agora: quem se inscreve de novo
+      // em outro grupo sem passar pelo termo não apaga o aceite anterior
+      const aceite = aceitouTermo ? { termsAcceptedAt: new Date() } : {};
+
       await tx.eventOnUsers.upsert({
         where: { userId_eventId: { userId, eventId } },
-        update: {},
-        create: { userId, eventId, minorApprovalStatus },
+        update: aceite,
+        create: { userId, eventId, minorApprovalStatus, ...aceite },
       });
 
       const registration = await tx.eventOnUsersRolesRegistration.create({
@@ -1825,6 +1844,39 @@ export class EventService {
         'Você só pode inscrever a si mesmo neste evento',
       );
     }
+  }
+
+  /**
+   * O termo do evento é condição para a inscrição existir.
+   *
+   * Vale para quem se inscreve — inclusive admin inscrevendo a si mesmo. Admin
+   * inscrevendo outra pessoa pelo painel passa direto: ninguém aceita termo em
+   * nome de terceiro, e a inscrição fica sem carimbo de aceite.
+   *
+   * Devolve se há aceite a registrar.
+   */
+  private async assertTermoAceito(
+    eventId: string,
+    requesterId: string,
+    userId: string,
+    acceptedTerms?: boolean,
+  ): Promise<boolean> {
+    if (requesterId !== userId) return false;
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { data: true },
+    });
+
+    if (!exigeAceiteDeTermo(event?.data)) return false;
+
+    if (acceptedTerms !== true) {
+      throw new BadRequestException(
+        'É preciso aceitar os termos do evento para se inscrever',
+      );
+    }
+
+    return true;
   }
 
   private async assertEventIsVisible(eventId: string, requesterId?: string) {

@@ -257,6 +257,11 @@ model EventOnUsers {
   /// Só em `REJECTED`; limpo quando o status muda para outra coisa.
   minorApprovalRejectionReason String?
 
+  /// Quando a pessoa aceitou o termo do evento (`data.registrationTerm`), na
+  /// tela de inscrição. Nulo é o caso comum: evento sem termo, ou inscrição
+  /// feita pelo painel por um admin, que não aceita nada em nome de ninguém.
+  termsAcceptedAt DateTime?
+
   @@id([userId, eventId])
   @@index([eventId])
 }

@@ -315,6 +315,16 @@ export class roleEventDto {
   })
   @IsString({ each: true })
   roleRegistrationId: string[];
+
+  @ApiProperty({
+    example: true,
+    description:
+      'Aceite do termo do evento (`data.registrationTerm`). Obrigatório para quem se inscreve em evento que tem termo; ignorado nos demais.',
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  acceptedTerms?: boolean;
 }
 
 class ProductPurchaseItemDto {
