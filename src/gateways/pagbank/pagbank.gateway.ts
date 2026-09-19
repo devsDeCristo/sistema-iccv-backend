@@ -135,6 +135,11 @@ export class PagbankGateway implements PaymentGateway {
       method: mapearMetodo(charge.payment_method?.type),
       createdAt: new Date(charge.created_at),
       paidAmountCents: valorPago(charge),
+      payload: {
+        payment_method: charge.payment_method,
+        links: charge.links,
+        codeTransaction: charge.id,
+      },
       raw: charge,
     }));
   }
@@ -226,8 +231,6 @@ export class PagbankGateway implements PaymentGateway {
         (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       )[0];
 
-    const bruta = escolhida.raw as any;
-
     return {
       kind: 'payment',
       referenceId,
@@ -235,9 +238,7 @@ export class PagbankGateway implements PaymentGateway {
       method: escolhida.method,
       paidAmountCents: escolhida.paidAmountCents,
       payload: {
-        payment_method: bruta?.payment_method,
-        links: bruta?.links,
-        codeTransaction: bruta?.id,
+        ...escolhida.payload,
         /** de onde veio este estado: a API, e não o corpo da notificação */
         confirmadoNaFonte: true,
       },

@@ -240,14 +240,7 @@ export class MercadoPagoGateway implements PaymentGateway {
       status: charge.status,
       method: charge.method,
       paidAmountCents: charge.paidAmountCents,
-      payload: {
-        payment_method: {
-          type: pagamento.payment_type_id,
-          id: pagamento.payment_method_id,
-        },
-        codeTransaction: String(pagamento.id),
-        receipt: pagamento.transaction_details?.external_resource_url ?? null,
-      },
+      payload: charge.payload,
     };
   }
 
@@ -342,6 +335,14 @@ export class MercadoPagoGateway implements PaymentGateway {
       createdAt: new Date(pagamento.date_created ?? Date.now()),
       paidAmountCents:
         typeof pagoEmReais === 'number' ? Math.round(pagoEmReais * 100) : null,
+      payload: {
+        payment_method: {
+          type: pagamento.payment_type_id,
+          id: pagamento.payment_method_id,
+        },
+        codeTransaction: String(pagamento.id),
+        receipt: pagamento.transaction_details?.external_resource_url ?? null,
+      },
       raw: pagamento,
     };
   }

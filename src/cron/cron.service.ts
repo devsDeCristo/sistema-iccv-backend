@@ -10,6 +10,14 @@ import {
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
 import { conferirValorPago } from 'src/payment/amount-check';
 
+/** O que a rodada fez, para quem a disparou pelo painel poder ler na tela */
+export interface ResumoDaReconciliacao {
+  /** cobranças pendentes que entraram na rodada */
+  conferidas: number;
+  /** as que voltaram do gateway com status diferente do que estava aqui */
+  atualizadas: number;
+}
+
 /** Uma cobrança pendente e a casa a quem perguntar por ela */
 interface CobrancaPendente {
   referenceId: string;
@@ -42,7 +50,19 @@ export class CronService {
     return runAsJob('reconcilePayments', () => this.reconciliar());
   }
 
-  private async reconciliar() {
+  /**
+   * A rotina em si, com dois gatilhos: o relógio, de três em três horas, e o
+   * botão do painel, para quem não quer esperar por ele — um pagamento que já
+   * foi pago lá e continua pendente aqui é o sintoma de webhook perdido, e
+   * esperar três horas por ele é tempo demais com o inscrito na frente.
+   *
+   * `eventId` recorta a rodada: o botão sempre manda um, para que quem
+   * administra uma igreja não dispare a conferência das cobranças das outras.
+   * Sem filtro é a rodada completa, que é o que o relógio faz.
+   */
+  async reconciliar(filtro?: {
+    eventId?: string;
+  }): Promise<ResumoDaReconciliacao> {
     this.logger.log('⏳ Iniciando reconciliação de pagamentos...');
 
     // 1. Busca todos os pagamentos pendentes ou em análise no banco
@@ -50,6 +70,7 @@ export class CronService {
       where: {
         status: { in: [PaymentStatus.WAITING, PaymentStatus.IN_ANALYSIS] },
         checkouts: { some: {} },
+        ...(filtro?.eventId ? { eventId: filtro.eventId } : {}),
       },
       select: {
         eventId: true,
@@ -93,6 +114,8 @@ export class CronService {
     // Uma credencial por configuração, e não uma por cobrança: sem isto a
     // rotina abre o envelope cifrado uma vez por linha pendente.
     const casas = new Map<string, GatewayResolvido | null>();
+
+    let atualizadas = 0;
 
     // 2. Para cada pagamento, consulta a casa que gerou o checkout
     for (const cobranca of aReconciliar) {
@@ -155,7 +178,7 @@ export class CronService {
             data: {
               status: statusConferido,
               method: chargeMaisRecente.method,
-              payload: chargeMaisRecente.raw as any,
+              payload: chargeMaisRecente.payload as any,
             },
           });
 
@@ -166,6 +189,8 @@ export class CronService {
             });
           }
         });
+
+        atualizadas += 1;
 
         this.logger.log(
           `Pagamento ${cobranca.referenceId} atualizado para ${statusConferido}`,
@@ -186,6 +211,8 @@ export class CronService {
     }
 
     this.logger.log('✅ Reconciliação finalizada');
+
+    return { conferidas: aReconciliar.length, atualizadas };
   }
 
   /**

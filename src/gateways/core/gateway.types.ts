@@ -145,6 +145,16 @@ export interface GatewayCharge {
    * `conferirValorPago`.
    */
   paidAmountCents?: number | null;
+  /**
+   * A cobrança traduzida para o que a tela do painel lê: método, código da
+   * transação, comprovante. É isto que vai para `Payment.payload`.
+   *
+   * Mora na cobrança, e não só no retorno do webhook, porque a baixa acontece
+   * por dois caminhos — o aviso do gateway e a reconciliação — e os dois
+   * gravam esse campo. Enquanto a reconciliação gravava `raw`, todo pagamento
+   * que o webhook não pegou chegava ao painel sem código de transação.
+   */
+  payload: Record<string, unknown>;
   raw: unknown;
 }
 

@@ -282,14 +282,7 @@ export class TonGateway implements PaymentGateway {
       status: charge.status,
       method: charge.method,
       paidAmountCents: charge.paidAmountCents,
-      payload: {
-        payment_method: { type: escolhida.payment_method },
-        codeTransaction: escolhida.id,
-        receipt:
-          escolhida.last_transaction?.pdf ??
-          escolhida.last_transaction?.url ??
-          null,
-      },
+      payload: charge.payload,
     };
   }
 
@@ -363,6 +356,12 @@ export class TonGateway implements PaymentGateway {
       method: mapearMetodo(charge.payment_method),
       createdAt: new Date(charge.created_at ?? Date.now()),
       paidAmountCents: typeof pago === 'number' ? pago : null,
+      payload: {
+        payment_method: { type: charge.payment_method },
+        codeTransaction: charge.id,
+        receipt:
+          charge.last_transaction?.pdf ?? charge.last_transaction?.url ?? null,
+      },
       raw: charge,
     };
   }

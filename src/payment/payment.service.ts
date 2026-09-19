@@ -316,7 +316,7 @@ export class PaymentService {
                 data: {
                   status: statusConferido,
                   method: chargeMaisRecente.method,
-                  payload: chargeMaisRecente.raw as Prisma.InputJsonValue,
+                  payload: chargeMaisRecente.payload as Prisma.InputJsonValue,
                 },
               });
               throw new BadRequestException(

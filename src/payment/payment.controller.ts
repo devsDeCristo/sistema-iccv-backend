@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { PaymentService } from './payment.service';
+import { CronService } from 'src/cron/cron.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 
 import {
@@ -25,7 +26,7 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_AREA_ROLES } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
   CreatePaymentCheckoutDto,
   payloadCreatePaymentCheckoutDto,
@@ -40,7 +41,10 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 @UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
 @Controller()
 export class PaymentController {
-  constructor(private readonly paymentService: PaymentService) {}
+  constructor(
+    private readonly paymentService: PaymentService,
+    private readonly cronService: CronService,
+  ) {}
 
   // ===============================
   // Criar pagamento (usuário no evento)
@@ -71,6 +75,39 @@ export class PaymentController {
   @Get('events/:idEvent/payments')
   findByEvent(@Param('idEvent') eventId: string) {
     return this.paymentService.findPaymentsByEvent(eventId);
+  }
+
+  // ===============================
+  // Conferir no gateway agora
+  // ===============================
+  /**
+   * A mesma rotina que roda de três em três horas, sob demanda e só para este
+   * evento.
+   *
+   * Existe para o caso do retorno perdido: o inscrito pagou, o gateway não
+   * avisou (ou avisou para um endereço que não existia mais) e a cobrança
+   * continua pendente na tela. O botão pergunta direto na fonte em vez de
+   * esperar o relógio — e, como é a mesma rotina, a conferência de valor
+   * continua valendo: pago a menos não vira pago.
+   *
+   * Só o dev. Não é questão de confiança: a rotina fala com o gateway uma vez
+   * por cobrança pendente, e um clique repetido numa tela com fila grande vira
+   * uma rajada de chamadas na conta da igreja. O caminho de quem administra
+   * continua sendo esperar o relógio ou lançar a baixa manual.
+   *
+   * O recorte por igreja vem do `EventTenantGuard`, como nas outras rotas de
+   * evento, e o `eventId` garante que a rodada não saia conferindo cobrança de
+   * evento alheio.
+   */
+  @ApiOperation({
+    summary: 'Conferir no gateway as cobranças pendentes deste evento',
+    description:
+      'Dispara a reconciliação sob demanda, só para o perfil dev. Devolve quantas cobranças foram conferidas e quantas mudaram de status.',
+  })
+  @Roles(Role.DEV)
+  @Post('events/:idEvent/payments/reconcile')
+  reconciliarEvento(@Param('idEvent') eventId: string) {
+    return this.cronService.reconciliar({ eventId });
   }
 
   // ===============================
