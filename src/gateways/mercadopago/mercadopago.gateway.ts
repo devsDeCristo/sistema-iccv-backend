@@ -60,8 +60,8 @@ export class MercadoPagoGateway implements PaymentGateway {
         label: 'Access token',
         required: true,
         secret: true,
-        placeholder: 'APP_USR-… (produção) ou TEST-… (sandbox)',
-        help: 'Painel do Mercado Pago › Suas integrações › Credenciais. O prefixo precisa combinar com o ambiente escolhido.',
+        placeholder: 'APP_USR-…',
+        help: 'Painel do Mercado Pago › Suas integrações › sua aplicação › Credenciais. As de teste e as de produção começam igual (APP_USR-…): o que muda é a aba de onde você copia. A public key da mesma tela não entra aqui — ela é do navegador, e o cartão é digitado no site do Mercado Pago.',
       },
       {
         key: 'webhookSecret',
@@ -256,27 +256,40 @@ export class MercadoPagoGateway implements PaymentGateway {
 
     try {
       const conta = await this.client.me(cred);
+      const nome = conta?.nickname ?? conta?.email;
 
-      // O prefixo da credencial diz o ambiente. Trocar os dois é o erro mais
-      // comum da primeira configuração, e ele só apareceria no primeiro
-      // inscrito que tentasse pagar de verdade.
-      const ehTeste = cred.accessToken.trim().startsWith('TEST-');
-      const esperaTeste = ctx.mode === PaymentProviderMode.SANDBOX;
+      /**
+       * O prefixo não diz mais o ambiente.
+       *
+       * A documentação do Mercado Pago é explícita: "o Access Token de teste
+       * começa com o prefixo `APP_USR`" — o mesmo das credenciais de produção.
+       * Enquanto esta conferência procurava `TEST-`, toda credencial de teste
+       * de hoje era anunciada como de produção, e a configuração certa era
+       * recusada na cara do admin.
+       *
+       * Sobrou o caso em que o prefixo ainda prova alguma coisa: `TEST-` é o
+       * formato antigo, e token nesse formato é de teste, ponto. No outro
+       * sentido não há o que afirmar, então a conta conectada vai na resposta
+       * e quem reconhece o vendedor é o admin.
+       */
+      const ehTesteAntigo = cred.accessToken.trim().startsWith('TEST-');
 
-      if (ehTeste !== esperaTeste) {
+      if (ehTesteAntigo && ctx.mode === PaymentProviderMode.PRODUCTION) {
         return {
           ok: false,
           account: conta?.nickname,
-          message: esperaTeste
-            ? 'Este é um token de produção, mas o ambiente selecionado é sandbox.'
-            : 'Este é um token de teste (TEST-…), mas o ambiente selecionado é produção.',
+          message:
+            'Este é um token de teste (TEST-…), mas o ambiente selecionado é produção.',
         };
       }
 
       return {
         ok: true,
-        account: conta?.nickname ?? conta?.email,
-        message: `Conectado à conta ${conta?.nickname ?? conta?.email}.`,
+        account: nome,
+        message:
+          ctx.mode === PaymentProviderMode.SANDBOX
+            ? `Conectado à conta ${nome}. O token não diz se é de teste: confira se esta é a conta de teste do vendedor.`
+            : `Conectado à conta ${nome}.`,
       };
     } catch (err: any) {
       const status = err?.response?.status;

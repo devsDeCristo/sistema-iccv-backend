@@ -5,9 +5,10 @@ import { criarHttp, falhaDoGateway } from '../core/gateway-http';
 /**
  * Um endereço só para os dois ambientes.
  *
- * Quem separa sandbox de produção no Mercado Pago é a credencial (`TEST-…`
- * contra `APP_USR-…`), e não a URL — por isso não há mapa de bases aqui como
- * nas outras casas.
+ * Quem separa sandbox de produção no Mercado Pago é a credencial, e não a URL
+ * — por isso não há mapa de bases aqui como nos outros gateways. E a
+ * credencial também não se anuncia: as de teste e as de produção começam com
+ * o mesmo `APP_USR-…`, e só o painel sabe de qual aba cada uma saiu.
  */
 const BASE = 'https://api.mercadopago.com';
 
