@@ -61,14 +61,17 @@ export class MercadoPagoGateway implements PaymentGateway {
         required: true,
         secret: true,
         placeholder: 'APP_USR-…',
-        help: 'Painel do Mercado Pago › Suas integrações › sua aplicação › Credenciais. As de teste e as de produção começam igual (APP_USR-…): o que muda é a aba de onde você copia. A public key da mesma tela não entra aqui — ela é do navegador, e o cartão é digitado no site do Mercado Pago.',
+        // o caminho no painel e a única troca possível ali. O resto — por que a
+        // public key não serve, por que o prefixo não diz o ambiente — está em
+        // docs/mercadopago.md, que é onde cabe texto
+        help: 'Painel › Suas integrações › Credenciais — o access token, não a public key.',
       },
       {
         key: 'webhookSecret',
         label: 'Assinatura secreta do webhook',
         required: true,
         secret: true,
-        help: 'Na mesma tela, em Webhooks: é a chave que assina as notificações. Sem ela o sistema recusa os retornos.',
+        help: 'Painel › Webhooks. Sem ela o sistema recusa os retornos.',
       },
     ],
     docsUrl:
