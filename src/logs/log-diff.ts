@@ -92,7 +92,8 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
     OTHER: 'Outro',
   },
   receivedFrom: {
-    SYSTEM: 'Sistema',
+    PENDING: 'Aguardando pagamento',
+    SYSTEM: 'Gateway de pagamento',
     EXTERNAL: 'Lançamento manual',
   },
   role: {

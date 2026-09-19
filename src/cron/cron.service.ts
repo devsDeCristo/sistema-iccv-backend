@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { CheckoutStatus, PaymentProvider, PaymentStatus } from '@prisma/client';
+import {
+  CheckoutStatus,
+  PaymentProvider,
+  PaymentReceived,
+  PaymentStatus,
+} from '@prisma/client';
 import { PrismaService } from 'src/prisma';
 import { runAsJob } from 'src/context/request.context';
 import {
@@ -179,6 +184,9 @@ export class CronService {
               status: statusConferido,
               method: chargeMaisRecente.method,
               payload: chargeMaisRecente.payload as any,
+              // quem respondeu foi o gateway: a cobrança deixa de ser uma
+              // linha sem origem e passa a ser governada por ele
+              receivedFrom: PaymentReceived.SYSTEM,
             },
           });
 

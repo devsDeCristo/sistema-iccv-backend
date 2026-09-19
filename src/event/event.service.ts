@@ -388,7 +388,9 @@ export class EventService {
             totalEmCentavos > 0 ? PaymentStatus.WAITING : PaymentStatus.PAID,
           method:
             totalEmCentavos > 0 ? PaymentMethod.OTHER : PaymentMethod.CASH,
-          receivedFrom: PaymentReceived.SYSTEM,
+          // a cobrança nasce sem origem: ninguém pagou por lugar nenhum ainda.
+          // Quem carimba SYSTEM é o retorno do gateway
+          receivedFrom: PaymentReceived.PENDING,
         },
         select: { id: true, roleRegistrationId: true },
       });
@@ -642,7 +644,7 @@ export class EventService {
           amount: role.price,
           status: role.price > 0 ? PaymentStatus.WAITING : PaymentStatus.PAID,
           method: role.price > 0 ? PaymentMethod.OTHER : PaymentMethod.CASH,
-          receivedFrom: PaymentReceived.SYSTEM,
+          receivedFrom: PaymentReceived.PENDING,
         },
       });
 

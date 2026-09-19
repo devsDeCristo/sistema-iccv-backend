@@ -317,6 +317,8 @@ export class PaymentService {
                   status: statusConferido,
                   method: chargeMaisRecente.method,
                   payload: chargeMaisRecente.payload as Prisma.InputJsonValue,
+                  // mesma regra do retorno: o dado é do gateway
+                  receivedFrom: PaymentReceived.SYSTEM,
                 },
               });
               throw new BadRequestException(
@@ -702,6 +704,9 @@ export class PaymentService {
               method,
               status: statusConferido,
               payload,
+              // é aqui que a cobrança ganha origem: o dado veio do gateway, e
+              // a partir de agora quem manda no status é ele, não a tela
+              receivedFrom: PaymentReceived.SYSTEM,
             },
           });
           /**
