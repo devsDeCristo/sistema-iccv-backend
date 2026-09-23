@@ -1,7 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
 import { PrismaService } from '../prisma';
 import { TeamService } from '../team/team.service';
+import { Role } from '../auth/roles';
+import { isSuperAdmin, perfilNaIgreja, SELECT_TENANT } from '../auth/tenant';
+import { quadranteVisivelParaInscritos } from '../event/event-quadrante';
 
 /** Mesmo propósito do `escapeHtml` de `password-reset.service.ts` /
  * `event.service.ts`: nomes e observações vão direto para dentro do HTML que
@@ -34,7 +42,7 @@ function formatDate(value: Date): string {
   return new Date(value).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 }
 
-interface QuadranteUser {
+export interface QuadranteUser {
   id: string;
   fullName: string;
   profilePhotoUrl: string | null;
@@ -44,7 +52,7 @@ interface QuadranteUser {
   roleTeam: 'LEADER' | 'MEMBER';
 }
 
-interface QuadranteTeam {
+export interface QuadranteTeam {
   id: string;
   name: string;
   users: QuadranteUser[];
@@ -112,9 +120,64 @@ export class QuadranteService {
     return `<section class="cover">${bg}${logo}</section>`;
   }
 
-  async buildHtml(
-    eventId: string,
-  ): Promise<{ html: string; eventName: string; periodo: string }> {
+  /**
+   * Quem pode abrir o quadrante: o admin da igreja do evento, sempre; o
+   * inscrito, só quando o evento libera (`data.showQuadrante`).
+   *
+   * A rota não passa pelo `EventTenantGuard` porque ele recortaria o admin de
+   * outra igreja que está inscrito aqui como qualquer pessoa — e é justamente
+   * o caso do inscrito que esta checagem precisa aceitar.
+   */
+  async assertPodeVer(eventId: string, requesterId?: string): Promise<void> {
+    if (!requesterId) {
+      throw new ForbiddenException('Usuário não autenticado');
+    }
+
+    const [requester, event] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: SELECT_TENANT,
+      }),
+      this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { churchId: true, data: true },
+      }),
+    ]);
+
+    if (!event) {
+      throw new NotFoundException('Evento não encontrado');
+    }
+
+    if (
+      isSuperAdmin(requester) ||
+      perfilNaIgreja(requester, event.churchId) === Role.ADMIN
+    ) {
+      return;
+    }
+
+    if (!quadranteVisivelParaInscritos(event.data)) {
+      throw new ForbiddenException(
+        'O quadrante deste evento não está disponível para os participantes',
+      );
+    }
+
+    const inscricao = await this.prisma.eventOnUsers.findUnique({
+      where: { userId_eventId: { userId: requesterId, eventId } },
+      select: { userId: true },
+    });
+
+    if (!inscricao) {
+      throw new ForbiddenException(
+        'O quadrante só pode ser visto por quem está inscrito no evento',
+      );
+    }
+  }
+
+  /**
+   * O conteúdo do quadrante, para a tela montar a mesma folha do PDF: equipes
+   * já na ordem de impressão, e capa, logo e período do rodapé.
+   */
+  async findQuadrante(eventId: string) {
     const [teams, event] = await Promise.all([
       this.teamService.findAll(eventId) as Promise<QuadranteTeam[]>,
       this.prisma.event.findUnique({
@@ -127,15 +190,44 @@ export class QuadranteService {
       throw new NotFoundException('Evento não encontrado');
     }
 
-    if (!teams?.length) {
+    const data = (event.data ?? {}) as Record<string, unknown>;
+
+    return {
+      event: {
+        name: event.name,
+        startDate: event.startDate,
+        endDate: event.endDate,
+        logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : null,
+        coverUrl: typeof data.coverUrl === 'string' ? data.coverUrl : null,
+        // paleta do evento, para a tela vestir as cores dele; o PDF não usa
+        colors: (data.colors ?? null) as {
+          primary?: string;
+          secondary?: string;
+          tertiary?: string;
+        } | null,
+        periodo: formatDateRange(event.startDate, event.endDate),
+      },
+      teams: (teams ?? []).map((team) => ({
+        id: team.id,
+        name: team.name,
+        users: this.sortUsers(team.users),
+      })),
+    };
+  }
+
+  async buildHtml(
+    eventId: string,
+  ): Promise<{ html: string; eventName: string; periodo: string }> {
+    const { event, teams } = await this.findQuadrante(eventId);
+
+    if (!teams.length) {
       throw new BadRequestException(
         'Não é possível gerar o PDF: este evento ainda não possui equipes cadastradas.',
       );
     }
 
-    const data = (event.data ?? {}) as Record<string, unknown>;
-    const logoUrl = typeof data.logoUrl === 'string' ? data.logoUrl : undefined;
-    const coverUrl = typeof data.coverUrl === 'string' ? data.coverUrl : undefined;
+    const logoUrl = event.logoUrl ?? undefined;
+    const coverUrl = event.coverUrl ?? undefined;
 
     const html = `
       <!DOCTYPE html>
@@ -206,11 +298,7 @@ export class QuadranteService {
         </body>
       </html>`;
 
-    return {
-      html,
-      eventName: event.name,
-      periodo: formatDateRange(event.startDate, event.endDate),
-    };
+    return { html, eventName: event.name, periodo: event.periodo };
   }
 
   async generatePdf(

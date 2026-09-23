@@ -1,26 +1,35 @@
-import { Controller, Get, Param, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
-import { RolesGuard } from 'src/decorators/roles.guard';
-import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
-import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES } from 'src/auth/roles';
 import { QuadranteService } from './quadrante.service';
 
+/**
+ * Sem `@Roles` nem `EventTenantGuard`: além do admin da igreja, o inscrito
+ * também abre o quadrante quando o evento libera. Quem pode ver é decidido em
+ * `QuadranteService.assertPodeVer`, em toda rota daqui.
+ */
 @ApiTags('quadrante')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
-@Roles(...ADMIN_ROLES)
+@UseGuards(JwtAuthGuard)
 @Controller('events/:idEvent/quadrante')
 export class QuadranteController {
   constructor(private readonly quadranteService: QuadranteService) {}
 
+  @Get()
+  async findOne(@Param('idEvent') idEvent: string, @Req() req) {
+    await this.quadranteService.assertPodeVer(idEvent, req.user?.userId);
+    return this.quadranteService.findQuadrante(idEvent);
+  }
+
   @Get('pdf')
   async generatePdf(
     @Param('idEvent') idEvent: string,
+    @Req() req,
     @Res() res: Response,
   ) {
+    await this.quadranteService.assertPodeVer(idEvent, req.user?.userId);
+
     const { buffer, fileName } =
       await this.quadranteService.generatePdf(idEvent);
 

@@ -43,6 +43,7 @@ import {
   NOME_DO_MODULO,
   normalizarModulos,
 } from './event-modules';
+import { normalizarMostrarQuadrante } from './event-quadrante';
 import {
   SELECT_TENANT,
   assertChurchAccess,
@@ -1686,6 +1687,7 @@ export class EventService {
         ...(dataDoEvento.modules !== undefined
           ? { modules: normalizarModulos(dataDoEvento.modules) }
           : {}),
+        showQuadrante: normalizarMostrarQuadrante(dataDoEvento.showQuadrante),
         coverUrl,
         logoUrl,
         minorTermUrl,
@@ -2222,6 +2224,11 @@ export class EventService {
     if (safeData.colors === undefined && dataAtual.colors !== undefined) {
       safeData.colors = dataAtual.colors;
     }
+
+    if (safeData.showQuadrante === undefined) {
+      safeData.showQuadrante = dataAtual.showQuadrante;
+    }
+    safeData.showQuadrante = normalizarMostrarQuadrante(safeData.showQuadrante);
 
     // só as três chaves conhecidas, só booleano — o resto do objeto que vier
     // no corpo da requisição não vira módulo
