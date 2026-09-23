@@ -36,7 +36,7 @@ import {
   validarFoto,
   validarProdutos,
 } from './event-products';
-import { ADMIN_AREA_ROLES, isAdminRole, Role } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
   SELECT_TENANT,
   assertChurchAccess,
@@ -2424,8 +2424,12 @@ export class EventService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    if (!isAdminRole(requester.role)) {
-      throw new UnauthorizedException('Usuário não é administrador');
+    // a trava real: o guard já barra pelo token, e aqui o perfil vem do banco,
+    // para que um token antigo de quem deixou de ser dev não apague nada
+    if (requester.role !== Role.DEV) {
+      throw new UnauthorizedException(
+        'Apagar evento é restrito ao perfil de desenvolvimento',
+      );
     }
 
     const event = await this.prisma.event.findUnique({
@@ -2470,6 +2474,11 @@ export class EventService {
         const waitlist = await tx.waitlist.deleteMany({
           where: { eventId: id },
         });
+        // o check-in não tem cascata e não saía com a inscrição: uma linha
+        // esquecida aqui derrubava a exclusão inteira na chave estrangeira
+        const checkins = await tx.checkin.deleteMany({
+          where: { eventId: id },
+        });
         const registrations = await tx.eventOnUsersRolesRegistration.deleteMany(
           {
             where: { eventId: id },
@@ -2499,6 +2508,7 @@ export class EventService {
           bedroomUsers: bedroomUsers.count,
           teamUsers: teamUsers.count,
           waitlist: waitlist.count,
+          checkins: checkins.count,
           registrations: registrations.count,
           eventUsers: eventUsers.count,
           roles: roles.count,

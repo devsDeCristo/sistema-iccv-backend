@@ -30,7 +30,7 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_AREA_ROLES, ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, ADMIN_ROLES, Role } from 'src/auth/roles';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('events')
@@ -201,8 +201,19 @@ export class EventController {
     );
   }
 
-  @ApiOperation({ summary: 'Delete event' })
-  @Roles(...ADMIN_ROLES)
+  /**
+   * Apagar evento é decisão de negócio, não de operação: leva junto grupos,
+   * quartos, equipes, lista de espera e o histórico de cobrança. Por isso o
+   * perfil interno de desenvolvimento é o único que alcança a rota — e o
+   * serviço confere de novo, lendo o perfil do banco, para que a trava não
+   * dependa só do token.
+   */
+  @ApiOperation({
+    summary: 'Delete event',
+    description:
+      'Apaga o evento e tudo que pende dele. Só o perfil DEV, e só enquanto o evento não tiver inscritos.',
+  })
+  @Roles(Role.DEV)
   @Delete(':id')
   remove(@Param('id') id: string, @Req() req: any) {
     return this.eventService.remove(id, req.user.userId);
