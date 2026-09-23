@@ -127,8 +127,14 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Edit event' })
+  /**
+   * `:idEvent` e não `:id`: é por este nome que o `EventTenantGuard` acha o
+   * evento na URL. Com `:id` ele não resolvia nada e liberava a rota, e a
+   * checagem de igreja ficava só dentro do serviço — que a faz, mas aí a
+   * garantia depende de cada método lembrar dela.
+   */
   @Roles(...ADMIN_ROLES)
-  @Put(':id')
+  @Put(':idEvent')
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -151,7 +157,7 @@ export class EventController {
       coverFile?: Express.Multer.File[];
       termFile?: Express.Multer.File[];
     },
-    @Param('id') id: string,
+    @Param('idEvent') id: string,
     @Body() updateEventDto: EventDto,
     @Req() req: any,
   ) {
@@ -214,8 +220,8 @@ export class EventController {
       'Apaga o evento e tudo que pende dele. Só o perfil DEV, e só enquanto o evento não tiver inscritos.',
   })
   @Roles(Role.DEV)
-  @Delete(':id')
-  remove(@Param('id') id: string, @Req() req: any) {
+  @Delete(':idEvent')
+  remove(@Param('idEvent') id: string, @Req() req: any) {
     return this.eventService.remove(id, req.user.userId);
   }
 

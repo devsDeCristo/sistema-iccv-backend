@@ -2524,8 +2524,10 @@ export class EventService {
     });
 
     if (userCount > 0) {
+      // a mensagem chega inteira na tela, num toast: em inglês ela não dizia
+      // nada para quem opera o painel, nem quantos inscritos impedem a exclusão
       throw new BadRequestException(
-        'Cannot delete event with registered users!',
+        `Este evento tem ${userCount} inscrito(s) e por isso não pode ser apagado. Remova as inscrições antes.`,
       );
     }
 
