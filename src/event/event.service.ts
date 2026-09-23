@@ -2206,6 +2206,23 @@ export class EventService {
       any
     >;
 
+    /**
+     * `data` é gravado inteiro, então chave que não vem no corpo desaparece.
+     * Para texto do formulário isso é o esperado — campo apagado é campo
+     * vazio —, mas módulos e cores são configuração: um cliente que salve o
+     * evento sem mandá-los religaria módulo desligado e apagaria a paleta sem
+     * ninguém ter pedido. Ausente aqui quer dizer "não mexi nisso".
+     */
+    const dataAtual = (event.data ?? {}) as Record<string, any>;
+
+    if (safeData.modules === undefined && dataAtual.modules !== undefined) {
+      safeData.modules = dataAtual.modules;
+    }
+
+    if (safeData.colors === undefined && dataAtual.colors !== undefined) {
+      safeData.colors = dataAtual.colors;
+    }
+
     // só as três chaves conhecidas, só booleano — o resto do objeto que vier
     // no corpo da requisição não vira módulo
     if (safeData.modules !== undefined) {
@@ -2401,6 +2418,11 @@ export class EventService {
         const bedroomUsers = await tx.bedroomsOnUsers.deleteMany({
           where: { userId: idUser, bedrooms: { eventId: idEvent } },
         });
+        // quem sai do evento sai do ônibus junto: sem isto o lugar continuava
+        // ocupado por alguém que não está mais inscrito
+        const transportUsers = await tx.transportOnUsers.deleteMany({
+          where: { userId: idUser, transport: { eventId: idEvent } },
+        });
         const teamUsers = await tx.teamOnUsers.deleteMany({
           where: { userId: idUser, team: { eventId: idEvent } },
         });
@@ -2420,6 +2442,7 @@ export class EventService {
           paymentCheckouts: paymentCheckouts.count,
           payments: payments.count,
           bedroomUsers: bedroomUsers.count,
+          transportUsers: transportUsers.count,
           teamUsers: teamUsers.count,
           waitlist: waitlist.count,
           registrations: registrations.count,

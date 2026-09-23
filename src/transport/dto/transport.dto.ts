@@ -47,5 +47,8 @@ export class TransportDto {
     description: 'ids dos usuários que ocupam os lugares',
   })
   @IsArray()
+  // cada item precisa ser texto: sem isto, um número ou objeto no meio da lista
+  // só falharia lá dentro, na consulta
+  @IsString({ each: true })
   usersId: string[];
 }
