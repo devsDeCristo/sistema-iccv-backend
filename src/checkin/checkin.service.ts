@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CheckinStatus, PrismaService } from '../prisma';
+import { moduloAtivo } from '../event/event-modules';
 import { CheckinGateway } from './checkin.gateway';
 
 /** Etapas da fila, na ordem em que a recepção as executa. */
@@ -339,6 +340,19 @@ export class CheckinService {
     userId: string,
     grupos: string[],
   ) {
+    /**
+     * Evento sem o módulo de quartos não aloca ninguém. Não é só falta de
+     * quarto para escolher: a recepção que desligou o módulo não espera que o
+     * check-in mexa nisso, e um quarto que sobrou de antes viraria destino de
+     * quem entra na fila.
+     */
+    const evento = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { data: true },
+    });
+
+    if (!moduloAtivo(evento?.data, 'bedrooms')) return null;
+
     const jaTemQuarto = await this.prisma.bedroomsOnUsers.findFirst({
       where: { userId, bedrooms: { eventId } },
       select: { bedroomsId: true },

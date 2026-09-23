@@ -38,6 +38,12 @@ import {
 } from './event-products';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
+  ModuloDoEvento,
+  modulosDesligados,
+  NOME_DO_MODULO,
+  normalizarModulos,
+} from './event-modules';
+import {
   SELECT_TENANT,
   assertChurchAccess,
   churchIdsComPerfil,
@@ -1674,8 +1680,12 @@ export class EventService {
        */
       const minorTermUrl = data.termFile ? fileToDataUri(data.termFile) : null;
 
+      const dataDoEvento = (data.data as Prisma.JsonObject) ?? {};
       const jsonData: Prisma.JsonObject = {
-        ...((data.data as Prisma.JsonObject) ?? {}),
+        ...dataDoEvento,
+        ...(dataDoEvento.modules !== undefined
+          ? { modules: normalizarModulos(dataDoEvento.modules) }
+          : {}),
         coverUrl,
         logoUrl,
         minorTermUrl,
@@ -2195,6 +2205,14 @@ export class EventService {
       string,
       any
     >;
+
+    // só as três chaves conhecidas, só booleano — o resto do objeto que vier
+    // no corpo da requisição não vira módulo
+    if (safeData.modules !== undefined) {
+      safeData.modules = normalizarModulos(safeData.modules);
+    }
+
+    await this.assertModulosPodemDesligar(id, event.data, safeData.modules);
     const jsonData: Prisma.JsonObject = {
       ...safeData,
       coverUrl,
@@ -2414,6 +2432,37 @@ export class EventService {
     return { message: 'User removed from event successfully', deleted };
   }
 
+  /**
+   * Desligar módulo que já tem coisa cadastrada esconde dado: o quarto continua
+   * no banco, com gente dentro, e some da tela. Quem quiser desligar apaga
+   * antes — e a recusa diz quantos existem, para a pessoa saber o tamanho do
+   * serviço.
+   */
+  private async assertModulosPodemDesligar(
+    eventId: string,
+    dataAtual: unknown,
+    modulosNovos: unknown,
+  ) {
+    const saindo = modulosDesligados(dataAtual, modulosNovos);
+    if (!saindo.length) return;
+
+    const quantos: Record<ModuloDoEvento, () => Promise<number>> = {
+      bedrooms: () => this.prisma.bedrooms.count({ where: { eventId } }),
+      teams: () => this.prisma.team.count({ where: { eventId } }),
+      transport: () => this.prisma.transport.count({ where: { eventId } }),
+    };
+
+    for (const modulo of saindo) {
+      const total = await quantos[modulo]();
+
+      if (total > 0) {
+        throw new BadRequestException(
+          `Não dá para desligar ${NOME_DO_MODULO[modulo]}: o evento tem ${total} cadastrado(s). Apague antes de desligar o módulo.`,
+        );
+      }
+    }
+  }
+
   async remove(id: string, requesterId: string) {
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
@@ -2468,6 +2517,9 @@ export class EventService {
         const bedroomUsers = await tx.bedroomsOnUsers.deleteMany({
           where: { bedrooms: { eventId: id } },
         });
+        const transportUsers = await tx.transportOnUsers.deleteMany({
+          where: { transport: { eventId: id } },
+        });
         const teamUsers = await tx.teamOnUsers.deleteMany({
           where: { team: { eventId: id } },
         });
@@ -2496,6 +2548,9 @@ export class EventService {
         const bedrooms = await tx.bedrooms.deleteMany({
           where: { eventId: id },
         });
+        const transports = await tx.transport.deleteMany({
+          where: { eventId: id },
+        });
         const teams = await tx.team.deleteMany({
           where: { eventId: id },
         });
@@ -2506,6 +2561,7 @@ export class EventService {
           paymentCheckouts: paymentCheckouts.count,
           payments: payments.count,
           bedroomUsers: bedroomUsers.count,
+          transportUsers: transportUsers.count,
           teamUsers: teamUsers.count,
           waitlist: waitlist.count,
           checkins: checkins.count,
@@ -2514,6 +2570,7 @@ export class EventService {
           roles: roles.count,
           groups: groups.count,
           bedrooms: bedrooms.count,
+          transports: transports.count,
           teams: teams.count,
         };
       },

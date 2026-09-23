@@ -3,6 +3,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UserModule } from './user/user.module';
 import { EventModule } from './event/event.module';
 import { BedroomsModule } from './bedrooms/bedrooms.module';
+import { TransportModule } from './transport/transport.module';
 import { TeamModule } from './team/team.module';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
@@ -28,6 +29,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     UserModule,
     EventModule,
     BedroomsModule,
+    TransportModule,
     TeamModule,
     AuthModule,
     PasswordResetModule,
