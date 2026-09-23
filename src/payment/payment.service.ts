@@ -316,7 +316,9 @@ export class PaymentService {
                 data: {
                   status: statusConferido,
                   method: chargeMaisRecente.method,
-                  payload: chargeMaisRecente.raw as Prisma.InputJsonValue,
+                  payload: chargeMaisRecente.payload as Prisma.InputJsonValue,
+                  // mesma regra do retorno: o dado é do gateway
+                  receivedFrom: PaymentReceived.SYSTEM,
                 },
               });
               throw new BadRequestException(
@@ -702,13 +704,30 @@ export class PaymentService {
               method,
               status: statusConferido,
               payload,
+              // é aqui que a cobrança ganha origem: o dado veio do gateway, e
+              // a partir de agora quem manda no status é ele, não a tela
+              receivedFrom: PaymentReceived.SYSTEM,
             },
           });
-          // inativar checkouts
-          await tx.paymentCheckout.updateMany({
-            where: { referenceId, ...this.filtroDaCasa(escopo) },
-            data: { status: CheckoutStatus.INACTIVE },
-          });
+          /**
+           * O checkout fecha quando o dinheiro entra — e só então.
+           *
+           * Antes fechava em qualquer notificação, o que era inofensivo
+           * enquanto só o retorno de "pago" chegava aqui. Com o aviso de
+           * pedido criado também sendo aplicado, fechar nele derrubava o
+           * checkout de um Pix que ainda nem tinha sido pago: o próximo
+           * clique em "pagar" abriria uma segunda cobrança para a mesma
+           * inscrição, e quem pagasse as duas pagaria duas vezes.
+           *
+           * O retorno de "pago" continua achando a cobrança pelo
+           * `referenceId`, esteja o checkout ativo ou não.
+           */
+          if (statusConferido === PaymentStatus.PAID) {
+            await tx.paymentCheckout.updateMany({
+              where: { referenceId, ...this.filtroDaCasa(escopo) },
+              data: { status: CheckoutStatus.INACTIVE },
+            });
+          }
         },
         {
           timeout: 20000, // 20 segundos
@@ -1078,6 +1097,61 @@ export class PaymentService {
       },
     });
   }
+  /**
+   * Registra (ou desfaz) a entrega dos produtos de uma compra.
+   *
+   * A entrega é da compra inteira: quem leva duas camisas paga uma vez e
+   * recebe as duas de uma vez.
+   *
+   * Só compra paga pode ser entregue — entregar antes de receber é justamente
+   * o que o controle existe para impedir. Desfazer, ao contrário, vale em
+   * qualquer status: é a correção de um registro errado, e quando um pagamento
+   * é estornado a entrega precisa poder voltar atrás.
+   */
+  async updateProductsDelivery(
+    paymentId: string,
+    delivered: boolean,
+    adminId?: string,
+  ) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        status: true,
+        _count: { select: { productItems: true } },
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    if (payment._count.productItems === 0) {
+      throw new BadRequestException(
+        'Esta compra não tem produtos para entregar',
+      );
+    }
+
+    if (delivered && payment.status !== PaymentStatus.PAID) {
+      throw new BadRequestException(
+        'Só dá para registrar a entrega depois que o pagamento estiver pago',
+      );
+    }
+
+    return this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        productsDeliveredAt: delivered ? new Date() : null,
+        productsDeliveredById: delivered ? adminId ?? null : null,
+      },
+      select: {
+        id: true,
+        productsDeliveredAt: true,
+        productsDeliveredById: true,
+      },
+    });
+  }
+
   /**
    * @param requesterId quem pediu o extrato. O admin de uma igreja não pode
    * ver o que a pessoa deve nas outras: sem este recorte bastava o id de um

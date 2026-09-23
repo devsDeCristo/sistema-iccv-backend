@@ -179,9 +179,8 @@ export class InfinitePayGateway implements PaymentGateway {
       method: charge.method,
       paidAmountCents: charge.paidAmountCents,
       payload: {
-        payment_method: { type: conferencia.capture_method },
+        ...charge.payload,
         codeTransaction: body.transaction_nsu ?? null,
-        installments: conferencia.installments ?? null,
         receipt: body.receipt_url ?? null,
       },
     };
@@ -233,6 +232,14 @@ export class InfinitePayGateway implements PaymentGateway {
         typeof conferencia.paid_amount === 'number'
           ? conferencia.paid_amount
           : null,
+      // o código da transação e o comprovante só existem no aviso, e não na
+      // conferência — `parseWebhook` completa os dois por cima destes
+      payload: {
+        payment_method: { type: conferencia.capture_method },
+        codeTransaction: null,
+        installments: conferencia.installments ?? null,
+        receipt: null,
+      },
       raw: conferencia,
     };
   }

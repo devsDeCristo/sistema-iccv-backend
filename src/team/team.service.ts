@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService, TeamRole } from '../prisma';
+import { moduloAtivo } from '../event/event-modules';
 import { TeammDto } from './dto/team.dto';
 
 @Injectable()
@@ -75,8 +76,27 @@ export class TeamService {
     }
   }
 
+  /**
+   * Módulo desligado não recebe cadastro. A tela já esconde a aba, mas a rota
+   * existe: sem esta trava, um formulário aberto antes de desligar o módulo
+   * ainda gravaria.
+   */
+  private async assertModuloLigado(eventId: string) {
+    const evento = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { data: true },
+    });
+
+    if (!moduloAtivo(evento?.data, 'teams')) {
+      throw new BadRequestException(
+        'O módulo Equipes está desligado neste evento',
+      );
+    }
+  }
+
   async create(idEvent: string, createTeam: TeammDto) {
     // fora do try: o catch genérico abaixo viraria um 500 sem explicação
+    await this.assertModuloLigado(idEvent);
     await this.assertUsersNoEvento(idEvent, [
       ...(createTeam.usersId ?? []),
       ...(createTeam.usersLeadersId ?? []),

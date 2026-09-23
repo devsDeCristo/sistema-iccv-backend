@@ -126,6 +126,7 @@ export class WebhooksService {
     await this.marcarRecebimento(config.id);
 
     const evento = await gateway.parseWebhook(req, context);
+
     const escopo = {
       provider: config.provider,
       configId: config.id,

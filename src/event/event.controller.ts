@@ -30,7 +30,7 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_AREA_ROLES, ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, ADMIN_ROLES, Role } from 'src/auth/roles';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('events')
@@ -127,8 +127,14 @@ export class EventController {
   }
 
   @ApiOperation({ summary: 'Edit event' })
+  /**
+   * `:idEvent` e não `:id`: é por este nome que o `EventTenantGuard` acha o
+   * evento na URL. Com `:id` ele não resolvia nada e liberava a rota, e a
+   * checagem de igreja ficava só dentro do serviço — que a faz, mas aí a
+   * garantia depende de cada método lembrar dela.
+   */
   @Roles(...ADMIN_ROLES)
-  @Put(':id')
+  @Put(':idEvent')
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -151,7 +157,7 @@ export class EventController {
       coverFile?: Express.Multer.File[];
       termFile?: Express.Multer.File[];
     },
-    @Param('id') id: string,
+    @Param('idEvent') id: string,
     @Body() updateEventDto: EventDto,
     @Req() req: any,
   ) {
@@ -201,10 +207,21 @@ export class EventController {
     );
   }
 
-  @ApiOperation({ summary: 'Delete event' })
-  @Roles(...ADMIN_ROLES)
-  @Delete(':id')
-  remove(@Param('id') id: string, @Req() req: any) {
+  /**
+   * Apagar evento é decisão de negócio, não de operação: leva junto grupos,
+   * quartos, equipes, lista de espera e o histórico de cobrança. Por isso o
+   * perfil interno de desenvolvimento é o único que alcança a rota — e o
+   * serviço confere de novo, lendo o perfil do banco, para que a trava não
+   * dependa só do token.
+   */
+  @ApiOperation({
+    summary: 'Delete event',
+    description:
+      'Apaga o evento e tudo que pende dele. Só o perfil DEV, e só enquanto o evento não tiver inscritos.',
+  })
+  @Roles(Role.DEV)
+  @Delete(':idEvent')
+  remove(@Param('idEvent') id: string, @Req() req: any) {
     return this.eventService.remove(id, req.user.userId);
   }
 
@@ -262,7 +279,7 @@ export class EventController {
       idUser,
       idEvent,
       body.roleRegistrationId,
-      { requesterId: req.user?.userId },
+      { requesterId: req.user?.userId, acceptedTerms: body.acceptedTerms },
     );
   }
 

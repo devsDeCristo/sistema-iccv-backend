@@ -60,15 +60,18 @@ export class MercadoPagoGateway implements PaymentGateway {
         label: 'Access token',
         required: true,
         secret: true,
-        placeholder: 'APP_USR-… (produção) ou TEST-… (sandbox)',
-        help: 'Painel do Mercado Pago › Suas integrações › Credenciais. O prefixo precisa combinar com o ambiente escolhido.',
+        placeholder: 'APP_USR-…',
+        // o caminho no painel e a única troca possível ali. O resto — por que a
+        // public key não serve, por que o prefixo não diz o ambiente — está em
+        // docs/mercadopago.md, que é onde cabe texto
+        help: 'Painel › Suas integrações › Credenciais — o access token, não a public key.',
       },
       {
         key: 'webhookSecret',
         label: 'Assinatura secreta do webhook',
         required: true,
         secret: true,
-        help: 'Na mesma tela, em Webhooks: é a chave que assina as notificações. Sem ela o sistema recusa os retornos.',
+        help: 'Painel › Webhooks. Sem ela o sistema recusa os retornos.',
       },
     ],
     docsUrl:
@@ -240,14 +243,7 @@ export class MercadoPagoGateway implements PaymentGateway {
       status: charge.status,
       method: charge.method,
       paidAmountCents: charge.paidAmountCents,
-      payload: {
-        payment_method: {
-          type: pagamento.payment_type_id,
-          id: pagamento.payment_method_id,
-        },
-        codeTransaction: String(pagamento.id),
-        receipt: pagamento.transaction_details?.external_resource_url ?? null,
-      },
+      payload: charge.payload,
     };
   }
 
@@ -256,27 +252,40 @@ export class MercadoPagoGateway implements PaymentGateway {
 
     try {
       const conta = await this.client.me(cred);
+      const nome = conta?.nickname ?? conta?.email;
 
-      // O prefixo da credencial diz o ambiente. Trocar os dois é o erro mais
-      // comum da primeira configuração, e ele só apareceria no primeiro
-      // inscrito que tentasse pagar de verdade.
-      const ehTeste = cred.accessToken.trim().startsWith('TEST-');
-      const esperaTeste = ctx.mode === PaymentProviderMode.SANDBOX;
+      /**
+       * O prefixo não diz mais o ambiente.
+       *
+       * A documentação do Mercado Pago é explícita: "o Access Token de teste
+       * começa com o prefixo `APP_USR`" — o mesmo das credenciais de produção.
+       * Enquanto esta conferência procurava `TEST-`, toda credencial de teste
+       * de hoje era anunciada como de produção, e a configuração certa era
+       * recusada na cara do admin.
+       *
+       * Sobrou o caso em que o prefixo ainda prova alguma coisa: `TEST-` é o
+       * formato antigo, e token nesse formato é de teste, ponto. No outro
+       * sentido não há o que afirmar, então a conta conectada vai na resposta
+       * e quem reconhece o vendedor é o admin.
+       */
+      const ehTesteAntigo = cred.accessToken.trim().startsWith('TEST-');
 
-      if (ehTeste !== esperaTeste) {
+      if (ehTesteAntigo && ctx.mode === PaymentProviderMode.PRODUCTION) {
         return {
           ok: false,
           account: conta?.nickname,
-          message: esperaTeste
-            ? 'Este é um token de produção, mas o ambiente selecionado é sandbox.'
-            : 'Este é um token de teste (TEST-…), mas o ambiente selecionado é produção.',
+          message:
+            'Este é um token de teste (TEST-…), mas o ambiente selecionado é produção.',
         };
       }
 
       return {
         ok: true,
-        account: conta?.nickname ?? conta?.email,
-        message: `Conectado à conta ${conta?.nickname ?? conta?.email}.`,
+        account: nome,
+        message:
+          ctx.mode === PaymentProviderMode.SANDBOX
+            ? `Conectado à conta ${nome}. O token não diz se é de teste: confira se esta é a conta de teste do vendedor.`
+            : `Conectado à conta ${nome}.`,
       };
     } catch (err: any) {
       const status = err?.response?.status;
@@ -329,6 +338,14 @@ export class MercadoPagoGateway implements PaymentGateway {
       createdAt: new Date(pagamento.date_created ?? Date.now()),
       paidAmountCents:
         typeof pagoEmReais === 'number' ? Math.round(pagoEmReais * 100) : null,
+      payload: {
+        payment_method: {
+          type: pagamento.payment_type_id,
+          id: pagamento.payment_method_id,
+        },
+        codeTransaction: String(pagamento.id),
+        receipt: pagamento.transaction_details?.external_resource_url ?? null,
+      },
       raw: pagamento,
     };
   }

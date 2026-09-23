@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -20,6 +21,7 @@ import {
 } from 'src/gateways/core/payment-gateway.registry';
 import { CredentialField } from 'src/gateways/core/gateway.types';
 import { montarUrlDeWebhook } from 'src/gateways/core/webhook-url';
+import { Role } from 'src/auth/roles';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
 
 /** Teto por campo. Nenhuma credencial de gateway chega perto disso. */
@@ -144,6 +146,7 @@ export class PaymentProviderService {
     actorId?: string,
   ) {
     this.exigirCofre();
+    await this.exigirDevParaSandbox(dto.mode, actorId);
 
     const descriptor = this.registry.descriptor(provider);
     const existente = await this.buscar(churchId, provider);
@@ -480,6 +483,44 @@ export class PaymentProviderService {
       config.credentials,
       contextoDoSelo(config.churchId, config.provider),
     );
+  }
+
+  /**
+   * Sandbox é ambiente de desenvolvimento, e só o dev escolhe.
+   *
+   * Uma integração em sandbox aceita a inscrição, devolve link de pagamento e
+   * marca tudo como se estivesse funcionando — e o dinheiro nunca chega. O
+   * erro não dá sintoma nenhum até alguém conferir o extrato da igreja, o que
+   * pode demorar um evento inteiro. Quem administra cadastra para receber de
+   * verdade; não há uso legítimo de sandbox fora do desenvolvimento.
+   *
+   * A tela já esconde o campo para os outros perfis, e não manda o modo quando
+   * o esconde — então `undefined` aqui é o caminho normal de quem edita sem ser
+   * dev, e mantém o que já estava gravado. Este método existe para o que a tela
+   * não alcança: a chamada montada na mão.
+   *
+   * Perfil lido do banco, e não do JWT: o token dura 24h, então um dev
+   * rebaixado continuaria podendo até ele expirar. Mesma escolha do
+   * `RolesGuard`.
+   */
+  private async exigirDevParaSandbox(
+    mode: PaymentProviderMode | undefined,
+    actorId?: string,
+  ) {
+    if (mode !== PaymentProviderMode.SANDBOX) return;
+
+    const ator = actorId
+      ? await this.prisma.user.findUnique({
+          where: { id: actorId },
+          select: { role: true },
+        })
+      : null;
+
+    if (ator?.role !== Role.DEV) {
+      throw new ForbiddenException(
+        'Só o perfil dev pode colocar uma integração em sandbox',
+      );
+    }
   }
 
   private buscar(churchId: string, provider: PaymentProvider) {

@@ -5,7 +5,8 @@ conta o que ele faz; aqui ficam as alternativas descartadas, as armadilhas já
 pisadas e o que continua em aberto — que é o que não dá para deduzir lendo os
 arquivos.
 
-Para os detalhes de uma casa específica, ver [`pagbank.md`](./pagbank.md).
+Para os detalhes de uma casa específica, ver [`pagbank.md`](./pagbank.md) e
+[`mercadopago.md`](./mercadopago.md).
 
 ---
 
@@ -175,11 +176,18 @@ confirmação de que errou por pouco.
 
 ### Onde o endereço é cadastrado
 
-Só o **Ton** exige cadastro na conta. PagBank, Mercado Pago e InfinitePay
-recebem a URL dentro da própria chamada que cria a cobrança
-(`payment_notification_urls`, `notification_url`, `webhook_url`), e não há o que
-fazer em painel nenhum. É por isso que a tela só mostra o endereço para o Ton —
-ver `PROVIDER_WEBHOOK_SETUP` no front.
+PagBank e InfinitePay recebem a URL dentro da própria chamada que cria a
+cobrança (`payment_notification_urls`, `webhook_url`), e não há o que fazer em
+painel nenhum.
+
+O **Ton** exige cadastro na conta: a API v5 da Pagar.me resolve webhook por
+conta, não por pedido.
+
+O **Mercado Pago** é os dois. Ele aceita `notification_url` na preferência, mas
+o painel tem uma URL separada para modo de teste, e em sandbox é só ela que
+recebe qualquer coisa — ver [`mercadopago.md`](./mercadopago.md). Por isso ele é
+`por-cobranca-e-painel` no `PROVIDER_WEBHOOK_SETUP` do front, e a tela mostra o
+endereço para ele também.
 
 Se um adapter mudar de comportamento aqui, esse mapa tem que mudar junto, ou a
 tela manda a pessoa fazer trabalho à toa — ou, pior, fica calada sobre um
@@ -239,6 +247,15 @@ Duas decisões que valem registro:
   na credencial de ontem daria "não existe", e o pagamento ficaria parado.
 - **Uma credencial por configuração, em cache**, não uma por cobrança: sem isso
   a rotina abre o envelope cifrado uma vez por linha pendente.
+- **A baixa grava o payload traduzido**, o mesmo do webhook. Ele nasce no
+  adapter, em `GatewayCharge.payload`, junto com status e valor. Antes a
+  reconciliação gravava o objeto cru da casa, e o painel ficava sem código de
+  transação em todo pagamento que o webhook não pegou — sintoma que apareceu no
+  Mercado Pago, onde em sandbox o webhook nunca pega.
+
+Além do relógio, a rotina tem um gatilho manual: o botão **Conferir no gateway**
+na aba Financeiro do evento, recortado àquele evento e limitado ao perfil dev —
+na tela e na rota. Cada clique fala com o gateway uma vez por cobrança pendente.
 
 ---
 

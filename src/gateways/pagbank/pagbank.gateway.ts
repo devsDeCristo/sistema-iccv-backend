@@ -53,7 +53,7 @@ export class PagbankGateway implements PaymentGateway {
         required: true,
         secret: true,
         placeholder: '········',
-        help: 'No portal do PagBank: Venda online › Integrações › Gerar token. O mesmo token assina as notificações.',
+        help: 'No portal do PagBank: Venda online › Integrações › Gerar token.',
       },
       {
         key: 'baseUrl',
@@ -135,6 +135,11 @@ export class PagbankGateway implements PaymentGateway {
       method: mapearMetodo(charge.payment_method?.type),
       createdAt: new Date(charge.created_at),
       paidAmountCents: valorPago(charge),
+      payload: {
+        payment_method: charge.payment_method,
+        links: charge.links,
+        codeTransaction: charge.id,
+      },
       raw: charge,
     }));
   }
@@ -144,39 +149,55 @@ export class PagbankGateway implements PaymentGateway {
   }
 
   /**
-   * `x-authenticity-token` = SHA-256 de `token-corpo`, com o corpo byte a byte
-   * como chegou.
+   * A autenticidade do PagBank não se resolve por assinatura.
    *
-   * Reserializar o JSON não funciona: `JSON.stringify` reordena chaves e some
-   * com espaços, e o hash do corpo remontado não bate com o do corpo enviado.
-   * Daí o `rawBody` no contrato do webhook.
+   * O `true` aqui não é "confio no corpo" — é "a prova está em outro lugar",
+   * o mesmo desenho da InfinitePay. O segredo da URL já foi conferido pelo
+   * registry antes de chegar aqui, e o que a notificação afirma é reconferido
+   * em `parseWebhook`, na API do gateway, com a nossa credencial.
+   *
+   * Por que não pela assinatura: o `x-authenticity-token` é o SHA-256 de
+   * `token-corpo` (documentação "Confirmar autenticidade da notificação"), mas
+   * o token que assina não é o token da API que cadastramos — a documentação
+   * fala do "token da conta fornecido via iBanking". Medimos: com o corpo cru e
+   * a fórmula da documentação, nenhuma composição bate, embora o mesmo token
+   * crie pedidos sem erro. Enquanto isso, conferir na fonte é mais forte que a
+   * assinatura, e não mais fraco: em vez de um hash, a baixa depende de uma
+   * chamada autenticada nossa.
+   *
+   * `scripts/diagnostico-assinatura-pagbank.ts` responde se a conta passar a
+   * assinar com o token cadastrado.
    */
-  verifyWebhook(req: WebhookRequest, ctx: GatewayContext): boolean {
-    const recebido = cabecalho(req, 'x-authenticity-token');
-    if (!recebido) return false;
-
-    const esperado = createHash('sha256')
-      .update(`${this.cred(ctx).token.trim()}-${req.rawBody.toString('utf8')}`)
-      .digest('hex');
-
-    // Comparação insensível a caixa: o PagBank envia em minúsculas, mas o
-    // valor é hex e não há por que depender disso.
-    return recebido.toLowerCase() === esperado.toLowerCase();
+  verifyWebhook(): boolean {
+    return true;
   }
 
   /**
-   * Traduz os dois formatos que o PagBank manda.
+   * Traduz a notificação — sem acreditar no que ela afirma.
    *
-   * A escolha da cobrança é a mesma de antes: PAID tem prioridade absoluta
-   * sobre qualquer outra, e sem PAID vale a mais recente. Sem essa regra, uma
-   * tentativa recusada chegando depois da aprovada derrubaria um pagamento
-   * que já entrou.
+   * Do corpo se aproveita só a referência, que é um id sem valor por si; o
+   * estado da cobrança vem da API. A escolha entre várias cobranças é a de
+   * sempre: PAID tem prioridade absoluta, e sem PAID vale a mais recente —
+   * senão uma tentativa recusada chegando depois da aprovada derrubaria um
+   * pagamento que já entrou.
    */
-  async parseWebhook(req: WebhookRequest): Promise<GatewayWebhookEvent> {
+  async parseWebhook(
+    req: WebhookRequest,
+    ctx: GatewayContext,
+  ): Promise<GatewayWebhookEvent> {
     const body = req.body ?? {};
 
-    // Notificação de checkout: traz o id e o estado do próprio checkout
+    // Aviso de checkout: a API não responde por ele, então o corpo é a única
+    // fonte — e aí a assinatura volta a ser exigida. Sem ela o aviso é
+    // descartado, que é o que já acontecia antes desta conferência existir.
     if (!body.charges && body.status && body.id) {
+      if (!this.assinaturaConfere(req, ctx)) {
+        return {
+          kind: 'ignored',
+          reason: 'aviso de checkout sem assinatura válida',
+        };
+      }
+
       return {
         kind: 'checkout',
         checkoutId: body.id,
@@ -184,35 +205,68 @@ export class PagbankGateway implements PaymentGateway {
       };
     }
 
-    const charges: any[] = body.charges ?? [];
-    if (charges.length === 0) {
-      return { kind: 'ignored', reason: 'notificação sem cobranças' };
+    const referenceId: string | undefined =
+      body.reference_id ?? body.charges?.[0]?.reference_id;
+
+    if (!referenceId) {
+      return { kind: 'ignored', reason: 'notificação sem referência' };
     }
 
-    const pago = charges.find((c) => c.status === 'PAID');
+    const charges = await this.listCharges(referenceId, ctx);
+
+    if (charges.length === 0) {
+      this.logger.warn(
+        `PagBank — ${referenceId} não tem cobrança na API; notificação ignorada.`,
+      );
+      return {
+        kind: 'ignored',
+        reason: 'o gateway não confirmou esta cobrança',
+      };
+    }
+
+    const pago = charges.find((c) => c.status === PaymentStatus.PAID);
     const escolhida =
       pago ??
       [...charges].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       )[0];
-
-    if (!escolhida) {
-      return { kind: 'ignored', reason: 'nenhuma cobrança utilizável' };
-    }
 
     return {
       kind: 'payment',
-      referenceId: escolhida.reference_id,
-      status: mapearStatus(escolhida.status),
-      method: mapearMetodo(escolhida.payment_method?.type),
-      paidAmountCents: valorPago(escolhida),
+      referenceId,
+      status: escolhida.status,
+      method: escolhida.method,
+      paidAmountCents: escolhida.paidAmountCents,
       payload: {
-        payment_method: escolhida.payment_method,
-        links: escolhida.links,
-        codeTransaction: escolhida.id,
+        ...escolhida.payload,
+        /** de onde veio este estado: a API, e não o corpo da notificação */
+        confirmadoNaFonte: true,
       },
     };
+  }
+
+  /**
+   * SHA-256 de `token-corpo`, com o corpo byte a byte como chegou.
+   *
+   * Reserializar o JSON não funciona: `JSON.stringify` reordena chaves e some
+   * com espaços, e o hash do corpo remontado não bate com o do enviado. Daí o
+   * `rawBody` no contrato do webhook.
+   */
+  private assinaturaConfere(req: WebhookRequest, ctx: GatewayContext): boolean {
+    const recebido = cabecalho(req, 'x-authenticity-token');
+    if (!recebido) return false;
+
+    const esperado = createHash('sha256')
+      .update(
+        `${(this.cred(ctx).token ?? '').trim()}-${req.rawBody.toString(
+          'utf8',
+        )}`,
+      )
+      .digest('hex');
+
+    // Comparação insensível a caixa: o PagBank envia em minúsculas, mas o
+    // valor é hex e não há por que depender disso.
+    return recebido.toLowerCase() === esperado.toLowerCase();
   }
 
   async healthCheck(ctx: GatewayContext): Promise<GatewayHealth> {

@@ -1,5 +1,9 @@
 import { createHash, createHmac } from 'crypto';
-import { PaymentProvider, PaymentProviderMode } from '@prisma/client';
+import {
+  PaymentProvider,
+  PaymentProviderMode,
+  PaymentStatus,
+} from '@prisma/client';
 import { PagbankGateway } from './pagbank/pagbank.gateway';
 import { MercadoPagoGateway } from './mercadopago/mercadopago.gateway';
 import { InfinitePayGateway } from './infinitepay/infinitepay.gateway';
@@ -36,46 +40,110 @@ function contexto(
   };
 }
 
-describe('PagBank — x-authenticity-token', () => {
-  const gateway = new PagbankGateway({} as any);
+/**
+ * O PagBank não passa pela assinatura: a prova dele é a API.
+ *
+ * O `x-authenticity-token` existe e a fórmula está implementada, mas o token
+ * que assina não é o token da API que cadastramos — medido na conta em uso,
+ * nenhuma composição do hash confere. Por isso a baixa depende de uma chamada
+ * autenticada nossa, e não do hash; o que estes testes protegem é que o corpo
+ * nunca vire palavra final.
+ */
+describe('PagBank — a prova é a API, não a assinatura', () => {
   const ctx = contexto(PaymentProvider.PAGBANK, { token: 'tok-secreto' });
-  const corpo = { charges: [{ reference_id: 'ref-1', status: 'PAID' }] };
+
+  const cobranca = (status: string, criadaEm = '2026-09-17T21:00:00Z') => ({
+    id: 'CHAR_1',
+    status,
+    created_at: criadaEm,
+    payment_method: { type: 'PIX' },
+    amount: { summary: { paid: 28000 } },
+  });
+
+  const comCobrancas = (charges: any[]) => ({
+    getCharges: jest.fn().mockResolvedValue(charges),
+  });
 
   const assinar = (token: string, req: WebhookRequest) =>
     createHash('sha256')
       .update(`${token}-${req.rawBody.toString('utf8')}`)
       .digest('hex');
 
-  it('aceita a notificação assinada com o token da igreja', () => {
-    const req = requisicao(corpo);
-    req.headers['x-authenticity-token'] = assinar('tok-secreto', req);
+  it('não bloqueia na assinatura, porque a conferência é na API', () => {
+    const gateway = new PagbankGateway({} as any);
 
-    expect(gateway.verifyWebhook(req, ctx)).toBe(true);
+    expect(gateway.verifyWebhook()).toBe(true);
   });
 
-  it('recusa notificação sem assinatura', () => {
-    expect(gateway.verifyWebhook(requisicao(corpo), ctx)).toBe(false);
-  });
+  it('usa o estado que a API devolve, não o que o corpo diz', async () => {
+    const client = comCobrancas([cobranca('WAITING')]);
+    const gateway = new PagbankGateway(client as any);
 
-  it('recusa assinatura feita com outro token', () => {
-    const req = requisicao(corpo);
-    req.headers['x-authenticity-token'] = assinar('tok-de-outro', req);
-
-    expect(gateway.verifyWebhook(req, ctx)).toBe(false);
-  });
-
-  it('recusa quando o corpo foi trocado depois de assinado', () => {
-    const req = requisicao(corpo);
-    req.headers['x-authenticity-token'] = assinar('tok-secreto', req);
-
-    // O ataque concreto: pegar uma notificação legítima de "recusado" e
-    // trocar o status para "pago" mantendo a assinatura.
-    req.rawBody = Buffer.from(
-      JSON.stringify({ charges: [{ reference_id: 'ref-1', status: 'PAID' }] }),
+    // o corpo alega PAID; a API diz que ainda está aguardando
+    const evento = await gateway.parseWebhook(
+      requisicao({ charges: [{ reference_id: 'ref-1', status: 'PAID' }] }),
+      ctx,
     );
-    req.rawBody = Buffer.from(req.rawBody.toString('utf8') + ' ');
 
-    expect(gateway.verifyWebhook(req, ctx)).toBe(false);
+    expect(client.getCharges).toHaveBeenCalledWith(
+      'ref-1',
+      expect.objectContaining({ token: 'tok-secreto' }),
+      ctx.mode,
+    );
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      referenceId: 'ref-1',
+      status: PaymentStatus.WAITING,
+      paidAmountCents: 28000,
+    });
+  });
+
+  it('aceita o pagamento quando é a API que afirma que entrou', async () => {
+    const gateway = new PagbankGateway(comCobrancas([cobranca('PAID')]) as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({ reference_id: 'ref-1' }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      status: PaymentStatus.PAID,
+    });
+  });
+
+  it('ignora quando a casa não conhece a referência', async () => {
+    const gateway = new PagbankGateway(comCobrancas([]) as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({ reference_id: 'ref-1' }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({ kind: 'ignored' });
+  });
+
+  it('ignora aviso de checkout sem assinatura, que é o que a API não confere', async () => {
+    const client = comCobrancas([cobranca('PAID')]);
+    const gateway = new PagbankGateway(client as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({ id: 'CHEC_1', status: 'PAID' }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({ kind: 'ignored' });
+    expect(client.getCharges).not.toHaveBeenCalled();
+  });
+
+  it('aceita o aviso de checkout quando ele vem assinado', async () => {
+    const gateway = new PagbankGateway({} as any);
+    const req = requisicao({ id: 'CHEC_1', status: 'PAID' });
+    req.headers['x-authenticity-token'] = assinar('tok-secreto', req);
+
+    const evento = await gateway.parseWebhook(req, ctx);
+
+    expect(evento).toMatchObject({ kind: 'checkout', checkoutId: 'CHEC_1' });
   });
 });
 

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma';
+import { moduloAtivo } from '../event/event-modules';
 import { BedroomDto } from './dto/bedroom.dto';
 
 @Injectable()
@@ -114,9 +115,28 @@ export class BedroomsService {
     }
   }
 
+  /**
+   * Módulo desligado não recebe cadastro. A tela já esconde a aba, mas a rota
+   * existe: sem esta trava, um formulário aberto antes de desligar o módulo
+   * ainda gravaria.
+   */
+  private async assertModuloLigado(eventId: string) {
+    const evento = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { data: true },
+    });
+
+    if (!moduloAtivo(evento?.data, 'bedrooms')) {
+      throw new BadRequestException(
+        'O módulo Quartos está desligado neste evento',
+      );
+    }
+  }
+
   async create(idEvent: string, createBedroom: BedroomDto) {
     // fora do try: o catch abaixo é genérico e transformaria a recusa de grupo
     // num 500 sem explicação
+    await this.assertModuloLigado(idEvent);
     await this.assertUsersNoEvento(idEvent, createBedroom.usersId || []);
     await this.assertUsersAllowed(
       idEvent,

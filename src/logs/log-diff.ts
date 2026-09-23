@@ -38,6 +38,8 @@ const FIELD_LABELS: Record<string, string> = {
   payload: 'Dados da transação',
   price: 'Preço',
   profession: 'Profissão',
+  productsDeliveredAt: 'Entrega dos produtos',
+  productsDeliveredById: 'Entrega registrada por',
   profilePhotoUrl: 'Foto de perfil',
   quantity: 'Quantidade',
   receivedFrom: 'Origem',
@@ -90,7 +92,8 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
     OTHER: 'Outro',
   },
   receivedFrom: {
-    SYSTEM: 'Sistema',
+    PENDING: 'Aguardando pagamento',
+    SYSTEM: 'Gateway de pagamento',
     EXTERNAL: 'Lançamento manual',
   },
   role: {

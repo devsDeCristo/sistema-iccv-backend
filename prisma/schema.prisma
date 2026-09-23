@@ -11,11 +11,11 @@ datasource db {
 /// pessoas ligadas a eles e as próprias notícias — o recorte é aplicado em
 /// `src/auth/tenant.ts`. Só o super admin atravessa todas.
 model Church {
-  id     String           @id @default(uuid())
-  name   String
-  users  UserChurchRole[]
-  events Event[]
-  news   News[]
+  id       String                  @id @default(uuid())
+  name     String
+  users    UserChurchRole[]
+  events   Event[]
+  news     News[]
   /// Por onde esta igreja cobra. Ver `PaymentProviderConfig`: cada uma tem a
   /// própria conta no gateway, e o dinheiro do evento dela cai lá.
   gateways PaymentProviderConfig[]
@@ -68,16 +68,16 @@ model UserChurchRole {
 }
 
 model User {
-  id                 String            @id @default(uuid())
+  id                 String             @id @default(uuid())
   email              String
   fullName           String
-  cpf                String            @unique
+  cpf                String             @unique
   birthday           DateTime
   cellphone          String
   religion           String?
   notes              String?
-  createdAt          DateTime          @default(now())
-  updateAt           DateTime          @updatedAt
+  createdAt          DateTime           @default(now())
+  updateAt           DateTime           @updatedAt
   city               String
   diabetes           Boolean
   /// Contato de emergência; quando o usuário é menor de 16 anos, este é o
@@ -98,10 +98,10 @@ model User {
   /// vínculos em `churchRoles`. É o que os guards de rota leem para saber se a
   /// pessoa pode chegar na rota — qual igreja ela alcança vem dos vínculos.
   /// Escrito junto deles, na mesma transação, por `UserService`.
-  role               Int               @default(5)
+  role               Int                @default(5)
   state              String
   worker             Boolean
-  registrationNumber Int               @unique @default(autoincrement())
+  registrationNumber Int                @unique @default(autoincrement())
   neighborhood       String
   /// Rua e número do endereço. Opcionais porque a coluna nasceu depois dos
   /// cadastros que já estão em produção: exigir valor aqui obrigaria a inventar
@@ -117,11 +117,12 @@ model User {
   /// porque o responsável pode nunca ter se cadastrado aqui. O telefone do
   /// responsável usa a mesma coluna de `emergencyContact` — é o mesmo dado.
   guardianName       String?
-  password           String            @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
+  password           String             @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
   /// Vínculos de painel: em qual igreja a pessoa é admin e em qual é
   /// financeiro. É daqui que sai QUAL igreja ela alcança.
   churchRoles        UserChurchRole[]
   bedrooms           BedroomsOnUsers[]
+  transports         TransportOnUsers[]
   events             EventOnUsers[]
   TeamOnUsers        TeamOnUsers[]
   waitlists          Waitlist[]
@@ -225,6 +226,7 @@ model Event {
   church     Church         @relation(fields: [churchId], references: [id], onDelete: Cascade)
   users      EventOnUsers[]
   bedrooms   Bedrooms[]
+  transports Transport[]
   groupRoles GroupRoles[]
   Team       Team[]
   waitlist   Waitlist[]
@@ -248,7 +250,7 @@ model EventOnUsers {
   /// Se o participante precisa de autorização dos pais para este evento —
   /// decidido pela idade dele na data de início do evento, no momento em que
   /// a inscrição é criada. `NOT_REQUIRED` é o caso comum (maior de idade).
-  minorApprovalStatus MinorApprovalStatus @default(NOT_REQUIRED)
+  minorApprovalStatus          MinorApprovalStatus @default(NOT_REQUIRED)
   /// Termo assinado, enviado pelo responsável. Some/reaparece a cada reenvio —
   /// não há histórico de versões anteriores.
   signedTermUrl                String?
@@ -256,6 +258,11 @@ model EventOnUsers {
   minorApprovalReviewedAt      DateTime?
   /// Só em `REJECTED`; limpo quando o status muda para outra coisa.
   minorApprovalRejectionReason String?
+
+  /// Quando a pessoa aceitou o termo do evento (`data.registrationTerm`), na
+  /// tela de inscrição. Nulo é o caso comum: evento sem termo, ou inscrição
+  /// feita pelo painel por um admin, que não aceita nada em nome de ninguém.
+  termsAcceptedAt DateTime?
 
   @@id([userId, eventId])
   @@index([eventId])
@@ -333,7 +340,7 @@ model Payment {
   id                 String                         @id @default(uuid())
   method             PaymentMethod
   status             PaymentStatus
-  receivedFrom       PaymentReceived                @default(SYSTEM)
+  receivedFrom       PaymentReceived                @default(PENDING)
   amount             Float
   createdAt          DateTime                       @default(now())
   updatedAt          DateTime                       @updatedAt
@@ -346,6 +353,16 @@ model Payment {
   /// mesmo checkout: pagar o ingresso é pagar os produtos dele.
   productItems       PaymentProductItem[]
   eventUserRole      EventOnUsersRolesRegistration? @relation(fields: [userId, eventId, roleRegistrationId], references: [userId, eventId, roleRegistrationId], onDelete: Cascade)
+
+  /// Quando os produtos desta compra foram entregues. Nulo é o normal: ainda
+  /// não foram, ou a compra nem tem produto.
+  ///
+  /// A entrega é da compra inteira, e não de cada item: quem leva duas camisas
+  /// paga uma vez e recebe as duas na mão, de uma vez só.
+  productsDeliveredAt   DateTime?
+  /// Quem registrou a entrega. Id solto, como em `minorApprovalReviewedById`:
+  /// o registro não pode sumir se o administrador for removido depois.
+  productsDeliveredById String?
 
   @@unique([userId, eventId, roleRegistrationId])
   @@index([eventId])
@@ -510,6 +527,40 @@ model BedroomsOnUsers {
 
   @@id([userId, bedroomsId])
   @@index([bedroomsId])
+}
+
+/// Transporte do evento: o ônibus, a van, o carro que leva o grupo.
+///
+/// É o quarto com outro nome — mesma capacidade, mesmas tags, mesma restrição
+/// por grupo de inscrição —, porque o problema é o mesmo: encaixar pessoas em
+/// lugares que têm limite. Nada de características do veículo por enquanto;
+/// quando vierem, entram aqui.
+model Transport {
+  id        String             @id @default(uuid())
+  note      String?
+  eventId   String
+  capacity  Int?
+  name      String             @default("Transporte sem nome")
+  tag       String[]
+  /// Nomes de grupos de inscrição que podem ocupar o transporte. Vazio = aberto
+  /// a qualquer inscrito; preenchido = restrito a esses grupos.
+  groupTags String[]           @default([])
+  users     TransportOnUsers[]
+  event     Event              @relation(fields: [eventId], references: [id])
+
+  @@index([eventId])
+  @@map("transports")
+}
+
+model TransportOnUsers {
+  userId      String
+  transportId String
+  transport   Transport @relation(fields: [transportId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@id([userId, transportId])
+  @@index([transportId])
+  @@map("transports_on_users")
 }
 
 model Team {
@@ -742,8 +793,17 @@ enum PaymentProviderMode {
   PRODUCTION
 }
 
+/// Por onde o dinheiro entrou — e não quem mexeu na linha.
 enum PaymentReceived {
+  /// Estado de nascença: a cobrança existe, ninguém pagou por lugar nenhum
+  /// ainda. Não é origem, é ausência dela — e por isso não tranca a edição
+  /// pela tela, que é o único caminho que essa cobrança tem para virar paga.
+  PENDING
+  /// O gateway trouxe o dado: retorno de webhook ou conferência na API dele.
+  /// A tela de detalhes fica somente leitura, porque quem manda no status
+  /// passa a ser a fonte, não o painel.
   SYSTEM
+  /// Lançamento manual: alguém deu baixa pela tela, com ou sem comprovante.
   EXTERNAL
 }
 
