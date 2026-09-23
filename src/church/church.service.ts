@@ -21,6 +21,7 @@ export class ChurchService {
       select: {
         id: true,
         name: true,
+        status: true,
         _count: { select: { users: true, events: true } },
       },
       orderBy: { name: 'asc' },
@@ -32,8 +33,8 @@ export class ChurchService {
     await this.ensureNameIsAvailable(name);
 
     return this.prisma.church.create({
-      data: { name },
-      select: { id: true, name: true },
+      data: { name, status: dto.status },
+      select: { id: true, name: true, status: true },
     });
   }
 
@@ -44,8 +45,10 @@ export class ChurchService {
 
     return this.prisma.church.update({
       where: { id },
-      data: { name },
-      select: { id: true, name: true },
+      // `status` ausente no corpo mantém o que está gravado: quem só renomeia
+      // não deve reativar uma igreja que alguém desligou
+      data: { name, status: dto.status },
+      select: { id: true, name: true, status: true },
     });
   }
 

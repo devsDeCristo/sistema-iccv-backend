@@ -1963,8 +1963,9 @@ export class EventService {
           status: true,
           data: true,
           // o super admin vê evento de todas as igrejas na mesma lista; sem o
-          // nome junto não dá para saber de quem é cada um
-          church: { select: { id: true, name: true } },
+          // nome junto não dá para saber de quem é cada um. A situação vai
+          // junto porque o filtro de igrejas da home só oferece as ativas
+          church: { select: { id: true, name: true, status: true } },
           groupRoles: {
             select: {
               capacity: true,

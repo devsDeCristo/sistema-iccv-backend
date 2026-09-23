@@ -40,6 +40,12 @@ model Church {
   /// Igreja sem gateway cadastrado continua sem cobrar de qualquer forma.
   modulePayment Boolean @default(true)
 
+  /// Em que pé esta igreja está. Ver `ChurchStatus`.
+  ///
+  /// Nasce ativa para todas as que já existem: é o que elas são hoje, e
+  /// qualquer outro padrão as tiraria do filtro da home de uma vez.
+  status ChurchStatus @default(ACTIVE)
+
   @@map("churches")
 }
 
@@ -759,6 +765,17 @@ enum CheckinStatus {
 enum EventType {
   CURSILHO
   RETIRO
+}
+
+/// Em que pé a igreja está — a mesma régua do `EventStatus`, um andar acima.
+enum ChurchStatus {
+  /// No ar: é a única situação que aparece no filtro de igrejas da home
+  ACTIVE
+  /// Fora do ar: a igreja continua no sistema, com os eventos e o histórico
+  /// dela, mas some do filtro de quem procura evento
+  INACTIVE
+  /// Implantação: a igreja está sendo montada e ainda não recebe público
+  TEST
 }
 
 /// Estado de publicação do evento, mostrado como "Status do evento" no painel.
