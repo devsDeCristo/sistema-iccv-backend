@@ -81,8 +81,14 @@ export class PaymentGatewayRegistry {
     });
 
     if (!config) {
+      /**
+       * Quem lê isto é o inscrito, não o suporte. Igreja sem gateway ativo não
+       * é sistema fora do ar — é uma igreja que não recebe pelo site, e o
+       * valor dela se acerta com a organização. "Contate o suporte", que era o
+       * texto de antes, mandava a pessoa procurar quem não tem o que resolver.
+       */
       throw new ServiceUnavailableException(
-        'Pagamentos online estão temporariamente indisponíveis. Contate o suporte!',
+        'Esta igreja não recebe pagamento pelo site. O valor é combinado diretamente com a organização do evento.',
       );
     }
 

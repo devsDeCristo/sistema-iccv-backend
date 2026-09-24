@@ -162,8 +162,11 @@ export class PaymentService {
     modulePayment: boolean;
   }) {
     if (!church.modulePayment) {
+      // mesma frase do gateway ausente: para quem está do outro lado da tela,
+      // módulo desligado e casa sem cadastro são a mesma coisa — esta igreja
+      // não recebe pelo site
       throw new ServiceUnavailableException(
-        'O pagamento online não está habilitado para esta igreja.',
+        'Esta igreja não recebe pagamento pelo site. O valor é combinado diretamente com a organização do evento.',
       );
     }
   }

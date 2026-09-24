@@ -63,6 +63,7 @@ import {
   uploadImageFirebase,
 } from 'src/utils/uploadImgFirebase';
 import { calculateAge } from 'src/utils/age';
+import { PaymentGatewayRegistry } from 'src/gateways/core/payment-gateway.registry';
 import { fileToDataUri } from 'src/utils/documentBase64';
 
 type EventWithGroupRole = Prisma.EventGetPayload<{
@@ -138,6 +139,7 @@ export class EventService {
   constructor(
     private prisma: PrismaService,
     private emailService: MailService,
+    private registry: PaymentGatewayRegistry,
   ) {}
 
   async registerUserInEvent(
@@ -2052,8 +2054,28 @@ export class EventService {
         throw new NotFoundException('Event does not exist');
       }
 
+      /**
+       * Esta igreja recebe pagamento pelo site agora?
+       *
+       * O módulo ligado não basta: sem gateway cadastrado e ativo o checkout
+       * devolve 503. A tela de inscrição usa isto para dizer que a igreja não
+       * recebe online, em vez de oferecer um pagamento que não tem por onde
+       * acontecer.
+       *
+       * A bandeira entra no evento antes da montagem da resposta, e não em
+       * volta dela: `handlerReturnEvent` é assíncrono, e envolver a chamada
+       * num espalhamento devolveria a promessa — a resposta chegaria vazia.
+       */
+      const comCobranca = {
+        ...event,
+        church: {
+          ...event.church,
+          chargesOnline: await this.registry.igrejaCobraOnline(event.churchId),
+        },
+      };
+
       return this.handlerReturnEvent(
-        event,
+        comCobranca,
         options.embedImages ?? false,
         await this.vendidosPorVariante(id),
       );
