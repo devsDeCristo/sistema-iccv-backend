@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
@@ -61,7 +62,20 @@ const protectSwagger = (req: Request, res: Response, next: NextFunction) => {
 };
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  /**
+   * A API fica atrás de um proxy: sem isto, `req.ip` é o endereço dele
+   * (`10.0.1.23`, o mesmo para todo mundo) e o registro de login guardava o
+   * IP do proxy em vez do de quem entrou.
+   *
+   * `1` confia só no salto imediato: o IP vem da última entrada do
+   * `X-Forwarded-For`, a que o proxy acrescenta. O que o cliente escrever
+   * antes dela é ignorado — senão bastaria mandar o cabeçalho para forjar o IP.
+   * Vale enquanto a API só for alcançável pelo proxy; com mais um salto na
+   * frente (CDN), o número sobe.
+   */
+  app.set('trust proxy', 1);
 
   /**
    * Guarda o corpo cru junto do já interpretado.

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Log, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma';
 import { ListLogsDto } from './dto/list-logs.dto';
+import { descreverDispositivo } from './dispositivo';
 import { buildChanges } from './log-diff';
 import {
   actionLabel,
@@ -150,6 +151,7 @@ export class LogsService {
     return {
       items: items.map((item) => ({
         ...item,
+        dispositivo: descreverDispositivo(item.userAgent),
         user: item.user
           ? {
               id: item.user.id,
