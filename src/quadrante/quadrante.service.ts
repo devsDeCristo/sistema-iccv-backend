@@ -15,6 +15,7 @@ import { quadranteAtivo } from '../event/event-quadrante';
 import { prepararImagens } from './quadrante-images';
 import {
   cabecalho,
+  comFonteEmbutida,
   EquipeDoPdf,
   EventoDoPdf,
   htmlDaCapa,
@@ -166,21 +167,21 @@ export class QuadranteService {
     };
   }
 
-  async generatePdf(
-    eventId: string,
-  ): Promise<{ buffer: Buffer; fileName: string }> {
-    const { event, teams } = await this.findQuadrante(eventId);
-
-    if (!teams.length) {
-      throw new BadRequestException(
-        'Não é possível gerar o PDF: este evento ainda não possui equipes cadastradas.',
-      );
-    }
-
-    // fotos, capa e logo entram no HTML já reduzidas e embutidas: o Chrome não
-    // tem nada para baixar — ver `quadrante-images.ts`
-    const imagens = await prepararImagens([
-      ...(event.logoUrl ? [{ url: event.logoUrl, formato: 'logo' as const }] : []),
+  /**
+   * Fotos, capa e logo do quadrante, já reduzidas e embutidas: o Chrome não tem
+   * nada para baixar — ver `quadrante-images.ts`.
+   */
+  private imagensDoQuadrante({
+    event,
+    teams,
+  }: Awaited<ReturnType<QuadranteService['findQuadrante']>>) {
+    return prepararImagens([
+      ...(event.logoUrl
+        ? [
+            { url: event.logoUrl, formato: 'logo' as const },
+            { url: event.logoUrl, formato: 'cabecalho' as const },
+          ]
+        : []),
       ...(event.coverUrl ? [{ url: event.coverUrl, formato: 'capa' as const }] : []),
       ...teams.flatMap((team) =>
         team.users
@@ -188,12 +189,45 @@ export class QuadranteService {
           .map((user) => ({ url: user.profilePhotoUrl!, formato: 'foto' as const })),
       ),
     ]);
+  }
+
+  /**
+   * Começa a baixar as imagens do PDF quando a tela do quadrante abre, sem
+   * esperar. O download é quase todo o tempo da geração (~5s num evento de 145
+   * fotos, contra ~1,5s do Chrome), e a pessoa sempre passa pela tela antes de
+   * clicar em "Baixar PDF": quando clica, as fotos já estão em cache ou a
+   * caminho — o PDF pega carona nelas.
+   */
+  aquecerImagens(quadrante: Awaited<ReturnType<QuadranteService['findQuadrante']>>) {
+    this.imagensDoQuadrante(quadrante).catch(() => undefined);
+  }
+
+  async generatePdf(
+    eventId: string,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const quadrante = await this.findQuadrante(eventId);
+    const { event, teams } = quadrante;
+
+    if (!teams.length) {
+      throw new BadRequestException(
+        'Não é possível gerar o PDF: este evento ainda não possui equipes cadastradas.',
+      );
+    }
+
+    // o Chrome abre enquanto as fotos chegam: uma coisa não depende da outra
+    const [imagens, browser] = await Promise.all([
+      this.imagensDoQuadrante(quadrante),
+      this.abrirNavegador(),
+    ]);
 
     const evento: EventoDoPdf = {
       name: event.name,
       periodo: event.periodo,
       colors: event.colors,
       logo: event.logoUrl ? imagens.get(`logo:${event.logoUrl}`) : undefined,
+      logoDoCabecalho: event.logoUrl
+        ? imagens.get(`cabecalho:${event.logoUrl}`)
+        : undefined,
       capa: event.coverUrl ? imagens.get(`capa:${event.coverUrl}`) : undefined,
     };
 
@@ -210,34 +244,14 @@ export class QuadranteService {
 
     const totalPessoas = equipes.reduce((soma, e) => soma + e.users.length, 0);
 
-    /**
-     * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
-     * ele usa esse binário — é o caso do Docker, que instala o Chromium em
-     * `/usr/bin/chromium`. Sem a variável, procura o Google Chrome instalado
-     * no lugar padrão do sistema, que é o caso de quem roda na própria máquina.
-     */
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    const browser = await puppeteer
-      .launch({
-        ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      })
-      .catch((error: Error) => {
-        throw new InternalServerErrorException(
-          `Não foi possível abrir o navegador para gerar o PDF (${error.message}). ` +
-            'Instale o Google Chrome ou defina PUPPETEER_EXECUTABLE_PATH no .env.',
-        );
-      });
-
     try {
       const imprimir = async (
         html: string,
         opcoes: Parameters<puppeteer.Page['pdf']>[0] = {},
       ) => {
         const page = await browser.newPage();
-        // as imagens já vêm embutidas; o que ainda vem de fora é a fonte
-        await page.setContent(html, { waitUntil: 'load' });
+        // imagens e fonte já vêm embutidas: não há nada para buscar fora
+        await page.setContent(await comFonteEmbutida(html), { waitUntil: 'load' });
         await page.evaluate(() => document.fonts.ready);
         const pdf = await page.pdf({
           printBackground: true,
@@ -283,5 +297,28 @@ export class QuadranteService {
     } finally {
       await browser.close();
     }
+  }
+
+  /**
+   * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
+   * ele usa esse binário — é o caso do Docker, que instala o Chromium em
+   * `/usr/bin/chromium`. Sem a variável, procura o Google Chrome instalado
+   * no lugar padrão do sistema, que é o caso de quem roda na própria máquina.
+   */
+  private abrirNavegador() {
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+
+    return puppeteer
+      .launch({
+        ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      })
+      .catch((error: Error) => {
+        throw new InternalServerErrorException(
+          `Não foi possível abrir o navegador para gerar o PDF (${error.message}). ` +
+            'Instale o Google Chrome ou defina PUPPETEER_EXECUTABLE_PATH no .env.',
+        );
+      });
   }
 }

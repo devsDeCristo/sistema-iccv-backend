@@ -19,7 +19,13 @@ export class QuadranteController {
   @Get()
   async findOne(@Param('idEvent') idEvent: string, @Req() req) {
     await this.quadranteService.assertPodeVer(idEvent, req.user?.userId);
-    return this.quadranteService.findQuadrante(idEvent);
+    const quadrante = await this.quadranteService.findQuadrante(idEvent);
+
+    // quem abre a tela quase sempre baixa o PDF em seguida: as fotos começam a
+    // chegar agora, sem atrasar esta resposta
+    this.quadranteService.aquecerImagens(quadrante);
+
+    return quadrante;
   }
 
   @Get('pdf')

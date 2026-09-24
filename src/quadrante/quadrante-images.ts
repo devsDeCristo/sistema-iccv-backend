@@ -13,8 +13,13 @@ import * as sharp from 'sharp';
  * nada para buscar. As mesmas 145 fotos viram ~850 KB.
  */
 
-/** Downloads ao mesmo tempo: mais que isso o Firebase começa a derrubar. */
-const CONCORRENCIA = 8;
+/**
+ * Downloads ao mesmo tempo. O tempo aqui é latência do Firebase (~1s por foto,
+ * qualquer que seja o tamanho), não banda: num evento de 145 fotos, 8 por vez
+ * levava 19s e 32 por vez leva 5s, sem nenhuma falha. O que derrubava
+ * download era o Chrome disparando as 145 de uma vez, não 32.
+ */
+const CONCORRENCIA = 32;
 
 /** Por imagem. Foto que não chega a tempo sai como o quadro cinza vazio. */
 const TIMEOUT_MS = 10_000;
@@ -23,11 +28,15 @@ const TIMEOUT_MS = 10_000;
  * Cache em memória por URL. A URL do Firebase muda quando a foto é trocada
  * (token novo), então foto antiga em cache nunca é servida no lugar da nova. O
  * teto só impede o processo de crescer sem limite: ~6 KB por foto.
+ *
+ * Guarda a promessa, e não o resultado: a tela do quadrante começa os downloads
+ * quando abre, e o clique em "Baixar PDF" logo depois pega carona nos que ainda
+ * estão a caminho em vez de baixar tudo de novo.
  */
 const LIMITE_DO_CACHE = 3000;
-const cache = new Map<string, string>();
+const cache = new Map<string, Promise<string | null>>();
 
-function guardar(chave: string, valor: string) {
+function guardar(chave: string, valor: Promise<string | null>) {
   if (cache.size >= LIMITE_DO_CACHE) {
     // o Map mantém a ordem de inserção: a primeira chave é a mais antiga
     cache.delete(cache.keys().next().value as string);
@@ -35,7 +44,7 @@ function guardar(chave: string, valor: string) {
   cache.set(chave, valor);
 }
 
-export type FormatoDeImagem = 'foto' | 'capa' | 'logo';
+export type FormatoDeImagem = 'foto' | 'capa' | 'logo' | 'cabecalho';
 
 /** Tamanho em pixels de cada uso, com folga para a impressão (~2×). */
 const FORMATOS: Record<FormatoDeImagem, (img: sharp.Sharp) => sharp.Sharp> = {
@@ -50,9 +59,14 @@ const FORMATOS: Record<FormatoDeImagem, (img: sharp.Sharp) => sharp.Sharp> = {
     img
       .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
       .png(),
+  // A mesma logo, na altura em que sai no cabeçalho (7mm; 160px é ~580 dpi).
+  // O Chrome embute a imagem do cabeçalho de novo em cada página: com a logo
+  // da capa ali, um quadrante de 15 páginas carregava 2 MB só de logo repetida.
+  cabecalho: (img) =>
+    img.resize({ height: 160, withoutEnlargement: true }).png(),
 };
 
-async function baixarReduzida(
+function baixarReduzida(
   url: string,
   formato: FormatoDeImagem,
 ): Promise<string | null> {
@@ -60,6 +74,21 @@ async function baixarReduzida(
   const emCache = cache.get(chave);
   if (emCache) return emCache;
 
+  const pendente = baixar(url, formato).then((dataUri) => {
+    // falha não fica guardada: a foto que não veio agora tenta de novo na
+    // próxima geração, em vez de sair com as iniciais até o servidor reiniciar
+    if (!dataUri) cache.delete(chave);
+    return dataUri;
+  });
+
+  guardar(chave, pendente);
+  return pendente;
+}
+
+async function baixar(
+  url: string,
+  formato: FormatoDeImagem,
+): Promise<string | null> {
   const controle = new AbortController();
   const timer = setTimeout(() => controle.abort(), TIMEOUT_MS);
 
@@ -71,11 +100,9 @@ async function baixarReduzida(
     // `rotate()` sem argumento aplica a orientação do EXIF: foto de celular
     // deitada no arquivo sai em pé
     const reduzida = await FORMATOS[formato](sharp(original).rotate()).toBuffer();
-    const mime = formato === 'logo' ? 'image/png' : 'image/jpeg';
-    const dataUri = `data:${mime};base64,${reduzida.toString('base64')}`;
-
-    guardar(chave, dataUri);
-    return dataUri;
+    const mime =
+      formato === 'logo' || formato === 'cabecalho' ? 'image/png' : 'image/jpeg';
+    return `data:${mime};base64,${reduzida.toString('base64')}`;
   } catch {
     // URL velha, arquivo apagado, timeout, imagem corrompida: sai sem foto
     return null;
