@@ -77,6 +77,9 @@ COPY prisma ./prisma
 # então a pasta de origem tem que existir na imagem — não só o dist.
 COPY src/mail/templates ./src/mail/templates
 
+# artes fixas do crachá, lidas do mesmo jeito (process.cwd()/src/...)
+COPY src/cracha/assets ./src/cracha/assets
+
 COPY start.sh ./start.sh
 RUN chmod +x ./start.sh
 

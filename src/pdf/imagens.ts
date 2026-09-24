@@ -1,7 +1,7 @@
 import * as sharp from 'sharp';
 
 /**
- * Imagens do quadrante, prontas para o Puppeteer.
+ * Imagens dos PDFs (quadrante e crachá), prontas para o Puppeteer.
  *
  * As fotos são os originais do Firebase: um evento real tinha 145 fotos
  * distintas somando 64 MB, com arquivo de 2 MB para um quadrinho de 50×65. O
@@ -44,7 +44,14 @@ function guardar(chave: string, valor: Promise<string | null>) {
   cache.set(chave, valor);
 }
 
-export type FormatoDeImagem = 'foto' | 'capa' | 'logo' | 'cabecalho';
+export type FormatoDeImagem =
+  | 'foto'
+  | 'capa'
+  | 'logo'
+  | 'cabecalho'
+  | 'crachaFundo'
+  | 'crachaLogo'
+  | 'crachaPapel';
 
 /** Tamanho em pixels de cada uso, com folga para a impressão (~2×). */
 const FORMATOS: Record<FormatoDeImagem, (img: sharp.Sharp) => sharp.Sharp> = {
@@ -64,7 +71,35 @@ const FORMATOS: Record<FormatoDeImagem, (img: sharp.Sharp) => sharp.Sharp> = {
   // da capa ali, um quadrante de 15 páginas carregava 2 MB só de logo repetida.
   cabecalho: (img) =>
     img.resize({ height: 160, withoutEnlargement: true }).png(),
+  // crachá: 8,7 × 11 cm. A capa vai inteira atrás, cortada no formato dele
+  crachaFundo: (img) =>
+    img.resize(700, 880, { fit: 'cover' }).jpeg({ quality: 80 }),
+  // a logo sai com 100pt (35mm) de altura no crachá
+  crachaLogo: (img) =>
+    img
+      .resize(800, 420, { fit: 'inside', withoutEnlargement: true })
+      .png(),
+  // o papel rasgado: 140pt de altura, cortado nas laterais pelo `cover`
+  crachaPapel: (img) =>
+    img.resize({ height: 600, withoutEnlargement: true }).png(),
 };
+
+const EM_PNG: FormatoDeImagem[] = [
+  'logo',
+  'cabecalho',
+  'crachaLogo',
+  'crachaPapel',
+];
+
+/** Reduz um arquivo que já está em mãos (as artes fixas do crachá) */
+export async function reduzir(
+  original: Buffer,
+  formato: FormatoDeImagem,
+): Promise<string> {
+  const reduzida = await FORMATOS[formato](sharp(original).rotate()).toBuffer();
+  const mime = EM_PNG.includes(formato) ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${reduzida.toString('base64')}`;
+}
 
 function baixarReduzida(
   url: string,
@@ -96,13 +131,9 @@ async function baixar(
     const resposta = await fetch(url, { signal: controle.signal });
     if (!resposta.ok) return null;
 
-    const original = Buffer.from(await resposta.arrayBuffer());
-    // `rotate()` sem argumento aplica a orientação do EXIF: foto de celular
-    // deitada no arquivo sai em pé
-    const reduzida = await FORMATOS[formato](sharp(original).rotate()).toBuffer();
-    const mime =
-      formato === 'logo' || formato === 'cabecalho' ? 'image/png' : 'image/jpeg';
-    return `data:${mime};base64,${reduzida.toString('base64')}`;
+    // `rotate()` sem argumento, em `reduzir`, aplica a orientação do EXIF:
+    // foto de celular deitada no arquivo sai em pé
+    return await reduzir(Buffer.from(await resposta.arrayBuffer()), formato);
   } catch {
     // URL velha, arquivo apagado, timeout, imagem corrompida: sai sem foto
     return null;

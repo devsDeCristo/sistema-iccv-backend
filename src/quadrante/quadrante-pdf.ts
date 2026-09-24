@@ -9,6 +9,8 @@
  * Tudo aqui é HTML em texto: o que vem do banco passa por `escapeHtml`.
  */
 
+import { embutirFonte, linkDaFonte } from '../pdf/fonte';
+
 export interface PessoaDoPdf {
   id: string;
   fullName: string;
@@ -184,61 +186,11 @@ function icone(nome: keyof typeof ICONES): string {
 const FONTE = `'Nunito', 'Helvetica Neue', Helvetica, Arial, sans-serif`;
 const URL_DA_FONTE =
   'https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=block';
-const LINK_DA_FONTE = `<link rel="stylesheet" href="${URL_DA_FONTE}" />`;
+const LINK_DA_FONTE = linkDaFonte(URL_DA_FONTE);
 
-/**
- * A Nunito embutida no HTML em vez do `<link>`: com o link, o Chrome buscava a
- * folha e os arquivos no Google a cada impressão — ~500ms em cada uma das duas.
- * Baixada uma vez por processo e reaproveitada. Se o Google não responder, fica
- * o `<link>` de sempre, que por sua vez cai na Helvetica.
- */
-let fonteEmbutida: Promise<string | null> | undefined;
-
-async function baixarFonte(): Promise<string | null> {
-  const buscar = async (url: string, headers?: Record<string, string>) => {
-    const resposta = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!resposta.ok) throw new Error(`${resposta.status} em ${url}`);
-    return resposta;
-  };
-
-  try {
-    // o Google só entrega woff2 para quem se apresenta como navegador moderno
-    const css = await (
-      await buscar(URL_DA_FONTE, {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36',
-      })
-    ).text();
-
-    const arquivos = [
-      ...new Set(css.match(/https:\/\/fonts\.gstatic\.com[^)]+/g) ?? []),
-    ];
-    const embutidos = await Promise.all(
-      arquivos.map(async (url) => {
-        const dados = Buffer.from(await (await buscar(url)).arrayBuffer());
-        return [url, `data:font/woff2;base64,${dados.toString('base64')}`];
-      }),
-    );
-
-    return `<style>${embutidos.reduce(
-      (folha, [url, dataUri]) => folha.split(url).join(dataUri),
-      css,
-    )}</style>`;
-  } catch {
-    // não guarda a falha: a próxima geração tenta de novo
-    fonteEmbutida = undefined;
-    return null;
-  }
-}
-
-/** Troca o `<link>` da fonte pela fonte embutida, quando ela está disponível. */
-export async function comFonteEmbutida(html: string): Promise<string> {
-  fonteEmbutida ??= baixarFonte();
-  const estilo = await fonteEmbutida;
-  return estilo ? html.replace(LINK_DA_FONTE, estilo) : html;
+/** Troca o `<link>` da Nunito pela fonte embutida — ver `src/pdf/fonte.ts` */
+export function comFonteEmbutida(html: string): Promise<string> {
+  return embutirFonte(html, URL_DA_FONTE);
 }
 
 function documento(estilo: string, corpo: string): string {

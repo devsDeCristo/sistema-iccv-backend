@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
@@ -12,7 +11,8 @@ import { TeamService } from '../team/team.service';
 import { Role } from '../auth/roles';
 import { isSuperAdmin, perfilNaIgreja, SELECT_TENANT } from '../auth/tenant';
 import { quadranteAtivo } from '../event/event-quadrante';
-import { prepararImagens } from './quadrante-images';
+import { prepararImagens } from '../pdf/imagens';
+import { abrirNavegador } from '../pdf/navegador';
 import {
   cabecalho,
   comFonteEmbutida,
@@ -217,7 +217,7 @@ export class QuadranteService {
     // o Chrome abre enquanto as fotos chegam: uma coisa não depende da outra
     const [imagens, browser] = await Promise.all([
       this.imagensDoQuadrante(quadrante),
-      this.abrirNavegador(),
+      abrirNavegador(),
     ]);
 
     const evento: EventoDoPdf = {
@@ -297,28 +297,5 @@ export class QuadranteService {
     } finally {
       await browser.close();
     }
-  }
-
-  /**
-   * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
-   * ele usa esse binário — é o caso do Docker, que instala o Chromium em
-   * `/usr/bin/chromium`. Sem a variável, procura o Google Chrome instalado
-   * no lugar padrão do sistema, que é o caso de quem roda na própria máquina.
-   */
-  private abrirNavegador() {
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-
-    return puppeteer
-      .launch({
-        ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      })
-      .catch((error: Error) => {
-        throw new InternalServerErrorException(
-          `Não foi possível abrir o navegador para gerar o PDF (${error.message}). ` +
-            'Instale o Google Chrome ou defina PUPPETEER_EXECUTABLE_PATH no .env.',
-        );
-      });
   }
 }
