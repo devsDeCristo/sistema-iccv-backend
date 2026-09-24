@@ -39,8 +39,11 @@ export class UserController {
 
   @Post()
   @ApiOperation({ summary: 'Create user' })
-  async create(@Body() data: UserDTO) {
-    return this.userService.create(data);
+  async create(@Body() data: UserDTO, @Req() req: any) {
+    return this.userService.create(data, {
+      ip: req.ip,
+      userAgent: req.headers?.['user-agent'],
+    });
   }
   // riando somente no evento
   // @ApiOperation({ summary: 'Create relation user event' })

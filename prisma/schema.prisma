@@ -97,12 +97,17 @@ model User {
   createdAt          DateTime           @default(now())
   updateAt           DateTime           @updatedAt
   city               String
-  diabetes           Boolean
+  /// Saúde e religião são dados sensíveis (LGPD, art. 11): só existem com o
+  /// consentimento específico do titular (`sensitiveConsentAt`). Nulo quer
+  /// dizer "não informado" — e não "não" —, e é por isso que deixaram de ser
+  /// obrigatórios: gravar `false` sem consentimento faria a organização ler
+  /// que a pessoa não é diabética.
+  diabetes           Boolean?
   /// Contato de emergência; quando o usuário é menor de 16 anos, este é o
   /// telefone do responsável (ver `guardianName`) — mesma coluna, dois nomes
   /// de tela dependendo da idade.
   emergencyContact   String?
-  hypertensive       Boolean
+  hypertensive       Boolean?
   indicatedBy        String?
   leadershipPosition String?
   /// Igreja que a pessoa frequenta, em texto livre. Não é `Church`: aquela é
@@ -110,6 +115,11 @@ model User {
   /// uma congregação que nunca vai estar cadastrada aqui.
   congregation       String?
   pastorName         String?
+  /// Quando o titular (ou o responsável, se menor) autorizou o tratamento dos
+  /// dados sensíveis: saúde (`diabetes`, `hypertensive`) e religião. Nulo é sem
+  /// consentimento — e aí esses campos também ficam nulos (ver
+  /// `src/user/dados-sensiveis.ts`). Revogar apaga os dados junto.
+  sensitiveConsentAt DateTime?
   profession         String
   profilePhotoUrl    String?
   /// Perfil efetivo: 1 super admin, 5 usuário comum, ou o mais alto dos
@@ -151,6 +161,8 @@ model User {
   news               News[]
   tokens             UserToken[]
   loginAttempts      LoginAttempt[]
+  termsAcceptances   TermsAcceptance[]
+  termsPublished     TermsDocument[]    @relation("TermsPublisher")
 
   @@map("users")
 }
@@ -1010,4 +1022,53 @@ model PaymentProductItem {
   @@unique([paymentId, variantId])
   @@index([variantId])
   @@map("payment_product_items")
+}
+
+/// Cada aceite dos Termos de Uso: quem, qual versão, quando e de onde.
+///
+/// É a prova do aceite — "ao entrar você concorda" não prova que aquela
+/// pessoa aceitou aquela versão. Uma linha por versão aceita (`version` é a de
+/// `TermsDocument`): quando uma mudança relevante é publicada, todos aceitam de
+/// novo e o histórico fica.
+model TermsAcceptance {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version    String
+  acceptedAt DateTime @default(now())
+  ip         String?
+  userAgent  String?
+
+  @@unique([userId, version])
+  @@map("terms_acceptances")
+}
+
+/// Uma versão publicada dos Termos de Uso, editada em Configurações pelo super
+/// admin ou dev.
+///
+/// Publicar cria uma linha nova; nenhuma é alterada depois. Cada aceite aponta
+/// para a versão que a pessoa leu (`TermsAcceptance.version`), e o texto que
+/// ela aceitou tem que continuar existindo exatamente como era.
+///
+/// A vigente — a que a página mostra e o aceite registra — é a mais recente.
+/// A que todo mundo precisa ter aceitado é a mais recente com
+/// `requiresAcceptance`: correção de texto publica sem exigir novo aceite.
+model TermsDocument {
+  id                 String   @id @default(uuid())
+  /// A data da publicação ("2026-09-24"); a segunda no mesmo dia vira
+  /// "2026-09-24.2"
+  version            String   @unique
+  /// HTML do editor. A página pública ainda o limpa antes de mostrar.
+  content            String
+  /// As frases do quadro "Em resumo"
+  summary            String[]
+  /// Mudança relevante: todo mundo aceita de novo no próximo acesso
+  requiresAcceptance Boolean  @default(true)
+  publishedAt        DateTime @default(now())
+  /// Quem publicou. `SetNull`: apagar a conta não apaga a versão
+  publishedById      String?
+  publishedBy        User?    @relation("TermsPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@index([publishedAt(sort: Desc)])
+  @@map("terms_documents")
 }

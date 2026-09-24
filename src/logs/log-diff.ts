@@ -21,6 +21,7 @@ const FIELD_LABELS: Record<string, string> = {
   data: 'Local e descrição',
   password: 'Senha',
   pastorName: 'Nome do pastor',
+  sensitiveConsentAt: 'Consentimento de dados de saúde e religião',
   description: 'Descrição',
   email: 'E-mail',
   emergencyContact: 'Contato de emergência',

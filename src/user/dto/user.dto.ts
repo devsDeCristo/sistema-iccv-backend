@@ -247,6 +247,27 @@ export class UserDTO {
   @IsOptional()
   religion?: string;
 
+  /**
+   * O cadastro público marca isto na caixa "Li e aceito os Termos de Uso", e
+   * o aceite é gravado com IP e aparelho. O cadastro feito pelo painel não
+   * manda: quem aceita é o titular, no primeiro acesso.
+   */
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  acceptedTerms?: boolean;
+
+  /**
+   * Consentimento específico para saúde e religião (LGPD, art. 11). `true`
+   * autoriza, `false` revoga e apaga; omitido, fica como estava. Sem
+   * consentimento, esses campos não são gravados — ver
+   * `src/user/dados-sensiveis.ts`.
+   */
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  sensitiveDataConsent?: boolean;
+
   @ApiProperty({
     example: 'Alergico',
     description: 'Este campo deve conter todas as observacoes sobre o usuario',

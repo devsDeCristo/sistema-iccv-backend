@@ -29,11 +29,14 @@ import {
   userChurchScope,
 } from 'src/auth/tenant';
 
+import { aplicarConsentimento, separarSensiveis } from './dados-sensiveis';
+import { ContextoDoAceite, registrarAceite } from 'src/terms/terms.service';
+
 @Injectable()
 export class UserService {
   constructor(private prisma: PrismaService, private jwtService: JwtService) {}
 
-  async create(data: UserDTO) {
+  async create(data: UserDTO, contexto: ContextoDoAceite = {}) {
     const userCpfExists = await this.prisma.user.findFirst({
       where: {
         cpf: data.cpf,
@@ -54,12 +57,16 @@ export class UserService {
       const {
         churchId: _lente,
         churchRoles: _vinculos,
-        ...cadastro
+        acceptedTerms,
+        sensitiveDataConsent,
+        ...corpo
       } = data;
+      const [sensiveis, cadastro] = separarSensiveis(corpo);
 
       const user = await this.prisma.user.create({
         data: {
           ...cadastro,
+          ...aplicarConsentimento(sensiveis, sensitiveDataConsent, null),
           // o cadastro é público: a permissão nunca vem do corpo da requisição.
           // Promoção de perfil só acontece pelo painel (PUT /users/:id por admin).
           role: Role.USER,
@@ -67,6 +74,12 @@ export class UserService {
             '$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW',
         },
       });
+
+      // o aceite marcado na tela de cadastro, com de onde ele veio
+      if (acceptedTerms === true) {
+        await registrarAceite(this.prisma, user.id, contexto);
+      }
+
       const payload = { username: user.cpf, sub: user.id };
       return {
         access_token: this.jwtService.sign(payload),
@@ -514,8 +527,21 @@ export class UserService {
       churchRoles: _vinculosDoCorpo,
       churchId: _lenteDoCorpo,
       password: _senha,
-      ...campos
+      // o aceite dos termos é gravado por `POST /terms/accept`, pelo titular
+      acceptedTerms: _aceite,
+      sensitiveDataConsent,
+      ...corpo
     } = data;
+    // saúde e religião só entram com consentimento — ver `dados-sensiveis.ts`
+    const [sensiveis, resto] = separarSensiveis(corpo);
+    const campos = {
+      ...resto,
+      ...aplicarConsentimento(
+        sensiveis,
+        sensitiveDataConsent,
+        userExists.sensitiveConsentAt,
+      ),
+    };
 
     try {
       await this.prisma.$transaction(async (tx) => {
