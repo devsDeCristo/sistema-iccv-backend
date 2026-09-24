@@ -1,22 +1,22 @@
 import {
   normalizarMostrarQuadrante,
-  quadranteVisivelParaInscritos,
+  quadranteAtivo,
 } from './event-quadrante';
 
-describe('quadranteVisivelParaInscritos', () => {
+describe('quadranteAtivo', () => {
   it('fica fechado em evento sem a chave', () => {
-    expect(quadranteVisivelParaInscritos({})).toBe(false);
-    expect(quadranteVisivelParaInscritos(null)).toBe(false);
+    expect(quadranteAtivo({})).toBe(false);
+    expect(quadranteAtivo(null)).toBe(false);
   });
 
   it('abre só com true', () => {
-    expect(quadranteVisivelParaInscritos({ showQuadrante: true })).toBe(true);
-    expect(quadranteVisivelParaInscritos({ showQuadrante: 'true' })).toBe(false);
+    expect(quadranteAtivo({ showQuadrante: true })).toBe(true);
+    expect(quadranteAtivo({ showQuadrante: 'true' })).toBe(false);
   });
 
   it('fica fechado com o módulo de equipes desligado', () => {
     expect(
-      quadranteVisivelParaInscritos({
+      quadranteAtivo({
         showQuadrante: true,
         modules: { teams: false },
       }),

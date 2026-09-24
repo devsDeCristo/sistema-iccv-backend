@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
@@ -9,7 +10,8 @@ import { PrismaService } from '../prisma';
 import { TeamService } from '../team/team.service';
 import { Role } from '../auth/roles';
 import { isSuperAdmin, perfilNaIgreja, SELECT_TENANT } from '../auth/tenant';
-import { quadranteVisivelParaInscritos } from '../event/event-quadrante';
+import { quadranteAtivo } from '../event/event-quadrante';
+import { prepararImagens } from './quadrante-images';
 
 /** Mesmo propósito do `escapeHtml` de `password-reset.service.ts` /
  * `event.service.ts`: nomes e observações vão direto para dentro do HTML que
@@ -121,8 +123,10 @@ export class QuadranteService {
   }
 
   /**
-   * Quem pode abrir o quadrante: o admin da igreja do evento, sempre; o
-   * inscrito, só quando o evento libera (`data.showQuadrante`).
+   * Quem pode abrir o quadrante. Com ele desligado no evento
+   * (`data.showQuadrante`), ninguém — nem o admin: a opção decide se o evento
+   * tem quadrante, não só quem o vê. Ligado, abrem o admin da igreja e os
+   * inscritos.
    *
    * A rota não passa pelo `EventTenantGuard` porque ele recortaria o admin de
    * outra igreja que está inscrito aqui como qualquer pessoa — e é justamente
@@ -148,17 +152,17 @@ export class QuadranteService {
       throw new NotFoundException('Evento não encontrado');
     }
 
+    if (!quadranteAtivo(event.data)) {
+      throw new ForbiddenException(
+        'O quadrante está desligado nas configurações deste evento',
+      );
+    }
+
     if (
       isSuperAdmin(requester) ||
       perfilNaIgreja(requester, event.churchId) === Role.ADMIN
     ) {
       return;
-    }
-
-    if (!quadranteVisivelParaInscritos(event.data)) {
-      throw new ForbiddenException(
-        'O quadrante deste evento não está disponível para os participantes',
-      );
     }
 
     const inscricao = await this.prisma.eventOnUsers.findUnique({
@@ -226,8 +230,30 @@ export class QuadranteService {
       );
     }
 
-    const logoUrl = event.logoUrl ?? undefined;
-    const coverUrl = event.coverUrl ?? undefined;
+    // fotos, capa e logo entram no HTML já reduzidas e embutidas: o Chrome não
+    // tem nada para baixar — ver `quadrante-images.ts`
+    const imagens = await prepararImagens([
+      ...(event.logoUrl ? [{ url: event.logoUrl, formato: 'logo' as const }] : []),
+      ...(event.coverUrl ? [{ url: event.coverUrl, formato: 'capa' as const }] : []),
+      ...teams.flatMap((team) =>
+        team.users
+          .filter((user) => user.profilePhotoUrl)
+          .map((user) => ({ url: user.profilePhotoUrl!, formato: 'foto' as const })),
+      ),
+    ]);
+
+    const logoUrl = event.logoUrl ? imagens.get(`logo:${event.logoUrl}`) : undefined;
+    const coverUrl = event.coverUrl ? imagens.get(`capa:${event.coverUrl}`) : undefined;
+    const teamsComFotos = teams.map((team) => ({
+      ...team,
+      users: team.users.map((user) => ({
+        ...user,
+        // foto que não baixou sai como o quadro cinza, igual a quem não tem foto
+        profilePhotoUrl: user.profilePhotoUrl
+          ? (imagens.get(`foto:${user.profilePhotoUrl}`) ?? null)
+          : null,
+      })),
+    }));
 
     const html = `
       <!DOCTYPE html>
@@ -293,7 +319,7 @@ export class QuadranteService {
         <body>
           ${this.renderCover(logoUrl, coverUrl)}
           <div class="content">
-            ${teams.map((team) => this.renderTeam(team)).join('')}
+            ${teamsComFotos.map((team) => this.renderTeam(team)).join('')}
           </div>
         </body>
       </html>`;
@@ -306,16 +332,29 @@ export class QuadranteService {
   ): Promise<{ buffer: Buffer; fileName: string }> {
     const { html, eventName, periodo } = await this.buildHtml(eventId);
 
-    const browser = await puppeteer.launch({
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    /**
+     * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
+     * ele usa esse binário — é o caso do Docker, que instala o Chromium em
+     * `/usr/bin/chromium`. Sem a variável, procura o Google Chrome instalado
+     * no lugar padrão do sistema, que é o caso de quem roda na própria máquina.
+     */
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    const browser = await puppeteer
+      .launch({
+        ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      })
+      .catch((error: Error) => {
+        throw new InternalServerErrorException(
+          `Não foi possível abrir o navegador para gerar o PDF (${error.message}). ` +
+            'Instale o Google Chrome ou defina PUPPETEER_EXECUTABLE_PATH no .env.',
+        );
+      });
 
     try {
       const page = await browser.newPage();
-      // 'load' espera as imagens remotas (fotos, logo, capa) carregarem antes
-      // de imprimir — sem isso o PDF sai com fotos quebradas.
+      // as imagens já vêm embutidas, então o 'load' é imediato
       await page.setContent(html, { waitUntil: 'load' });
 
       const buffer = await page.pdf({
