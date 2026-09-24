@@ -4,8 +4,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { Role, SUPER_ADMIN_ROLES } from 'src/auth/roles';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateChurchDto } from './dto/create-church.dto';
+
+/** O que as telas de igreja leem: nome, situação e quem assina os e-mails. */
+const SELECT_CHURCH = {
+  id: true,
+  name: true,
+  status: true,
+  spiritualLeader: { select: { id: true, fullName: true } },
+};
 
 @Injectable()
 export class ChurchService {
@@ -19,9 +29,7 @@ export class ChurchService {
   async findAll() {
     return this.prisma.church.findMany({
       select: {
-        id: true,
-        name: true,
-        status: true,
+        ...SELECT_CHURCH,
         _count: { select: { users: true, events: true } },
       },
       orderBy: { name: 'asc' },
@@ -31,10 +39,21 @@ export class ChurchService {
   async create(dto: CreateChurchDto) {
     const name = dto.name.trim();
     await this.ensureNameIsAvailable(name);
+    const lider = await this.findLeaderOrFail(dto.spiritualLeaderId);
 
-    return this.prisma.church.create({
-      data: { name, status: dto.status },
-      select: { id: true, name: true, status: true },
+    return this.prisma.$transaction(async (tx) => {
+      const church = await tx.church.create({
+        data: {
+          name,
+          status: dto.status,
+          spiritualLeaderId: dto.spiritualLeaderId ?? null,
+        },
+        select: SELECT_CHURCH,
+      });
+
+      if (lider) await this.vincularLider(tx, church.id, lider);
+
+      return church;
     });
   }
 
@@ -42,14 +61,76 @@ export class ChurchService {
     const name = dto.name.trim();
     await this.findOneOrFail(id);
     await this.ensureNameIsAvailable(name, id);
+    const lider = await this.findLeaderOrFail(dto.spiritualLeaderId);
 
-    return this.prisma.church.update({
-      where: { id },
-      // `status` ausente no corpo mantém o que está gravado: quem só renomeia
-      // não deve reativar uma igreja que alguém desligou
-      data: { name, status: dto.status },
-      select: { id: true, name: true, status: true },
+    return this.prisma.$transaction(async (tx) => {
+      const church = await tx.church.update({
+        where: { id },
+        // `status` ausente no corpo mantém o que está gravado: quem só renomeia
+        // não deve reativar uma igreja que alguém desligou. Vale igual para o
+        // líder — só troca quem veio no corpo.
+        data: {
+          name,
+          status: dto.status,
+          spiritualLeaderId: dto.spiritualLeaderId,
+        },
+        select: SELECT_CHURCH,
+      });
+
+      if (lider) await this.vincularLider(tx, id, lider);
+
+      return church;
     });
+  }
+
+  /**
+   * Quem responde pela igreja administra a igreja: o vínculo de admin sai
+   * junto com o cadastro, na mesma transação. Sem isso o líder ficaria
+   * registrado na igreja sem conseguir abrir o painel dela.
+   *
+   * Trocar de líder não rebaixa o anterior: ele continua admin até alguém
+   * tirar a permissão pela tela de usuários — perder o acesso ao painel não é
+   * consequência óbvia de deixar de assinar o e-mail.
+   */
+  private async vincularLider(
+    tx: Prisma.TransactionClient,
+    churchId: string,
+    lider: { id: string; role: number },
+  ) {
+    await tx.userChurchRole.upsert({
+      where: { userId_churchId: { userId: lider.id, churchId } },
+      create: { userId: lider.id, churchId, role: Role.ADMIN },
+      update: { role: Role.ADMIN },
+    });
+
+    // `User.role` é derivado do mais alto dos vínculos, e admin é o mais alto
+    // que um vínculo dá. Dev e super admin são perfis globais: escrever admin
+    // por cima deles seria rebaixá-los.
+    if (!SUPER_ADMIN_ROLES.includes(lider.role as Role)) {
+      await tx.user.update({
+        where: { id: lider.id },
+        data: { role: Role.ADMIN },
+      });
+    }
+  }
+
+  /**
+   * A conta do líder é conferida antes de gravar: o erro do banco pela chave
+   * estrangeira sairia como 500, e isto aqui é um id errado no corpo.
+   */
+  private async findLeaderOrFail(userId?: string | null) {
+    if (!userId) return null;
+
+    const pessoa = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+
+    if (!pessoa) {
+      throw new BadRequestException('Usuário não encontrado');
+    }
+
+    return pessoa;
   }
 
   /**

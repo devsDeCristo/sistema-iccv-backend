@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ChurchStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateChurchDto {
   @ApiProperty({
@@ -20,4 +27,20 @@ export class CreateChurchDto {
   @IsOptional()
   @IsEnum(ChurchStatus)
   status?: ChurchStatus;
+
+  /**
+   * Quem responde pela igreja: é o nome que assina o e-mail dos eventos dela.
+   *
+   * Vincular alguém aqui dá a essa pessoa o perfil de admin desta igreja — ver
+   * `ChurchService.vincularLider`. `null` desfaz o vínculo (o admin continua
+   * admin); omitido, a edição mantém quem já estava.
+   */
+  @ApiPropertyOptional({
+    description: 'Id do usuário que responde pela igreja',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((dto) => dto.spiritualLeaderId !== null)
+  @IsUUID()
+  spiritualLeaderId?: string | null;
 }

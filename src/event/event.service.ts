@@ -86,6 +86,8 @@ type EventWithGroupRole = Prisma.EventGetPayload<{
 type EmailUser = { id: string; fullName: string; email: string };
 type EmailEvent = {
   id: string;
+  /// de qual igreja é o evento: é o líder dela que assina o e-mail
+  churchId: string;
   name: string;
   startDate: Date;
   endDate: Date;
@@ -482,6 +484,7 @@ export class EventService {
         where: { id: eventId },
         select: {
           id: true,
+          churchId: true,
           name: true,
           startDate: true,
           endDate: true,
@@ -794,6 +797,54 @@ export class EventService {
             </tr>`;
   }
 
+  /**
+   * Rodapé assinado por quem responde pela igreja do evento.
+   *
+   * Igreja sem líder vinculado não assina nada: e-mail sem assinatura é melhor
+   * do que e-mail assinado por quem não responde por aquele evento. Quem
+   * vincula é a tela de igrejas (`ChurchService`).
+   */
+  private renderSignature(
+    lider?: { fullName: string; email: string; cellphone: string } | null,
+  ): string {
+    if (!lider) return '';
+
+    // o celular é gravado só com os dígitos; a máscara é assunto de quem mostra
+    const celular = (lider.cellphone ?? '').replace(
+      /^(\d{2})(\d{4,5})(\d{4})$/,
+      '($1) $2-$3',
+    );
+    const contato = [lider.email, celular]
+      .filter(Boolean)
+      .map(escapeHtml)
+      .join(' &middot; ');
+
+    return `
+      <table
+        role="presentation"
+        width="100%"
+        cellpadding="0"
+        cellspacing="0"
+        border="0"
+        style="margin-top: 24px; border-top: 1px solid #eceff5"
+      >
+        <tr>
+          <td
+            style="
+              padding-top: 18px;
+              font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              font-size: 13px;
+              line-height: 22px;
+              color: #6b7280;
+            "
+          >
+            ${escapeHtml(lider.fullName)} — Líder Espiritual<br />
+            ${contato}
+          </td>
+        </tr>
+      </table>`;
+  }
+
   private async sendEmailConfirmation({
     user,
     event,
@@ -816,6 +867,19 @@ export class EventService {
       .concat(data?.zipCode ? ` - CEP: ${data.zipCode}` : '')
       .concat(data?.number ? ` - ${data.number}` : '');
 
+    // Quem assina é o líder espiritual da igreja que organiza o evento. A
+    // assinatura era fixa no template, então o e-mail de toda igreja saía com
+    // o nome do pastor de uma delas.
+    const { spiritualLeader: lider } =
+      (await this.prisma.church.findUnique({
+        where: { id: event.churchId },
+        select: {
+          spiritualLeader: {
+            select: { fullName: true, email: true, cellphone: true },
+          },
+        },
+      })) ?? {};
+
     // valores vão direto para dentro do HTML do template -> precisam ser escapados
     const emailData = {
       eventTitle: escapeHtml(event.name),
@@ -829,6 +893,7 @@ export class EventService {
       INSERT_TICKETS: await this.renderTickets(tickets),
       EVENT_BANNER: this.renderEventBanner(data),
       LOCAL: escapeHtml(LOCAL),
+      ASSINATURA: this.renderSignature(lider),
     };
 
     const html = this.emailService.loadTemplate(

@@ -46,35 +46,56 @@
               <td
                 align="center"
                 bgcolor="#1C0F4D"
-                style="background-color: #1c0f4d; padding: 28px 24px"
+                style="background-color: #1c0f4d; padding: 10px 24px"
               >
-                <img
-                  src="cid:logo"
-                  width="55"
-                  alt="Igreja de Cristo Cidade Verde"
-                  style="
-                    display: block;
-                    width: 55px;
-                    max-width: 55px;
-                    height: auto;
-                    border: 0;
-                    margin: 0 auto;
-                  "
-                />
-                <div
-                  style="
-                    margin-top: 14px;
-                    font-family: 'Segoe UI', Roboto, Helvetica, Arial,
-                      sans-serif;
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: #ffffff;
-                    letter-spacing: 4px;
-                    text-indent: 4px;
-                  "
+                <!--
+                  A marca como ela aparece na barra do topo e no login: símbolo e nome
+                  lado a lado, numa linha só. Em tabela porque Outlook ignora flex —
+                  duas células no mesmo `tr` é o que alinha sem quebrar.
+                -->
+                <table
+                  role="presentation"
+                  cellpadding="0"
+                  cellspacing="0"
+                  border="0"
                 >
-                  ICCV EVENTOS
-                </div>
+                  <tr>
+                    <td valign="middle">
+                      <img
+                        src="cid:logo"
+                        width="25"
+                        height="38"
+                        alt="Igreja de Cristo Cidade Verde"
+                        style="
+                          display: block;
+                          width: 25px;
+                          height: 38px;
+                          border: 0;
+                        "
+                      />
+                    </td>
+                    <td
+                      valign="middle"
+                      style="
+                        padding-left: 8px;
+                        font-family: 'Segoe UI', Roboto, Helvetica, Arial,
+                          sans-serif;
+                        font-size: 17px;
+                        font-weight: 700;
+                        letter-spacing: -0.2px;
+                        color: #ffffff;
+                        white-space: nowrap;
+                      "
+                    >
+                      ICCV
+                      <!-- o mesmo branco a 78% da barra do topo, resolvido em hexa:
+                        parte dos clientes descarta rgba() -->
+                      <span style="font-weight: 400; color: #cdcad8"
+                        >Eventos</span
+                      >
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
 
@@ -179,30 +200,9 @@
                   da Igreja de Cristo!
                 </p>
 
-                <table
-                  role="presentation"
-                  width="100%"
-                  cellpadding="0"
-                  cellspacing="0"
-                  border="0"
-                  style="margin-top: 24px; border-top: 1px solid #eceff5"
-                >
-                  <tr>
-                    <td
-                      style="
-                        padding-top: 18px;
-                        font-family: 'Segoe UI', Roboto, Helvetica, Arial,
-                          sans-serif;
-                        font-size: 13px;
-                        line-height: 22px;
-                        color: #6b7280;
-                      "
-                    >
-                      Pr. Kleber Junior de Sousa — Líder Espiritual<br />
-                      admin@iccidadeverde.com &middot; +55 (84) 99170-1727
-                    </td>
-                  </tr>
-                </table>
+                <!-- assinatura do líder espiritual da igreja do evento: vem pronta de
+                  EventService.renderSignature, vazia quando a igreja não tem líder -->
+                {ASSINATURA}
               </td>
             </tr>
 
@@ -224,9 +224,9 @@
                   {eventTitle}. Se não foi você, entre em contato com nossa
                   equipe.
                 </p>
-                <p style="margin: 8px 0 0">
-                  Igreja de Cristo Cidade Verde — mensagem automática, não é
-                  necessário responder.
+                <p style="margin: 20px 0 0">
+                  ICCV Eventos — mensagem automática, não é necessário
+                  responder.
                 </p>
               </td>
             </tr>
