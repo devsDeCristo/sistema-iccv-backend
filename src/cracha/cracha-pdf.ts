@@ -233,11 +233,16 @@ export function htmlDosCrachas(
       .logo-evento {
         height: 100pt;
         margin-top: 5pt;
-        max-width: 100%;
+        /* largura definida: sem ela o 70% da logo era calculado sobre ela
+           mesma, e a redução se aplicava duas vezes */
+        width: 100%;
         display: flex;
         justify-content: center;
+        align-items: center;
       }
-      .logo-evento img { height: 100%; max-width: 100%; object-fit: contain; }
+      /* a logo ocupa 80% da caixa, centrada nela: é a caixa, e não a logo, que
+         segura o papel no lugar */
+      .logo-evento img { height: 80%; max-width: 80%; object-fit: contain; }
       .papel {
         width: 100%;
         height: 140pt;
