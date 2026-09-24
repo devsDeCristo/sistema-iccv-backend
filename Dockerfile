@@ -2,7 +2,11 @@
 
 # Mesma versão de Node em todos os stages: ABI diferente entre build e runtime
 # quebra módulos nativos (bcrypt, sharp).
-ARG NODE_VERSION=20.18.0
+#
+# 22 e não 20: o puppeteer-core, que gera o PDF do quadrante, exige >=22.12 e o
+# yarn recusa a instalação inteira por causa disso. É a versão do ambiente de
+# desenvolvimento, e a 20 saiu do suporte.
+ARG NODE_VERSION=22.20.0
 
 # --------------------------------------------------------------- deps (prod)
 # node_modules apenas de produção, compilado com o toolchain disponível.
