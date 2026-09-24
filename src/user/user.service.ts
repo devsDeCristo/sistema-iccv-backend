@@ -18,7 +18,6 @@ import {
   isAdminRole,
   isDevRole,
 } from 'src/auth/roles';
-import { enviarEmailConfirmacao } from 'src/nodeMailer/sendEmail';
 import { JwtService } from '@nestjs/jwt';
 import {
   SELECT_TENANT,
@@ -73,82 +72,10 @@ export class UserService {
         access_token: this.jwtService.sign(payload),
         user,
       };
-      // let event = {};
-      // if (eventId) {
-      //   const hasEvent = await this.prisma.event.findFirst({
-      //     where: { id: eventId },
-      //   });
-
-      //   if (hasEvent) {
-      //     event = await this.prisma.eventOnUsers.create({
-      //       data: {
-      //         eventId,
-      //         userId: user.id,
-      //         paid: false,
-      //       },
-      //     });
-      //   }
-      // }
-      // if (user && event) {
-      //   await enviarEmailConfirmacao(user.fullName, user.email, user.worker);
-      // }
     } catch (error) {
       throw new InternalServerErrorException();
     }
   }
-
-  // async createRelationEvent(
-  //   idUser: string,
-  //   idEvent: string,
-  //   registrationTypeId: string,
-  // ) {
-  //   const user = await this.prisma.user.findFirst({
-  //     where: { id: idUser },
-  //   });
-
-  //   if (!user) {
-  //     throw new NotFoundException('Usuário não encontrado!');
-  //   }
-
-  //   if (!idEvent) {
-  //     throw new BadRequestException('ID do evento não fornecido!');
-  //   }
-
-  //   const hasEvent = await this.prisma.event.findFirst({
-  //     where: { id: idEvent },
-  //   });
-
-  //   if (!hasEvent) {
-  //     throw new NotFoundException('Evento não encontrado!');
-  //   }
-
-  //   const hasRelationEventOnUser = await this.prisma.eventOnUsers.findFirst({
-  //     where: { userId: user.id, eventId: idEvent },
-  //   });
-
-  //   if (hasRelationEventOnUser) {
-  //     throw new ConflictException('Usuário já está inscrito neste evento!');
-  //   }
-
-  //   const event = await this.prisma.eventOnUsers.create({
-  //     data: {
-  //       eventId: idEvent,
-  //       userId: user.id,
-  //       registrationTypeId,
-  //     },
-  //   });
-
-  //   await enviarEmailConfirmacao(
-  //     user.fullName,
-  //     user.email,
-  //     false, // mudar
-  //     hasEvent.name,
-  //     hasEvent.startDate,
-  //     hasEvent.endDate,
-  //   );
-
-  //   return event;
-  // }
 
   /**
    * A conta dev só é alterada por outro dev. Rebaixar, trocar dados pessoais ou
