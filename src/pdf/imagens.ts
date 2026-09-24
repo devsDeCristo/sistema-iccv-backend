@@ -79,9 +79,10 @@ const FORMATOS: Record<FormatoDeImagem, (img: sharp.Sharp) => sharp.Sharp> = {
     img
       .resize(800, 420, { fit: 'inside', withoutEnlargement: true })
       .png(),
-  // o papel rasgado: 140pt de altura, cortado nas laterais pelo `cover`
-  crachaPapel: (img) =>
-    img.resize({ height: 600, withoutEnlargement: true }).png(),
+  // O papel rasgado já cortado no formato em que aparece (8,7cm × 140pt): o
+  // original é bem mais largo, e o `cover` do CSS jogava as laterais fora
+  // depois de o Chrome ter embutido tudo no PDF.
+  crachaPapel: (img) => img.resize(900, 512, { fit: 'cover' }).png(),
 };
 
 const EM_PNG: FormatoDeImagem[] = [

@@ -29,6 +29,7 @@ import {
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
+import { aquecerImagensDoCracha } from 'src/cracha/cracha.service';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES, ADMIN_ROLES, Role } from 'src/auth/roles';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
@@ -114,16 +115,23 @@ export class EventController {
   })
   @ApiConsumes('multipart/form-data')
   @Get(':id')
-  findOne(
+  async findOne(
     @Param('id') id: string,
     @Query('embedImages') embedImages: string,
     @Query('painel') painel: string,
     @Req() req: any,
   ) {
-    return this.eventService.findOne(id, req.user?.userId, {
+    const event = await this.eventService.findOne(id, req.user?.userId, {
       embedImages: embedImages === 'true' || embedImages === '1',
       emPainel: painel === 'true',
     });
+
+    // o painel do evento é de onde o crachá é baixado: capa e logo começam a
+    // chegar agora, sem atrasar esta resposta. A página pública não aquece —
+    // quem só vê o evento não gera crachá.
+    if (painel === 'true') aquecerImagensDoCracha(event?.data);
+
+    return event;
   }
 
   @ApiOperation({ summary: 'Edit event' })

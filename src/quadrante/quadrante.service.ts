@@ -12,7 +12,7 @@ import { Role } from '../auth/roles';
 import { isSuperAdmin, perfilNaIgreja, SELECT_TENANT } from '../auth/tenant';
 import { quadranteAtivo } from '../event/event-quadrante';
 import { prepararImagens } from '../pdf/imagens';
-import { abrirNavegador } from '../pdf/navegador';
+import { novaPagina, prepararNavegador } from '../pdf/navegador';
 import {
   cabecalho,
   comFonteEmbutida,
@@ -214,10 +214,10 @@ export class QuadranteService {
       );
     }
 
-    // o Chrome abre enquanto as fotos chegam: uma coisa não depende da outra
-    const [imagens, browser] = await Promise.all([
+    // o Chrome abre (se ainda não estiver aberto) enquanto as fotos chegam
+    const [imagens] = await Promise.all([
       this.imagensDoQuadrante(quadrante),
-      abrirNavegador(),
+      prepararNavegador(),
     ]);
 
     const evento: EventoDoPdf = {
@@ -244,58 +244,56 @@ export class QuadranteService {
 
     const totalPessoas = equipes.reduce((soma, e) => soma + e.users.length, 0);
 
-    try {
-      const imprimir = async (
-        html: string,
-        opcoes: Parameters<puppeteer.Page['pdf']>[0] = {},
-      ) => {
-        const page = await browser.newPage();
+    const imprimir = async (
+      html: string,
+      opcoes: Parameters<puppeteer.Page['pdf']>[0] = {},
+    ) => {
+      const page = await novaPagina();
+      try {
         // imagens e fonte já vêm embutidas: não há nada para buscar fora
         await page.setContent(await comFonteEmbutida(html), { waitUntil: 'load' });
         await page.evaluate(() => document.fonts.ready);
-        const pdf = await page.pdf({
+        return await page.pdf({
           printBackground: true,
           preferCSSPageSize: true,
           ...opcoes,
         });
+      } finally {
         await page.close();
-        return pdf;
-      };
-
-      // capa e equipes saem separadas e são juntadas: o cabeçalho do Puppeteer
-      // vai em toda página, e a capa precisa sair limpa — ver `quadrante-pdf.ts`
-      const [capa, paginas] = await Promise.all([
-        imprimir(
-          htmlDaCapa(evento, { equipes: equipes.length, pessoas: totalPessoas }),
-        ),
-        imprimir(htmlDasEquipes(evento, equipes), {
-          displayHeaderFooter: true,
-          headerTemplate: cabecalho(evento),
-          footerTemplate: rodape(evento),
-        }),
-      ]);
-
-      const final = await PDFDocument.create();
-      final.setTitle(`Quadrante · ${event.name}`);
-      for (const parte of [capa, paginas]) {
-        const doc = await PDFDocument.load(parte);
-        const copiadas = await final.copyPages(doc, doc.getPageIndices());
-        copiadas.forEach((pagina) => final.addPage(pagina));
       }
+    };
 
-      const slug = event.name
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .toLowerCase();
+    // capa e equipes saem separadas e são juntadas: o cabeçalho do Puppeteer
+    // vai em toda página, e a capa precisa sair limpa — ver `quadrante-pdf.ts`
+    const [capa, paginas] = await Promise.all([
+      imprimir(
+        htmlDaCapa(evento, { equipes: equipes.length, pessoas: totalPessoas }),
+      ),
+      imprimir(htmlDasEquipes(evento, equipes), {
+        displayHeaderFooter: true,
+        headerTemplate: cabecalho(evento),
+        footerTemplate: rodape(evento),
+      }),
+    ]);
 
-      return {
-        buffer: Buffer.from(await final.save()),
-        fileName: `quadrante-${slug || 'evento'}.pdf`,
-      };
-    } finally {
-      await browser.close();
+    const final = await PDFDocument.create();
+    final.setTitle(`Quadrante · ${event.name}`);
+    for (const parte of [capa, paginas]) {
+      const doc = await PDFDocument.load(parte);
+      const copiadas = await final.copyPages(doc, doc.getPageIndices());
+      copiadas.forEach((pagina) => final.addPage(pagina));
     }
+
+    const slug = event.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
+
+    return {
+      buffer: Buffer.from(await final.save()),
+      fileName: `quadrante-${slug || 'evento'}.pdf`,
+    };
   }
 }

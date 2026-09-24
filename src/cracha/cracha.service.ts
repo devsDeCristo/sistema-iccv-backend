@@ -8,7 +8,7 @@ import * as path from 'path';
 import { PrismaService } from '../prisma';
 import { embutirFonte } from '../pdf/fonte';
 import { prepararImagens, reduzir } from '../pdf/imagens';
-import { abrirNavegador } from '../pdf/navegador';
+import { novaPagina, prepararNavegador } from '../pdf/navegador';
 import {
   ArtesDoCracha,
   htmlDosCrachas,
@@ -51,6 +51,37 @@ function carregarArtesFixas() {
   });
 
   return artesFixas;
+}
+
+/** Capa e logo do evento, no `data` que vem do banco */
+function imagensDoEvento(data: unknown) {
+  const campos = (data ?? {}) as Record<string, unknown>;
+  return {
+    capaUrl: typeof campos.coverUrl === 'string' ? campos.coverUrl : null,
+    logoUrl: typeof campos.logoUrl === 'string' ? campos.logoUrl : null,
+  };
+}
+
+function baixarImagens({
+  capaUrl,
+  logoUrl,
+}: ReturnType<typeof imagensDoEvento>) {
+  return prepararImagens([
+    ...(capaUrl ? [{ url: capaUrl, formato: 'crachaFundo' as const }] : []),
+    ...(logoUrl ? [{ url: logoUrl, formato: 'crachaLogo' as const }] : []),
+  ]);
+}
+
+/**
+ * Começa a baixar o que o crachá do evento vai usar, sem esperar: capa e logo
+ * do Firebase (~1,6s juntas, quase todo o tempo do primeiro crachá), as artes
+ * fixas e a fonte. Chamado quando o admin abre o painel do evento — de onde o
+ * crachá é baixado —, e o clique em "Baixar Crachá" encontra tudo em cache.
+ */
+export function aquecerImagensDoCracha(data: unknown) {
+  baixarImagens(imagensDoEvento(data)).catch(() => undefined);
+  carregarArtesFixas().catch(() => undefined);
+  embutirFonte('', URL_DA_FONTE).catch(() => undefined);
 }
 
 @Injectable()
@@ -99,20 +130,17 @@ export class CrachaService {
       );
     }
 
-    const data = (event.data ?? {}) as Record<string, unknown>;
-    const capaUrl = typeof data.coverUrl === 'string' ? data.coverUrl : null;
-    const logoUrl = typeof data.logoUrl === 'string' ? data.logoUrl : null;
+    const urls = imagensDoEvento(event.data);
+    const { capaUrl, logoUrl } = urls;
 
     // capa, logo, artes fixas e o Chrome ao mesmo tempo: nada depende de nada
-    const [imagens, fixas, browser] = await Promise.all([
-      prepararImagens([
-        ...(capaUrl ? [{ url: capaUrl, formato: 'crachaFundo' as const }] : []),
-        ...(logoUrl ? [{ url: logoUrl, formato: 'crachaLogo' as const }] : []),
-      ]),
+    const [imagens, fixas] = await Promise.all([
+      baixarImagens(urls),
       carregarArtesFixas(),
-      abrirNavegador(),
+      prepararNavegador(),
     ]);
 
+    const page = await novaPagina();
     try {
       const artes: ArtesDoCracha = {
         // capa que não baixou cai na padrão, como evento sem capa
@@ -131,7 +159,6 @@ export class CrachaService {
         URL_DA_FONTE,
       );
 
-      const page = await browser.newPage();
       await page.setContent(html, { waitUntil: 'load' });
       await page.evaluate(() => document.fonts.ready);
       const pdf = await page.pdf({
@@ -141,7 +168,7 @@ export class CrachaService {
 
       const slug = event.name
         .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
+        .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-zA-Z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .toLowerCase();
@@ -151,7 +178,7 @@ export class CrachaService {
         fileName: `crachas-${slug || 'evento'}.pdf`,
       };
     } finally {
-      await browser.close();
+      await page.close();
     }
   }
 }
