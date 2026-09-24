@@ -89,6 +89,9 @@ async function bootstrap() {
     origin: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
+    // sem isto o navegador esconde o Content-Disposition do JS, e quem baixa um
+    // arquivo (PDF do quadrante) não consegue ler o nome que o servidor mandou
+    exposedHeaders: ['Content-Disposition'],
   });
 
   const config = new DocumentBuilder()

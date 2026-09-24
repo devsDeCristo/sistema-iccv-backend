@@ -52,9 +52,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5000
 
+# chromium: usado pelo puppeteer-core (módulo de quadrante) para gerar PDF a
+# partir de HTML. Instalado via apt (não pelo puppeteer) para não baixar um
+# segundo Chromium na imagem — o pacote do Debian já traz as libs necessárias.
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
 # openssl é exigido pelo query engine do Prisma.
 RUN apt-get update -qq \
-    && apt-get install --no-install-recommends -y openssl \
+    && apt-get install --no-install-recommends -y openssl chromium \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 
 COPY --from=deps  /app/node_modules ./node_modules

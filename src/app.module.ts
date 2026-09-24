@@ -5,6 +5,7 @@ import { EventModule } from './event/event.module';
 import { BedroomsModule } from './bedrooms/bedrooms.module';
 import { TransportModule } from './transport/transport.module';
 import { TeamModule } from './team/team.module';
+import { QuadranteModule } from './quadrante/quadrante.module';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
 import { PasswordResetModule } from './auth/password-reset/password-reset.module';
@@ -31,6 +32,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     BedroomsModule,
     TransportModule,
     TeamModule,
+    QuadranteModule,
     AuthModule,
     PasswordResetModule,
     CryptoModule,
