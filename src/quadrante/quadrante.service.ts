@@ -6,27 +6,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
+import { PDFDocument } from 'pdf-lib';
 import { PrismaService } from '../prisma';
 import { TeamService } from '../team/team.service';
 import { Role } from '../auth/roles';
 import { isSuperAdmin, perfilNaIgreja, SELECT_TENANT } from '../auth/tenant';
 import { quadranteAtivo } from '../event/event-quadrante';
 import { prepararImagens } from './quadrante-images';
-
-/** Mesmo propósito do `escapeHtml` de `password-reset.service.ts` /
- * `event.service.ts`: nomes e observações vão direto para dentro do HTML que
- * o Puppeteer imprime, então precisam ser escapados antes. */
-function escapeHtml(value: unknown): string {
-  return String(value ?? '').replace(/[&<>"']/g, (char) =>
-    ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    })[char] ?? char,
-  );
-}
+import {
+  cabecalho,
+  EquipeDoPdf,
+  EventoDoPdf,
+  htmlDaCapa,
+  htmlDasEquipes,
+  rodape,
+} from './quadrante-pdf';
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -38,10 +32,6 @@ function formatDateRange(startDate: Date, endDate: Date): string {
   return `De ${new Date(startDate).getUTCDate()} a ${end.getUTCDate()} de ${
     MESES[end.getUTCMonth()]
   } de ${end.getUTCFullYear()}`;
-}
-
-function formatDate(value: Date): string {
-  return new Date(value).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 }
 
 export interface QuadranteUser {
@@ -77,49 +67,6 @@ export class QuadranteService {
           ? -1
           : 1,
     );
-  }
-
-  private renderCard(user: QuadranteUser): string {
-    // a moldura cinza é do container, não da <img>: foto ausente e foto que
-    // falha no download (URL antiga, arquivo removido) caem no mesmo quadro
-    // vazio, em vez do ícone de imagem quebrada
-    const photo = user.profilePhotoUrl
-      ? `<img src="${escapeHtml(user.profilePhotoUrl)}" alt="" onerror="this.remove()" />`
-      : '';
-
-    return `
-      <div class="card">
-        <div class="photo">${photo}</div>
-        <div class="info">
-          <div class="name">${escapeHtml(user.fullName)}</div>
-          <div>Data Nasc: ${formatDate(user.birthday)}</div>
-          <div>Email: ${escapeHtml(user.email)}</div>
-          <div>Celular: ${escapeHtml(user.cellphone)}</div>
-        </div>
-      </div>`;
-  }
-
-  private renderTeam(team: QuadranteTeam): string {
-    const cards = this.sortUsers(team.users).map((u) => this.renderCard(u)).join('');
-
-    return `
-      <section class="team">
-        <h2 class="team-title">${escapeHtml(team.name)}</h2>
-        <div class="grid">${cards}</div>
-      </section>`;
-  }
-
-  private renderCover(logoUrl?: string, coverUrl?: string): string {
-    if (!coverUrl && !logoUrl) return '';
-
-    const bg = coverUrl
-      ? `<img class="cover-bg" src="${escapeHtml(coverUrl)}" alt="" />`
-      : '';
-    const logo = logoUrl
-      ? `<img class="cover-logo" src="${escapeHtml(logoUrl)}" alt="" />`
-      : '';
-
-    return `<section class="cover">${bg}${logo}</section>`;
   }
 
   /**
@@ -203,7 +150,7 @@ export class QuadranteService {
         endDate: event.endDate,
         logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : null,
         coverUrl: typeof data.coverUrl === 'string' ? data.coverUrl : null,
-        // paleta do evento, para a tela vestir as cores dele; o PDF não usa
+        // paleta do evento: a tela e o PDF vestem as cores dele
         colors: (data.colors ?? null) as {
           primary?: string;
           secondary?: string;
@@ -219,9 +166,9 @@ export class QuadranteService {
     };
   }
 
-  async buildHtml(
+  async generatePdf(
     eventId: string,
-  ): Promise<{ html: string; eventName: string; periodo: string }> {
+  ): Promise<{ buffer: Buffer; fileName: string }> {
     const { event, teams } = await this.findQuadrante(eventId);
 
     if (!teams.length) {
@@ -242,95 +189,26 @@ export class QuadranteService {
       ),
     ]);
 
-    const logoUrl = event.logoUrl ? imagens.get(`logo:${event.logoUrl}`) : undefined;
-    const coverUrl = event.coverUrl ? imagens.get(`capa:${event.coverUrl}`) : undefined;
-    const teamsComFotos = teams.map((team) => ({
+    const evento: EventoDoPdf = {
+      name: event.name,
+      periodo: event.periodo,
+      colors: event.colors,
+      logo: event.logoUrl ? imagens.get(`logo:${event.logoUrl}`) : undefined,
+      capa: event.coverUrl ? imagens.get(`capa:${event.coverUrl}`) : undefined,
+    };
+
+    const equipes: EquipeDoPdf[] = teams.map((team) => ({
       ...team,
       users: team.users.map((user) => ({
         ...user,
-        // foto que não baixou sai como o quadro cinza, igual a quem não tem foto
+        // foto que não baixou sai com as iniciais, igual a quem não tem foto
         profilePhotoUrl: user.profilePhotoUrl
           ? (imagens.get(`foto:${user.profilePhotoUrl}`) ?? null)
           : null,
       })),
     }));
 
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <style>
-            * { box-sizing: border-box; }
-            body { margin: 0; font-family: Helvetica, Arial, sans-serif; color: #000; }
-            .cover {
-              position: relative;
-              width: 100%;
-              height: 100vh;
-              page-break-after: always;
-              background-color: #1c0f4d;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-            }
-            .cover-bg {
-              position: absolute;
-              inset: 0;
-              width: 100%;
-              height: 100%;
-              object-fit: cover;
-            }
-            .cover-logo {
-              position: relative;
-              max-width: 55%;
-              max-height: 55%;
-              object-fit: contain;
-            }
-            .content { padding: 16px 20px 28px; }
-            .team { break-inside: auto; margin-bottom: 24px; }
-            /* break-after: título de equipe no pé da página, com o quadro só
-               na página seguinte, é o caso que mais atrapalha na hora de usar */
-            .team-title { font-size: 16px; margin: 0 0 10px; break-after: avoid; }
-            .grid {
-              display: grid;
-              grid-template-columns: repeat(4, 1fr);
-              gap: 10px;
-            }
-            .card {
-              border: 1px solid #000;
-              padding: 4px;
-              display: flex;
-              flex-direction: row;
-              break-inside: avoid;
-              font-size: 8px;
-            }
-            .photo {
-              width: 50px;
-              height: 65px;
-              margin-right: 6px;
-              flex-shrink: 0;
-              background-color: #ededed;
-            }
-            .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-            .info { display: flex; flex-direction: column; justify-content: center; gap: 3px; }
-            .name { font-size: 9px; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          ${this.renderCover(logoUrl, coverUrl)}
-          <div class="content">
-            ${teamsComFotos.map((team) => this.renderTeam(team)).join('')}
-          </div>
-        </body>
-      </html>`;
-
-    return { html, eventName: event.name, periodo: event.periodo };
-  }
-
-  async generatePdf(
-    eventId: string,
-  ): Promise<{ buffer: Buffer; fileName: string }> {
-    const { html, eventName, periodo } = await this.buildHtml(eventId);
+    const totalPessoas = equipes.reduce((soma, e) => soma + e.users.length, 0);
 
     /**
      * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
@@ -353,30 +231,55 @@ export class QuadranteService {
       });
 
     try {
-      const page = await browser.newPage();
-      // as imagens já vêm embutidas, então o 'load' é imediato
-      await page.setContent(html, { waitUntil: 'load' });
+      const imprimir = async (
+        html: string,
+        opcoes: Parameters<puppeteer.Page['pdf']>[0] = {},
+      ) => {
+        const page = await browser.newPage();
+        // as imagens já vêm embutidas; o que ainda vem de fora é a fonte
+        await page.setContent(html, { waitUntil: 'load' });
+        await page.evaluate(() => document.fonts.ready);
+        const pdf = await page.pdf({
+          printBackground: true,
+          preferCSSPageSize: true,
+          ...opcoes,
+        });
+        await page.close();
+        return pdf;
+      };
 
-      const buffer = await page.pdf({
-        format: 'A4',
-        landscape: true,
-        printBackground: true,
-        displayHeaderFooter: true,
-        headerTemplate: '<span></span>',
-        footerTemplate: `<div style="font-size: 9px; width: 100%; text-align: center; color: #555;">${escapeHtml(
-          periodo,
-        )}</div>`,
-        margin: { top: '10mm', bottom: '16mm', left: '10mm', right: '10mm' },
-      });
+      // capa e equipes saem separadas e são juntadas: o cabeçalho do Puppeteer
+      // vai em toda página, e a capa precisa sair limpa — ver `quadrante-pdf.ts`
+      const [capa, paginas] = await Promise.all([
+        imprimir(
+          htmlDaCapa(evento, { equipes: equipes.length, pessoas: totalPessoas }),
+        ),
+        imprimir(htmlDasEquipes(evento, equipes), {
+          displayHeaderFooter: true,
+          headerTemplate: cabecalho(evento),
+          footerTemplate: rodape(evento),
+        }),
+      ]);
 
-      const slug = eventName
+      const final = await PDFDocument.create();
+      final.setTitle(`Quadrante · ${event.name}`);
+      for (const parte of [capa, paginas]) {
+        const doc = await PDFDocument.load(parte);
+        const copiadas = await final.copyPages(doc, doc.getPageIndices());
+        copiadas.forEach((pagina) => final.addPage(pagina));
+      }
+
+      const slug = event.name
         .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
+        .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-zA-Z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .toLowerCase();
 
-      return { buffer: Buffer.from(buffer), fileName: `quadrante-${slug || 'evento'}.pdf` };
+      return {
+        buffer: Buffer.from(await final.save()),
+        fileName: `quadrante-${slug || 'evento'}.pdf`,
+      };
     } finally {
       await browser.close();
     }
