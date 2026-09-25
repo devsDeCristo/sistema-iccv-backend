@@ -13,6 +13,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ASSIGNABLE_ROLES } from 'src/auth/roles';
+import { SENHA_MAXIMA, SENHA_MINIMA } from 'src/auth/senha';
 
 /** Um vínculo de painel: o perfil que a pessoa tem em uma igreja. */
 export class ChurchRoleDto {
@@ -59,12 +60,23 @@ export class UserDTO {
   @MinLength(5)
   fullName: string;
 
+  /**
+   * A senha escolhida no cadastro público. Ausente, o cadastro é o do painel,
+   * que continua com a senha padrão. Na edição ela é ignorada: quem troca senha
+   * é `POST /auth/password/*`.
+   */
   @ApiProperty({
-    example: '123456',
-    description: 'Senha',
+    example: 'uma frase fácil de lembrar',
+    description: 'Senha escolhida no cadastro',
   })
   @IsString()
   @IsOptional()
+  @MinLength(SENHA_MINIMA, {
+    message: `A senha precisa de pelo menos ${SENHA_MINIMA} caracteres`,
+  })
+  @MaxLength(SENHA_MAXIMA, {
+    message: `A senha pode ter no máximo ${SENHA_MAXIMA} caracteres`,
+  })
   password?: string;
 
   @ApiProperty({

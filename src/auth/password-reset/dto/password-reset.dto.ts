@@ -50,3 +50,17 @@ export class ResetPasswordDto {
   @MaxLength(72, { message: 'A senha pode ter no máximo 72 caracteres' })
   password: string;
 }
+
+/** Troca de senha de quem está logado: a atual confere antes */
+export class ChangePasswordDto {
+  @ApiProperty({ description: 'Senha atual' })
+  @IsString()
+  @MaxLength(72)
+  currentPassword: string;
+
+  @ApiProperty({ example: 'senha-nova-2026', description: 'Nova senha' })
+  @IsString()
+  @MinLength(8, { message: 'A senha precisa de pelo menos 8 caracteres' })
+  @MaxLength(72, { message: 'A senha pode ter no máximo 72 caracteres' })
+  password: string;
+}

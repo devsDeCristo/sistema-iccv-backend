@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -19,6 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { UserDTO } from './dto/user.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { UserService } from './user.service';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -27,6 +29,19 @@ import { RolesGuard } from 'src/decorators/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 import { EventService } from 'src/event/event.service';
+
+/** Foto de perfil: imagem comum de câmera ou celular, e nada mais */
+const TIPOS_DE_FOTO = ['image/jpeg', 'image/png', 'image/webp'];
+const FOTO_MAXIMA_BYTES = 5 * 1024 * 1024;
+
+function conferirFoto(file?: Express.Multer.File) {
+  if (!file) {
+    throw new BadRequestException('Envie uma foto');
+  }
+  if (!TIPOS_DE_FOTO.includes(file.mimetype)) {
+    throw new BadRequestException('A foto precisa ser JPG, PNG ou WebP');
+  }
+}
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -79,6 +94,48 @@ export class UserController {
   }
 
   @ApiOperation({ summary: 'User by id' })
+  /**
+   * O próprio cadastro, para a tela de perfil. O id vem sempre do token: não há
+   * parâmetro na rota que alguém troque para ler ou editar outra pessoa.
+   *
+   * Declaradas antes das rotas `:id` de propósito — depois delas o Nest casaria
+   * "me" como se fosse um id.
+   */
+  @ApiOperation({ summary: 'O próprio cadastro' })
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async findMe(@Req() req: any) {
+    return this.userService.findOne(req.user.userId, req.user.userId);
+  }
+
+  @ApiOperation({ summary: 'Edita o próprio cadastro' })
+  @UseGuards(JwtAuthGuard)
+  @Put('me')
+  async updateMe(@Body() dto: UpdateMeDto, @Req() req: any) {
+    return this.userService.updateMe(req.user.userId, dto);
+  }
+
+  @ApiOperation({ summary: 'Troca a própria foto de perfil' })
+  @ApiConsumes('multipart/form-data')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileInterceptor('photo', { limits: { fileSize: FOTO_MAXIMA_BYTES } }),
+  )
+  @Post('me/profile-photo')
+  async setMyProfilePhoto(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ) {
+    conferirFoto(file);
+    const { url } = await uploadImageFirebase(file, file.originalname);
+    await this.userService.setProfilePhoto(
+      req.user.userId,
+      url,
+      req.user.userId,
+    );
+    return { message: 'Foto de perfil atualizada com sucesso' };
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   async findOne(@Param('id') id: string, @Req() req: any) {
@@ -111,12 +168,19 @@ export class UserController {
     type: 'file',
   })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('photo'))
+  @UseInterceptors(
+    FileInterceptor('photo', { limits: { fileSize: FOTO_MAXIMA_BYTES } }),
+  )
   async setProfilePhoto(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
+    // antes do upload: conferindo só depois, qualquer autenticado subia arquivo
+    // para o storage com o id de outra pessoa e só então levava o 403
+    conferirFoto(file);
+    await this.userService.assertPodeTrocarFoto(req.user?.userId, id);
+
     // reaproveita o util para não duplicar o cacheControl e o versionamento da URL
     const { url } = await uploadImageFirebase(file, file.originalname);
 

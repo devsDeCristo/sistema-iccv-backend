@@ -31,6 +31,12 @@ import {
 
 import { aplicarConsentimento, separarSensiveis } from './dados-sensiveis';
 import { ContextoDoAceite, registrarAceite } from 'src/terms/terms.service';
+import { conferirSenhaAtual, hashDaSenha } from 'src/auth/senha';
+import { UpdateMeDto } from './dto/update-me.dto';
+
+/** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
+const SENHA_PADRAO =
+  '$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW';
 
 @Injectable()
 export class UserService {
@@ -70,8 +76,11 @@ export class UserService {
           // o cadastro é público: a permissão nunca vem do corpo da requisição.
           // Promoção de perfil só acontece pelo painel (PUT /users/:id por admin).
           role: Role.USER,
-          password:
-            '$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW',
+          // a senha que a pessoa escolheu no cadastro; o do painel não manda
+          // e fica com a padrão, como sempre
+          password: cadastro.password
+            ? await hashDaSenha(cadastro.password)
+            : SENHA_PADRAO,
         },
       });
 
@@ -81,9 +90,12 @@ export class UserService {
       }
 
       const payload = { username: user.cpf, sub: user.id };
+      // o hash não sai daqui: a tela guarda este objeto no navegador, e com o
+      // hash em mãos dá para tentar adivinhar a senha fora do sistema
+      const { password: _hash, ...semSenha } = user;
       return {
         access_token: this.jwtService.sign(payload),
-        user,
+        user: semSenha,
       };
     } catch (error) {
       throw new InternalServerErrorException();
@@ -225,7 +237,9 @@ export class UserService {
       },
     });
 
-    return users;
+    // o hash da senha não sai na lista: o painel vê todos os cadastros, e com
+    // os hashes em mãos daria para tentar adivinhar as senhas fora do sistema
+    return users.map(({ password: _hash, ...user }) => user);
   }
 
   async findByDocument(document: string) {
@@ -421,7 +435,76 @@ export class UserService {
    * @param requesterId usuário autenticado que disparou a edição. Quando ausente
    * (chamada interna), nenhuma restrição de permissão é aplicada.
    */
-  async update(id: string, data: UserDTO, requesterId?: string) {
+  /**
+   * O próprio cadastro, pela tela de perfil — o id é sempre o do token.
+   *
+   * Aqui a pessoa muda os dados dela e nada além: perfil de acesso, vínculos e
+   * senha não passam (a senha tem rota própria, que confere a atual). O CPF é a
+   * identidade de login e não muda por aqui. O e-mail é por onde chega a
+   * redefinição de senha: trocá-lo pede a senha atual, senão quem pegasse um
+   * navegador aberto trocaria o e-mail e, em seguida, a senha.
+   */
+  async updateMe(userId: string, dto: UpdateMeDto) {
+    const atual = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { cpf: true, email: true, password: true },
+    });
+
+    if (!atual) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    const {
+      currentPassword,
+      cpf,
+      role: _perfil,
+      churchRoles: _vinculos,
+      churchId: _lente,
+      password: _senha,
+      acceptedTerms: _aceite,
+      ...dados
+    } = dto;
+
+    if (cpf !== undefined && cpf !== atual.cpf) {
+      throw new ForbiddenException(
+        'O CPF é a sua identificação de acesso e não pode ser alterado por aqui. Fale com a organização.',
+      );
+    }
+
+    const email = dados.email?.trim();
+    if (email && email.toLowerCase() !== atual.email.trim().toLowerCase()) {
+      // sem a senha não é tentativa errada: não conta para a trava
+      if (!currentPassword) {
+        throw new BadRequestException(
+          'Para trocar o e-mail, confirme a sua senha atual',
+        );
+      }
+      await conferirSenhaAtual(userId, currentPassword, atual.password);
+    }
+
+    return this.update(userId, dados as UserDTO, userId, { peloPerfil: true });
+  }
+
+  /**
+   * Quem pode trocar a foto deste cadastro. Separado de `setProfilePhoto` para
+   * o controller perguntar antes do upload: conferir depois deixava qualquer
+   * autenticado subir arquivo para o storage em nome de outra pessoa.
+   */
+  async assertPodeTrocarFoto(requesterId: string | undefined, id: string) {
+    await this.assertCanReachUser(requesterId, id);
+    await this.assertDevAccountIsUntouchableById(requesterId, id);
+  }
+
+  /**
+   * @param opcoes.peloPerfil a chamada vem de `updateMe`, que já aplicou as
+   * regras do próprio cadastro (CPF fixo, e-mail com senha atual)
+   */
+  async update(
+    id: string,
+    data: UserDTO,
+    requesterId?: string,
+    opcoes: { peloPerfil?: boolean } = {},
+  ) {
     const userExists = await this.prisma.user.findUnique({
       where: {
         id,
@@ -449,6 +532,14 @@ export class UserService {
       // usuário comum só edita o próprio cadastro
       if (!requesterIsAdmin && requesterId !== id) {
         throw new ForbiddenException('Você só pode editar o seu cadastro');
+      }
+
+      // e só pelo perfil (`PUT /users/me`): por esta rota ele trocaria o CPF de
+      // acesso ou o e-mail de recuperação sem confirmar a senha atual
+      if (!requesterIsAdmin && !opcoes.peloPerfil) {
+        throw new ForbiddenException(
+          'Para editar o seu cadastro, use a tela de perfil',
+        );
       }
 
       // Nenhum campo da conta dev, e não só o `role`: com o e-mail trocado, um

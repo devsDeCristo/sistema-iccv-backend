@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { BCRYPT_ROUNDS, conferirSenhaAtual } from '../senha';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import * as path from 'path';
 import { PrismaService } from 'src/prisma';
@@ -24,7 +25,6 @@ const TICKET_TTL_MINUTES = 15;
 const MAX_CODE_ATTEMPTS = 5;
 /** Intervalo mínimo entre dois envios para o mesmo CPF. */
 const RESEND_COOLDOWN_SECONDS = 60;
-const BCRYPT_ROUNDS = 10;
 
 /**
  * Uma única resposta para "CPF existe", "CPF não existe" e "acabei de mandar um
@@ -236,6 +236,51 @@ export class PasswordResetService {
     return {
       message: 'Senha redefinida com sucesso. Entre com a nova senha.',
     };
+  }
+
+  /**
+   * Troca de senha de quem está logado (tela de perfil).
+   *
+   * Pede a senha atual: a sessão sozinha não prova que é o dono — pode ser um
+   * navegador esquecido aberto. A redefinição por código continua sendo o
+   * caminho de quem não lembra a atual.
+   */
+  async changePassword(userId: string, atual: string, nova: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { password: true, email: true, fullName: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Sessão inválida');
+    }
+
+    await conferirSenhaAtual(userId, atual, user.password);
+
+    if (await bcrypt.compare(nova, user.password)) {
+      throw new BadRequestException(
+        'A nova senha precisa ser diferente da atual',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(nova, BCRYPT_ROUNDS);
+
+    // o código de redefinição pendente morre junto: pedido antes da troca, ele
+    // abriria uma segunda porta para a conta
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { password: passwordHash },
+      });
+      await tx.userToken.deleteMany({
+        where: { userId, type: TOKEN_TYPE_PASSWORD_RESET },
+      });
+    });
+
+    // se não foi o dono quem trocou, é por este e-mail que ele descobre
+    await this.sendChangedEmail(user.email, user.fullName);
+
+    return { message: 'Senha alterada com sucesso.' };
   }
 
   private async discard(id: string) {
