@@ -971,11 +971,16 @@ model EventProduct {
   name        String
   description String?
   price       Float
-  /// Foto como data URL (`data:image/webp;base64,...`), gravada no próprio
-  /// banco. Chega reduzida pelo front e tem teto de tamanho no servidor: é
-  /// devolvida inteira em toda abertura do evento. Fica fora do log de
-  /// atividades (`REDACTED_FIELDS`), que registra só que ela mudou.
-  image       String?
+  /// Até 5 fotos (`MAXIMO_DE_FOTOS`), a primeira é a capa. Cada uma é uma
+  /// data URL (`data:image/webp;base64,...`) gravada no próprio banco: chega
+  /// reduzida pelo front e tem teto de tamanho no servidor. Ficam fora do log
+  /// de atividades (`REDACTED_FIELDS`), que registra só que mudaram.
+  ///
+  /// ponytail: base64 no banco, devolvido inteiro em toda abertura do evento —
+  /// com 5 fotos por produto o peso da página cresce junto. O passo escalável é
+  /// gravar no Storage e guardar só a URL, como a logo e a capa do evento; a
+  /// coluna já é uma lista de strings, então a troca não muda o formato.
+  images      String[]              @default([])
   variants    EventProductVariant[]
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt

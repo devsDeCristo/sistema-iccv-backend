@@ -18,6 +18,9 @@ export const STATUS_QUE_LIBERAM_ESTOQUE: PaymentStatus[] = [
  */
 export const TAMANHO_MAXIMO_DA_FOTO = 700_000;
 
+/** Fotos por produto; a primeira é a capa */
+export const MAXIMO_DE_FOTOS = 5;
+
 const FORMATO_DA_FOTO =
   /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 
@@ -35,7 +38,7 @@ export type ProdutoRecebido = {
   name: string;
   description?: string | null;
   price: number;
-  image?: string | null;
+  images?: string[] | null;
   variants: VarianteRecebida[];
 };
 
@@ -61,6 +64,29 @@ export function validarFoto(image?: string | null): string | null | undefined {
   }
 
   return image;
+}
+
+/**
+ * As fotos de um produto: `undefined` não mexe, `null` ou lista vazia remove
+ * todas. Cada uma passa por `validarFoto`, e as vazias caem fora — a ordem é a
+ * de quem cadastrou, e a primeira vira a capa.
+ */
+export function validarFotos(images?: string[] | null): string[] | undefined {
+  if (images === undefined) return undefined;
+  if (images === null) return [];
+
+  if (!Array.isArray(images)) {
+    throw new BadRequestException('As fotos do produto precisam vir em lista');
+  }
+  if (images.length > MAXIMO_DE_FOTOS) {
+    throw new BadRequestException(
+      `Um produto pode ter até ${MAXIMO_DE_FOTOS} fotos`,
+    );
+  }
+
+  return images
+    .map((foto) => validarFoto(foto))
+    .filter((foto): foto is string => !!foto);
 }
 
 /** Regras de cadastro que o class-validator não expressa sozinho. */

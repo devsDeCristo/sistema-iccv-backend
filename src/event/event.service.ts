@@ -33,7 +33,7 @@ import {
   conferirEstoque,
   disponivel,
   montarPedido,
-  validarFoto,
+  validarFotos,
   validarProdutos,
 } from './event-products';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
@@ -1414,7 +1414,7 @@ export class EventService {
             data: {
               ...dados,
               eventId,
-              image: validarFoto(produto.image) ?? null,
+              images: validarFotos(produto.images) ?? [],
               variants: {
                 create: produto.variants.map((variante) => ({
                   name: variante.name.trim(),
@@ -1438,12 +1438,12 @@ export class EventService {
         throw new BadRequestException('Produto não pertence a este evento');
       }
 
-      const foto = validarFoto(produto.image);
+      const fotos = validarFotos(produto.images);
 
       ops.push(
         this.prisma.eventProduct.update({
           where: { id: atual.id },
-          data: { ...dados, ...(foto !== undefined && { image: foto }) },
+          data: { ...dados, ...(fotos !== undefined && { images: fotos }) },
         }),
       );
 
@@ -1656,7 +1656,7 @@ export class EventService {
     // antes de qualquer escrita: produto mal cadastrado não pode deixar um
     // evento pela metade, nem subir como erro 500 lá de dentro da transação
     validarProdutos(data.products ?? []);
-    (data.products ?? []).forEach((produto) => validarFoto(produto.image));
+    (data.products ?? []).forEach((produto) => validarFotos(produto.images));
 
     try {
       data.endDate = new Date(data.endDate);
@@ -1695,7 +1695,7 @@ export class EventService {
                   name: produto.name.trim(),
                   description: produto.description?.trim() || null,
                   price: produto.price,
-                  image: validarFoto(produto.image) ?? null,
+                  images: validarFotos(produto.images) ?? [],
                   variants: {
                     create: produto.variants.map((variante) => ({
                       name: variante.name.trim(),

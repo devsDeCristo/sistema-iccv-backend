@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { EventStatus, EventType, MinorApprovalStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -102,15 +103,18 @@ class ProductDto {
   price: number;
 
   @ApiProperty({
-    example: 'data:image/webp;base64,UklGR...',
+    example: ['data:image/webp;base64,UklGR...'],
     description:
-      'Foto como data URL base64 (PNG, JPG ou WebP). Ausente mantém a atual; nulo ou vazio remove.',
+      'Até 5 fotos como data URL base64 (PNG, JPG ou WebP); a primeira é a capa. Ausente mantém as atuais; nulo ou lista vazia remove todas.',
     required: false,
     nullable: true,
+    type: [String],
   })
   @IsOptional()
-  @IsString()
-  image?: string | null;
+  @IsArray()
+  @ArrayMaxSize(5, { message: 'Um produto pode ter até 5 fotos' })
+  @IsString({ each: true })
+  images?: string[] | null;
 
   @IsArray()
   @ArrayMinSize(1)

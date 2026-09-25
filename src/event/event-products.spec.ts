@@ -6,6 +6,8 @@ import {
   disponivel,
   montarPedido,
   validarFoto,
+  validarFotos,
+  MAXIMO_DE_FOTOS,
   validarProdutos,
 } from './event-products';
 
@@ -138,5 +140,34 @@ describe('conferirEstoque', () => {
   it('calcula o disponível sem ficar negativo', () => {
     expect(disponivel(5, 7)).toBe(0);
     expect(disponivel(null, 7)).toBeNull();
+  });
+});
+
+describe('validarFotos', () => {
+  const foto = 'data:image/webp;base64,AAAA';
+
+  it('distingue não mexer, remover todas e trocar', () => {
+    expect(validarFotos(undefined)).toBeUndefined();
+    expect(validarFotos(null)).toEqual([]);
+    expect(validarFotos([])).toEqual([]);
+    expect(validarFotos([foto, foto])).toEqual([foto, foto]);
+  });
+
+  it('aceita até 5 fotos e recusa a sexta', () => {
+    expect(validarFotos(Array(MAXIMO_DE_FOTOS).fill(foto))).toHaveLength(5);
+    expect(() => validarFotos(Array(MAXIMO_DE_FOTOS + 1).fill(foto))).toThrow(
+      /até 5 fotos/,
+    );
+  });
+
+  it('uma foto ruim no meio recusa a lista inteira', () => {
+    expect(() => validarFotos([foto, 'javascript:alert(1)'])).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('vazias caem fora, e a ordem (capa primeiro) é mantida', () => {
+    const outra = 'data:image/png;base64,BBBB';
+    expect(validarFotos([outra, '', foto])).toEqual([outra, foto]);
   });
 });
