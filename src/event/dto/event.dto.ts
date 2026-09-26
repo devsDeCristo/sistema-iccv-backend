@@ -60,6 +60,38 @@ class GroupRoleDto {
   @IsString()
   link?: string;
 
+  @ApiProperty({
+    required: false,
+    default: true,
+    description:
+      'Desligado, o grupo não recebe inscrição nem lista de espera. Ausente na edição não mexe.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    example: '2026-10-12T11:00:00.000Z',
+    description:
+      'A partir de quando o grupo recebe inscrições. Nulo: desde já. Ausente na edição não mexe.',
+  })
+  @IsOptional()
+  @IsDateString()
+  opensAt?: string | null;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    example: '2026-10-20T02:59:00.000Z',
+    description:
+      'Até quando o grupo recebe inscrições. Nulo: sem fim. Ausente na edição não mexe.',
+  })
+  @IsOptional()
+  @IsDateString()
+  closesAt?: string | null;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RoleDto)

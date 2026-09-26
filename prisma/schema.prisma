@@ -340,6 +340,14 @@ model GroupRoles {
   roles    RolesRegistration[]
   link     String?
   news     NewsOnGroupRoles[]
+  /// Desligado, o grupo não recebe inscrição nem lista de espera. Quem já está
+  /// dentro continua; o admin pelo painel ainda inscreve.
+  active   Boolean             @default(true)
+  /// A partir de quando recebe inscrições. Nulo: desde já.
+  opensAt  DateTime?
+  /// Até quando recebe. Nulo: sem fim. Dois grupos com janelas seguidas são
+  /// lotes que trocam sozinhos.
+  closesAt DateTime?
 
   @@index([eventId])
   @@map("group_roles")

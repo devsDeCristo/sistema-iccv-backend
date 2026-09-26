@@ -37,6 +37,7 @@ import {
   validarFotos,
   validarProdutos,
 } from './event-products';
+import { grupoFechado, janelaRecebida } from './event-groups';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
   ModuloDoEvento,
@@ -181,6 +182,14 @@ export class EventService {
 
     let aceitouTermo = false;
 
+    /**
+     * Grupo fechado — desligado, antes de abrir ou depois de encerrar — barra
+     * quem se inscreve sozinho. O admin inscrevendo outra pessoa pelo painel
+     * passa, e a lista de espera andando também: é assim que alguém entra num
+     * grupo interno, ou na vaga que abriu depois do prazo.
+     */
+    const respeitarJanela = options?.requesterId === userId;
+
     // evento em teste não recebe inscrição de quem não enxerga o evento: sem
     // isso bastaria ter o id em mãos para entrar num evento ainda em ensaio
     if (options?.requesterId) {
@@ -202,6 +211,7 @@ export class EventService {
             eventId,
             registrationRoleIds,
             aceitouTermo,
+            respeitarJanela,
           )
         : await this.prisma.$transaction(
             async (trx) =>
@@ -211,6 +221,7 @@ export class EventService {
                 eventId,
                 registrationRoleIds,
                 aceitouTermo,
+                respeitarJanela,
               ),
             { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 },
           );
@@ -509,6 +520,8 @@ export class EventService {
     registrationRoleIds: string[],
     /** aceite do termo do evento, já conferido por quem chamou */
     aceitouTermo = false,
+    /** grupo fechado recusa a inscrição; ver `registerUserInEvent` */
+    respeitarJanela = false,
   ) {
     //-------------------------- verificações iniciais --------------------------//
     // 1️⃣ Verifica usuário e evento (em paralelo)
@@ -565,6 +578,14 @@ export class EventService {
       throw new BadRequestException(
         'As regras devem pertencer a grupos diferentes',
       );
+    }
+
+    // antes da vaga: grupo fechado não recebe nem na lista de espera
+    if (respeitarJanela) {
+      for (const role of roles) {
+        const motivo = grupoFechado(role.group);
+        if (motivo) throw new BadRequestException(motivo);
+      }
     }
 
     // 4️⃣ Busca inscrições e waitlist existentes em UMA query lógica
@@ -1720,6 +1741,7 @@ export class EventService {
                   name: gr.name,
                   capacity: gr.capacity,
                   link: this.normalizeGroupLink(gr.link),
+                  ...janelaRecebida(gr),
                   roles: {
                     create: gr.roles.map((r) => ({
                       price: r.price,
@@ -2430,6 +2452,7 @@ export class EventService {
                 name: group.name,
                 capacity: group.capacity,
                 link: this.normalizeGroupLink(group.link),
+                ...janelaRecebida(group),
               },
             }),
           );
@@ -2439,6 +2462,7 @@ export class EventService {
               name: group.name,
               capacity: group.capacity,
               link: this.normalizeGroupLink(group.link),
+              ...janelaRecebida(group),
               eventId: id,
             },
           });
