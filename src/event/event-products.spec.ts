@@ -9,7 +9,8 @@ import {
   validarFotos,
   MAXIMO_DE_FOTOS,
   podeComprarNaLoja,
-  conferirEstoqueAoReativar,
+  emTransacaoSerializavel,
+  reativarCompras,
   validarProdutos,
 } from './event-products';
 
@@ -194,39 +195,162 @@ describe('podeComprarNaLoja', () => {
   });
 });
 
-describe('conferirEstoqueAoReativar', () => {
-  // o `tx` só precisa das duas consultas que a conferência faz
-  const tx = (vendidas: number, stock: number | null = 10) =>
-    ({
-      paymentProductItem: {
-        findMany: async () => [
-          {
-            variantId: 'v1',
-            quantity: 2,
-            variant: { name: 'P', stock, product: { name: 'Camisa' } },
-          },
-        ],
-        groupBy: async () => [
-          { variantId: 'v1', _sum: { quantity: vendidas } },
-        ],
-      },
-    } as any);
-
-  it('recusa quando as unidades foram vendidas no meio tempo', async () => {
-    await expect(conferirEstoqueAoReativar(tx(9), ['p1'])).rejects.toThrow(
-      'Camisa (P): restam só 1 unidade',
-    );
-    await expect(conferirEstoqueAoReativar(tx(10), ['p1'])).rejects.toThrow(
-      'Camisa (P) esgotou',
-    );
+describe('reativarCompras', () => {
+  const item = (
+    id: string,
+    variantId: string,
+    quantity: number,
+    stock: number | null,
+  ) => ({
+    id,
+    variantId,
+    quantity,
+    unitPrice: 50,
+    variant: { name: 'P', stock, product: { name: 'Camisa' } },
   });
 
-  it('libera quando ainda cabe, ou sem limite de estoque', async () => {
-    await expect(conferirEstoqueAoReativar(tx(8), ['p1'])).resolves.toBe(
-      undefined,
+  // o `tx` falso guarda o que a reativação escreveu
+  const montarTx = (pagamentos: any[], vendidos: Record<string, number>) => {
+    const escritas = {
+      removidos: [] as string[],
+      valores: {} as Record<string, number>,
+    };
+    const tx = {
+      payment: {
+        findMany: async () => pagamentos,
+        update: async ({ where, data }: any) => {
+          escritas.valores[where.id] = data.amount;
+        },
+      },
+      paymentProductItem: {
+        groupBy: async () =>
+          Object.entries(vendidos).map(([variantId, quantidade]) => ({
+            variantId,
+            _sum: { quantity: quantidade },
+          })),
+        deleteMany: async ({ where }: any) => {
+          escritas.removidos.push(...where.id.in);
+        },
+      },
+    } as any;
+    return { tx, escritas };
+  };
+
+  it('o ingresso volta sempre: a camisa esgotada sai e o valor cai junto', async () => {
+    const { tx, escritas } = montarTx(
+      [
+        {
+          id: 'p1',
+          amount: 150,
+          roleRegistrationId: 'r1',
+          productItems: [item('i1', 'v1', 2, 10)],
+        },
+      ],
+      { v1: 10 },
     );
+
+    const resultado = await reativarCompras(tx, ['p1']);
+
+    expect(resultado.reativados).toEqual(['p1']);
+    expect(resultado.itensRemovidos).toEqual(['i1']);
+    expect(escritas.valores.p1).toBe(50);
+  });
+
+  it('compra só de produto sem nada que caiba continua cancelada, intacta', async () => {
+    const { tx, escritas } = montarTx(
+      [
+        {
+          id: 'p1',
+          amount: 100,
+          roleRegistrationId: null,
+          productItems: [item('i1', 'v1', 2, 10)],
+        },
+      ],
+      { v1: 9 },
+    );
+
+    const resultado = await reativarCompras(tx, ['p1']);
+
+    expect(resultado.reativados).toEqual([]);
+    expect(resultado.recusa).toBe('Camisa (P): restam só 1 unidade');
+    expect(escritas.removidos).toEqual([]);
+  });
+
+  it('compra só de produto volta com o que ainda cabe', async () => {
+    const { tx, escritas } = montarTx(
+      [
+        {
+          id: 'p1',
+          amount: 150,
+          roleRegistrationId: null,
+          productItems: [item('i1', 'v1', 2, 10), item('i2', 'v2', 1, null)],
+        },
+      ],
+      { v1: 10, v2: 500 },
+    );
+
+    const resultado = await reativarCompras(tx, ['p1']);
+
+    expect(resultado.reativados).toEqual(['p1']);
+    expect(escritas.removidos).toEqual(['i1']);
+    expect(escritas.valores.p1).toBe(50);
+  });
+
+  it('dois pagamentos disputando a última unidade: só o primeiro leva', async () => {
+    const { tx, escritas } = montarTx(
+      [
+        {
+          id: 'p1',
+          amount: 50,
+          roleRegistrationId: 'r1',
+          productItems: [item('i1', 'v1', 1, 10)],
+        },
+        {
+          id: 'p2',
+          amount: 50,
+          roleRegistrationId: 'r2',
+          productItems: [item('i2', 'v1', 1, 10)],
+        },
+      ],
+      { v1: 9 },
+    );
+
+    const resultado = await reativarCompras(tx, ['p1', 'p2']);
+
+    expect(resultado.reativados).toEqual(['p1', 'p2']);
+    expect(escritas.removidos).toEqual(['i2']);
+  });
+});
+
+describe('emTransacaoSerializavel', () => {
+  it('tenta de novo no conflito de serialização', async () => {
+    let chamadas = 0;
+    const prisma = {
+      $transaction: async (fn: any) => {
+        chamadas++;
+        if (chamadas === 1) throw { code: 'P2034' };
+        return fn({});
+      },
+    } as any;
+
     await expect(
-      conferirEstoqueAoReativar(tx(500, null), ['p1']),
-    ).resolves.toBe(undefined);
+      emTransacaoSerializavel(prisma, async () => 'ok'),
+    ).resolves.toBe('ok');
+    expect(chamadas).toBe(2);
+  });
+
+  it('outro erro sobe na primeira', async () => {
+    let chamadas = 0;
+    const prisma = {
+      $transaction: async () => {
+        chamadas++;
+        throw new Error('falhou');
+      },
+    } as any;
+
+    await expect(
+      emTransacaoSerializavel(prisma, async () => 'ok'),
+    ).rejects.toThrow('falhou');
+    expect(chamadas).toBe(1);
   });
 });

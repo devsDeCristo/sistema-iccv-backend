@@ -37,7 +37,8 @@ import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
 import {
   STATUS_QUE_LIBERAM_ESTOQUE,
-  conferirEstoqueAoReativar,
+  emTransacaoSerializavel,
+  reativarCompras,
 } from 'src/event/event-products';
 /**
  * Os estados que só se alcançam quando alguém declara, pela mão, que o
@@ -272,13 +273,13 @@ export class PaymentService {
 
       // estornado é dinheiro devolvido: cobrar de novo seria vender outra vez
       // o que já voltou ao estoque, sem conferir nada
-      const unpaidPayments = payments.filter(
+      const aCobrar = payments.filter(
         (p) =>
           p.status !== PaymentStatus.PAID &&
           p.status !== PaymentStatus.REFUNDED,
       );
 
-      if (!unpaidPayments.length) {
+      if (!aCobrar.length) {
         throw new BadRequestException(
           payments.some((p) => p.status === PaymentStatus.REFUNDED)
             ? 'Pagamento estornado não pode ser pago de novo. Fale com a organização do evento.'
@@ -286,14 +287,48 @@ export class PaymentService {
         );
       }
 
-      // compra cancelada devolveu as unidades: pagar de novo é pegá-las outra
-      // vez. Antes do gateway, para não abrir cobrança do que esgotou
-      // ponytail: fora de transação serializável; duas pessoas no mesmo
-      // segundo ainda podem levar a última unidade — travar aqui se aparecer
-      await conferirEstoqueAoReativar(
+      /**
+       * Compra cancelada devolveu as unidades: pagar de novo é pegá-las outra
+       * vez. Conferir e voltar para "aguardando" é uma coisa só, serializável
+       * — a compra nova lê o estoque do mesmo jeito, e das duas que disputam
+       * a última unidade só uma grava. Antes do gateway, para não abrir
+       * cobrança do que esgotou.
+       */
+      const reativacao = await emTransacaoSerializavel(
         this.prisma,
-        unpaidPayments.map((p) => p.id),
+        async (tx) => {
+          const resultado = await reativarCompras(
+            tx,
+            aCobrar.map((p) => p.id),
+          );
+          await tx.payment.updateMany({
+            where: { id: { in: resultado.reativados } },
+            data: {
+              status: PaymentStatus.WAITING,
+              method: PaymentMethod.OTHER,
+            },
+          });
+          return resultado;
+        },
       );
+
+      const itensForaDoEstoque = new Set(reativacao.itensRemovidos);
+      const unpaidPayments = aCobrar
+        .filter(
+          (p) =>
+            !STATUS_QUE_LIBERAM_ESTOQUE.includes(p.status) ||
+            reativacao.reativados.includes(p.id),
+        )
+        .map((p) => ({
+          ...p,
+          productItems: p.productItems.filter(
+            (item) => !itensForaDoEstoque.has(item.id),
+          ),
+        }));
+
+      if (!unpaidPayments.length) {
+        throw new BadRequestException(reativacao.recusa);
+      }
 
       const activeCheckouts = unpaidPayments
         .flatMap((p) => p.checkouts)
@@ -815,10 +850,6 @@ export class PaymentService {
         'Não é possível alterar um pagamento já pago, exceto para reembolso',
       );
     }
-    // tirar do cancelado ou do estornado devolve os produtos à compra
-    if (!STATUS_QUE_LIBERAM_ESTOQUE.includes(payload.status)) {
-      await conferirEstoqueAoReativar(this.prisma, [paymentId]);
-    }
     // compra avulsa de produto não tem inscrição: o evento vem do pagamento
     const eventId =
       payment.eventUserRole?.eventOnUsers?.event?.id ?? payment.eventId;
@@ -844,40 +875,51 @@ export class PaymentService {
       ).url;
     }
 
-    await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: payload.status,
-        method: payload.method,
-        // só quando a mão de alguém trouxe o dinheiro; ver `ehLancamentoManual`
-        ...(ehLancamentoManual(payment.status, payload.status) && {
-          receivedFrom: PaymentReceived.EXTERNAL,
-        }),
-        // desconto é da inscrição; compra avulsa de produto não tem onde
-        // guardar, e o update aninhado estouraria sem a relação
-        ...(payload.discountsAppliedId &&
-          payment.roleRegistrationId && {
-            eventUserRole: {
-              update: {
-                discountId: payload?.discountsAppliedId || null,
+    // tirar do cancelado ou do estornado devolve os produtos à compra: a
+    // conferência do estoque e o status novo vão juntos, como no checkout
+    await emTransacaoSerializavel(this.prisma, async (tx) => {
+      if (!STATUS_QUE_LIBERAM_ESTOQUE.includes(payload.status)) {
+        const { reativados, recusa } = await reativarCompras(tx, [paymentId]);
+        if (recusa && !reativados.length) {
+          throw new BadRequestException(recusa);
+        }
+      }
+
+      await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: payload.status,
+          method: payload.method,
+          // só quando a mão de alguém trouxe o dinheiro; ver `ehLancamentoManual`
+          ...(ehLancamentoManual(payment.status, payload.status) && {
+            receivedFrom: PaymentReceived.EXTERNAL,
+          }),
+          // desconto é da inscrição; compra avulsa de produto não tem onde
+          // guardar, e o update aninhado estouraria sem a relação
+          ...(payload.discountsAppliedId &&
+            payment.roleRegistrationId && {
+              eventUserRole: {
+                update: {
+                  discountId: payload?.discountsAppliedId || null,
+                },
               },
-            },
-          }),
-        payload: {
-          ...(typeof payment.payload === 'object' && payment.payload !== null
-            ? payment.payload
-            : {}),
-          // Só sobrescreve quando veio arquivo novo: `comprovanteFileUrl:
-          // undefined` some na serialização do Json e apagaria o comprovante
-          // já enviado em qualquer edição posterior (o reembolso, por ex.).
-          // o tipo fica salvo para o front saber renderizar sem chutar: a url
-          // gerada no upload não tem extensão
-          ...(url && {
-            comprovanteFileUrl: url,
-            comprovanteFileType: fileType,
-          }),
+            }),
+          payload: {
+            ...(typeof payment.payload === 'object' && payment.payload !== null
+              ? payment.payload
+              : {}),
+            // Só sobrescreve quando veio arquivo novo: `comprovanteFileUrl:
+            // undefined` some na serialização do Json e apagaria o comprovante
+            // já enviado em qualquer edição posterior (o reembolso, por ex.).
+            // o tipo fica salvo para o front saber renderizar sem chutar: a url
+            // gerada no upload não tem extensão
+            ...(url && {
+              comprovanteFileUrl: url,
+              comprovanteFileType: fileType,
+            }),
+          },
         },
-      },
+      });
     });
     // ivalidar os checkouts que contem esse pagamento em todos os pagamentos relacionados
     await this.prisma.$transaction(async (tx) => {

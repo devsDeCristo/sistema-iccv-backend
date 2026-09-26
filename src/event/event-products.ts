@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { PaymentStatus, Prisma } from '@prisma/client';
+import { PaymentStatus, Prisma, PrismaClient } from '@prisma/client';
 
 /**
  * Pagamentos que devolvem a unidade ao estoque. Recusado (`DECLINED`) não
@@ -209,14 +209,16 @@ export function conferirEstoque(
 
     if (restante === null || quero <= restante) continue;
 
-    const item = `${variante.productName} (${variante.name})`;
-
-    throw new BadRequestException(
-      restante === 0
-        ? `${item} esgotou`
-        : `${item}: restam só ${restante} unidade${restante === 1 ? '' : 's'}`,
-    );
+    throw new BadRequestException(faltaDeEstoque(variante, restante));
   }
+}
+
+function faltaDeEstoque(variante: VarianteComEstoque, restante: number) {
+  const item = `${variante.productName} (${variante.name})`;
+
+  return restante === 0
+    ? `${item} esgotou`
+    : `${item}: restam só ${restante} unidade${restante === 1 ? '' : 's'}`;
 }
 
 /**
@@ -242,61 +244,167 @@ export function podeComprarNaLoja(
 }
 
 /**
+ * Transação serializável com nova tentativa no conflito — a mesma trava da
+ * compra nova. Quem lê "resta 1" e grava em cima disso precisa dela: em
+ * READ COMMITTED, duas transações no mesmo segundo leem o mesmo 1.
+ */
+export async function emTransacaoSerializavel<T>(
+  prisma: PrismaClient,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  tentativas = 5,
+): Promise<T> {
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      return await prisma.$transaction(fn, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 10000,
+        timeout: 30000,
+      });
+    } catch (error: any) {
+      const conflito = error?.code === '40001' || error?.code === 'P2034';
+      if (!conflito || tentativa >= tentativas) throw error;
+    }
+  }
+}
+
+export type Reativacao = {
+  /** voltam a valer: os com ingresso, e as compras em que algo ainda coube */
+  reativados: string[];
+  /** itens tirados do pagamento por falta de estoque */
+  itensRemovidos: string[];
+  /** por que uma compra só de produto continuou cancelada */
+  recusa?: string;
+};
+
+/**
  * Compra cancelada ou estornada devolveu as unidades ao estoque. Voltar a
  * valer — pagar de novo, ou o admin mudar o status — é pegar as unidades outra
- * vez, e elas podem ter sido vendidas nesse meio tempo: confere como numa
- * compra nova. Pagamento que não está num desses status passa direto.
+ * vez, e elas podem ter sido vendidas nesse meio tempo.
+ *
+ * O que não cabe mais sai do pagamento, e o valor sai junto. O ingresso nunca
+ * fica preso por causa de uma camisa: o pagamento com ingresso volta sempre,
+ * com os produtos que ainda couberem. A compra só de produto volta se sobrar
+ * algum item; sem nenhum, continua cancelada, com os itens como estavam.
+ *
+ * Não muda o status — quem chama grava o novo, na mesma transação, que tem
+ * de ser serializável (`emTransacaoSerializavel`).
  */
-export async function conferirEstoqueAoReativar(
+export async function reativarCompras(
   tx: Prisma.TransactionClient,
   paymentIds: string[],
-) {
-  const itens = await tx.paymentProductItem.findMany({
+): Promise<Reativacao> {
+  const pagamentos = await tx.payment.findMany({
     where: {
-      paymentId: { in: paymentIds },
-      payment: { status: { in: STATUS_QUE_LIBERAM_ESTOQUE } },
+      id: { in: paymentIds },
+      status: { in: STATUS_QUE_LIBERAM_ESTOQUE },
     },
-    include: {
-      variant: {
+    select: {
+      id: true,
+      amount: true,
+      roleRegistrationId: true,
+      productItems: {
+        orderBy: { createdAt: 'asc' },
         select: {
-          name: true,
-          stock: true,
-          product: { select: { name: true } },
+          id: true,
+          variantId: true,
+          quantity: true,
+          unitPrice: true,
+          variant: {
+            select: {
+              name: true,
+              stock: true,
+              product: { select: { name: true } },
+            },
+          },
         },
       },
     },
   });
 
-  if (!itens.length) return;
-
-  const pedido = new Map<string, number>();
-  for (const item of itens) {
-    pedido.set(
-      item.variantId,
-      (pedido.get(item.variantId) ?? 0) + item.quantity,
-    );
-  }
+  const itens = pagamentos.flatMap((pagamento) => pagamento.productItems);
 
   // os próprios itens não entram: estão em pagamento cancelado ou estornado
-  const vendidos = await tx.paymentProductItem.groupBy({
-    by: ['variantId'],
-    where: {
-      variantId: { in: [...pedido.keys()] },
-      payment: { status: { notIn: STATUS_QUE_LIBERAM_ESTOQUE } },
-    },
-    _sum: { quantity: true },
-  });
+  const vendidos = itens.length
+    ? await tx.paymentProductItem.groupBy({
+        by: ['variantId'],
+        where: {
+          variantId: { in: [...new Set(itens.map((item) => item.variantId))] },
+          payment: { status: { notIn: STATUS_QUE_LIBERAM_ESTOQUE } },
+        },
+        _sum: { quantity: true },
+      })
+    : [];
 
-  conferirEstoque(
-    itens.map((item) => ({
-      id: item.variantId,
-      name: item.variant.name,
-      stock: item.variant.stock,
-      productName: item.variant.product.name,
-    })),
-    new Map(
-      vendidos.map((linha) => [linha.variantId, linha._sum.quantity ?? 0]),
-    ),
-    pedido,
-  );
+  const restantes = new Map<string, number | null>();
+  for (const item of itens) {
+    const vendido =
+      vendidos.find((linha) => linha.variantId === item.variantId)?._sum
+        .quantity ?? 0;
+    restantes.set(item.variantId, disponivel(item.variant.stock, vendido));
+  }
+
+  const reativacao: Reativacao = { reativados: [], itensRemovidos: [] };
+
+  for (const pagamento of pagamentos) {
+    const fora: typeof pagamento.productItems = [];
+    // o que este pagamento pega, para devolver se ele não voltar
+    const pegos = new Map<string, number>();
+
+    for (const item of pagamento.productItems) {
+      const resta = restantes.get(item.variantId) ?? null;
+
+      if (resta === null) continue;
+      if (item.quantity > resta) {
+        fora.push(item);
+        continue;
+      }
+
+      restantes.set(item.variantId, resta - item.quantity);
+      pegos.set(
+        item.variantId,
+        (pegos.get(item.variantId) ?? 0) + item.quantity,
+      );
+    }
+
+    const sobrou = pagamento.productItems.length > fora.length;
+
+    if (!pagamento.roleRegistrationId && !sobrou) {
+      const item = fora[0];
+      reativacao.recusa ??= faltaDeEstoque(
+        {
+          id: item.variantId,
+          name: item.variant.name,
+          stock: item.variant.stock,
+          productName: item.variant.product.name,
+        },
+        restantes.get(item.variantId) ?? 0,
+      );
+      for (const [variantId, quantidade] of pegos) {
+        restantes.set(variantId, (restantes.get(variantId) ?? 0) + quantidade);
+      }
+      continue;
+    }
+
+    if (fora.length) {
+      const semEmCentavos = fora.reduce(
+        (soma, item) => soma + Math.round(item.unitPrice * 100) * item.quantity,
+        0,
+      );
+
+      await tx.paymentProductItem.deleteMany({
+        where: { id: { in: fora.map((item) => item.id) } },
+      });
+      await tx.payment.update({
+        where: { id: pagamento.id },
+        data: {
+          amount: (Math.round(pagamento.amount * 100) - semEmCentavos) / 100,
+        },
+      });
+      reativacao.itensRemovidos.push(...fora.map((item) => item.id));
+    }
+
+    reativacao.reativados.push(pagamento.id);
+  }
+
+  return reativacao;
 }
