@@ -5,10 +5,11 @@ import {
 } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { PDFDocument } from 'pdf-lib';
 import { PrismaService } from '../prisma';
 import { embutirFonte } from '../pdf/fonte';
 import { prepararImagens, reduzir } from '../pdf/imagens';
-import { novaPagina, prepararNavegador } from '../pdf/navegador';
+import { novaPagina, prepararNavegador, servirImagens } from '../pdf/navegador';
 import {
   ArtesDoCracha,
   htmlDosCrachas,
@@ -20,6 +21,14 @@ import { GerarCrachasDto } from './dto/gerar-crachas.dto';
 
 /** Teto por geração: acima disso é engano, não um evento de verdade */
 const LIMITE_DE_CRACHAS = 3000;
+
+/**
+ * Folhas por impressão (4 crachás cada). O Chrome segura tudo o que montou
+ * até o `pdf()` terminar, e a memória crescia com o número de crachás: 3000 de
+ * uma vez eram +550 MB. Em partes, o pico é o de uma parte, qualquer que seja
+ * o total — e cada parte cabe folgada no timeout do `pdf()`.
+ */
+const FOLHAS_POR_PARTE = 50;
 
 /**
  * As artes fixas do crachá, lidas do disco e reduzidas uma vez por processo.
@@ -154,17 +163,40 @@ export class CrachaService {
           : undefined,
       };
 
-      const html = await embutirFonte(
-        htmlDosCrachas(montarFolhas(secoes, brancos), artes),
-        URL_DA_FONTE,
-      );
+      // cada imagem vai uma vez só, e não em cada crachá — ver `servirImagens`
+      const enderecos = await servirImagens(page, artes);
+      const folhas = montarFolhas(secoes, brancos);
+      const partes: Uint8Array[] = [];
 
-      await page.setContent(html, { waitUntil: 'load' });
-      await page.evaluate(() => document.fonts.ready);
-      const pdf = await page.pdf({
-        printBackground: true,
-        preferCSSPageSize: true,
-      });
+      for (let i = 0; i < folhas.length; i += FOLHAS_POR_PARTE) {
+        const html = await embutirFonte(
+          htmlDosCrachas(folhas.slice(i, i + FOLHAS_POR_PARTE), enderecos),
+          URL_DA_FONTE,
+        );
+
+        await page.setContent(html, { waitUntil: 'load' });
+        await page.evaluate(() => document.fonts.ready);
+        partes.push(
+          await page.pdf({
+            printBackground: true,
+            preferCSSPageSize: true,
+            // servidor lento imprimindo 200 crachás passa dos 30s do padrão
+            timeout: 120_000,
+          }),
+        );
+      }
+
+      // o crachá da linha, e o lote pequeno, saem direto, sem juntar nada
+      let pdf = partes[0];
+      if (partes.length > 1) {
+        const final = await PDFDocument.create();
+        for (const parte of partes) {
+          const doc = await PDFDocument.load(parte);
+          const copiadas = await final.copyPages(doc, doc.getPageIndices());
+          copiadas.forEach((pagina) => final.addPage(pagina));
+        }
+        pdf = await final.save();
+      }
 
       const slug = event.name
         .normalize('NFD')

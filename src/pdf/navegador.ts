@@ -28,7 +28,13 @@ function lancar() {
     .launch({
       ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        // o /dev/shm do Docker tem 64 MB; página grande estourava ali e
+        // derrubava o Chrome. Com a opção, ele usa o /tmp
+        '--disable-dev-shm-usage',
+      ],
     })
     .catch((error: Error) => {
       throw new InternalServerErrorException(
@@ -94,4 +100,58 @@ export async function novaPagina(): Promise<puppeteer.Page> {
   });
 
   return page;
+}
+
+/**
+ * Serve imagens à página por endereço curto, em vez de data URI no HTML.
+ *
+ * Imagem que se repete — o fundo, a logo e o papel de cada crachá — ia
+ * inteira, em base64, em cada cópia: 340 KB por crachá, e 100 crachás já eram
+ * 34 MB de HTML e 1,1 GB de Chrome. Com 300 o Chrome caía, e no container o
+ * limite de memória derrubava o processo inteiro, sem deixar erro no log.
+ *
+ * Aqui cada imagem vira um endereço (`https://pdf.local/fundo`) que a própria
+ * página responde, interceptando o pedido: o HTML fica com poucos KB e o
+ * Chrome busca e decodifica cada imagem uma vez só, qualquer que seja o número
+ * de cópias. Chamar antes do `setContent`. Devolve os endereços, com as mesmas
+ * chaves.
+ */
+export async function servirImagens<
+  T extends { [K in keyof T]: string | undefined },
+>(page: puppeteer.Page, imagens: T): Promise<T> {
+  const recursos = new Map<string, { contentType: string; body: Buffer }>();
+  const enderecos: Record<string, string | undefined> = {};
+
+  for (const [nome, dataUri] of Object.entries<string | undefined>(imagens)) {
+    const partes = dataUri && /^data:([^;,]+);base64,(.*)$/s.exec(dataUri);
+    if (!partes) {
+      enderecos[nome] = dataUri;
+      continue;
+    }
+    const url = `https://pdf.local/${encodeURIComponent(nome)}`;
+    recursos.set(url, {
+      contentType: partes[1],
+      body: Buffer.from(partes[2], 'base64'),
+    });
+    enderecos[nome] = url;
+  }
+
+  await page.setRequestInterception(true);
+  // a interceptação desliga o cache da página; religado, o mesmo endereço em
+  // mil `<img>` é um pedido só
+  await page.setCacheEnabled(true);
+  page.on('request', (pedido) => {
+    const recurso = recursos.get(pedido.url());
+    if (recurso) {
+      pedido.respond({
+        status: 200,
+        ...recurso,
+        headers: { 'Cache-Control': 'max-age=3600' },
+      });
+    } else {
+      pedido.continue();
+    }
+  });
+
+  return enderecos as T;
 }
