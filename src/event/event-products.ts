@@ -218,3 +218,15 @@ export function conferirEstoque(
     );
   }
 }
+
+/**
+ * Quem compra na loja é decisão do evento (`data.publicStore`): restrita, só
+ * quem tem inscrição confirmada; pública, qualquer pessoa com cadastro.
+ * Restrita é o padrão — era a única regra antes de a opção existir.
+ */
+export function podeComprarNaLoja(inscrito: boolean, dadosDoEvento: unknown) {
+  return (
+    inscrito ||
+    (dadosDoEvento as { publicStore?: unknown } | null)?.publicStore === true
+  );
+}

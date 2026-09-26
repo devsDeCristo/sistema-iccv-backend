@@ -33,6 +33,7 @@ import {
   conferirEstoque,
   disponivel,
   montarPedido,
+  podeComprarNaLoja,
   validarFotos,
   validarProdutos,
 } from './event-products';
@@ -322,17 +323,18 @@ export class EventService {
   ) {
     const variantIds = [...pedido.keys()];
 
-    const [variantes, inscricoesConfirmadas] = await Promise.all([
+    const [variantes, inscricoesConfirmadas, evento] = await Promise.all([
       tx.eventProductVariant.findMany({
         where: { id: { in: variantIds }, product: { eventId } },
         include: { product: { select: { name: true, price: true } } },
       }),
       tx.eventOnUsersRolesRegistration.count({ where: { userId, eventId } }),
+      tx.event.findUnique({ where: { id: eventId }, select: { data: true } }),
     ]);
 
-    if (!inscricoesConfirmadas) {
+    if (!podeComprarNaLoja(inscricoesConfirmadas > 0, evento?.data)) {
       throw new ForbiddenException(
-        'Só quem tem inscrição confirmada no evento pode comprar os produtos',
+        'As compras da loja deste evento são exclusivas para quem tem inscrição confirmada',
       );
     }
 
@@ -2315,6 +2317,10 @@ export class EventService {
 
     if (safeData.showQuadrante === undefined) {
       safeData.showQuadrante = dataAtual.showQuadrante;
+    }
+
+    if (safeData.publicStore === undefined) {
+      safeData.publicStore = dataAtual.publicStore;
     }
     safeData.showQuadrante = normalizarMostrarQuadrante(safeData.showQuadrante);
 

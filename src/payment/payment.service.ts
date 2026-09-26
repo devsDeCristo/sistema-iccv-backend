@@ -1172,6 +1172,22 @@ export class PaymentService {
     const churchIds =
       requesterId === userId ? null : tenantChurchIds(requester);
 
+    /**
+     * Com a loja pública, dá para comprar sem estar inscrito — e a compra
+     * precisa aparecer aqui, senão a pessoa não teria por onde pagá-la. O
+     * pagamento não tem relação com o evento no schema, por isso os ids vêm
+     * numa consulta à parte.
+     */
+    const eventosComCompraAvulsa = (
+      await this.prisma.payment.findMany({
+        where: { userId, roleRegistrationId: null, productItems: { some: {} } },
+        select: { eventId: true },
+        distinct: ['eventId'],
+      })
+    )
+      .map((pagamento) => pagamento.eventId)
+      .filter((id): id is string => !!id);
+
     const events = await this.prisma.event.findMany({
       where: {
         ...(churchIds ? { churchId: { in: churchIds } } : {}),
@@ -1192,6 +1208,9 @@ export class PaymentService {
               },
             },
           },
+          ...(eventosComCompraAvulsa.length
+            ? [{ id: { in: eventosComCompraAvulsa } }]
+            : []),
         ],
       },
       select: {

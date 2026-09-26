@@ -8,6 +8,7 @@ import {
   validarFoto,
   validarFotos,
   MAXIMO_DE_FOTOS,
+  podeComprarNaLoja,
   validarProdutos,
 } from './event-products';
 
@@ -169,5 +170,20 @@ describe('validarFotos', () => {
   it('vazias caem fora, e a ordem (capa primeiro) é mantida', () => {
     const outra = 'data:image/png;base64,BBBB';
     expect(validarFotos([outra, '', foto])).toEqual([outra, foto]);
+  });
+});
+
+describe('podeComprarNaLoja', () => {
+  it('restrita por padrão: só inscrito confirmado compra', () => {
+    expect(podeComprarNaLoja(true, {})).toBe(true);
+    expect(podeComprarNaLoja(false, {})).toBe(false);
+    expect(podeComprarNaLoja(false, null)).toBe(false);
+    expect(podeComprarNaLoja(false, { publicStore: false })).toBe(false);
+    // só o booleano abre: um "true" em texto no JSON não conta
+    expect(podeComprarNaLoja(false, { publicStore: 'true' })).toBe(false);
+  });
+
+  it('pública: qualquer pessoa com cadastro compra', () => {
+    expect(podeComprarNaLoja(false, { publicStore: true })).toBe(true);
   });
 });
