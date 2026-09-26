@@ -12,6 +12,7 @@ import { prepararImagens, reduzir } from '../pdf/imagens';
 import { novaPagina, prepararNavegador, servirImagens } from '../pdf/navegador';
 import {
   ArtesDoCracha,
+  htmlDaArte,
   htmlDosCrachas,
   montarFolhas,
   qrDoCracha,
@@ -93,6 +94,43 @@ export function aquecerImagensDoCracha(data: unknown) {
   embutirFonte('', URL_DA_FONTE).catch(() => undefined);
 }
 
+/**
+ * A arte do crachá — fundo, logos e papel —, desenhada pelo Chrome uma vez e
+ * fotografada; ver `htmlDaArte`. Em 3× a foto tem ~290 dpi no tamanho do
+ * crachá, acima da resolução do próprio fundo: não perde o detalhe que as
+ * camadas tinham.
+ */
+async function fotografarArte(artes: ArtesDoCracha): Promise<string> {
+  const page = await novaPagina();
+  try {
+    const enderecos = await servirImagens(page, artes);
+    await page.setViewport({ width: 400, height: 500, deviceScaleFactor: 3 });
+    await page.setContent(htmlDaArte(enderecos), { waitUntil: 'load' });
+
+    // só o miolo, sem a borda de corte: é a área que o fundo cobre em cada
+    // crachá, e a foto entra nela sem esticar
+    const miolo = await page.$eval('.cracha', (el) => {
+      const caixa = el.getBoundingClientRect();
+      return {
+        x: caixa.x + el.clientLeft,
+        y: caixa.y + el.clientTop,
+        width: caixa.width - 2 * el.clientLeft,
+        height: caixa.height - 2 * el.clientTop,
+      };
+    });
+    const foto = await page.screenshot({
+      type: 'jpeg',
+      quality: 90,
+      clip: miolo,
+      captureBeyondViewport: false,
+    });
+
+    return `data:image/jpeg;base64,${Buffer.from(foto).toString('base64')}`;
+  } finally {
+    await page.close();
+  }
+}
+
 @Injectable()
 export class CrachaService {
   constructor(private readonly prisma: PrismaService) {}
@@ -149,28 +187,25 @@ export class CrachaService {
       prepararNavegador(),
     ]);
 
+    const arte = await fotografarArte({
+      // capa que não baixou cai na padrão, como evento sem capa
+      fundo:
+        (capaUrl && imagens.get(`crachaFundo:${capaUrl}`)) || fixas.capaPadrao,
+      logoDaIgreja: fixas.logoDaIgreja,
+      papel: fixas.papel,
+      logoDoEvento: logoUrl ? imagens.get(`crachaLogo:${logoUrl}`) : undefined,
+    });
+
     const page = await novaPagina();
     try {
-      const artes: ArtesDoCracha = {
-        // capa que não baixou cai na padrão, como evento sem capa
-        fundo:
-          (capaUrl && imagens.get(`crachaFundo:${capaUrl}`)) ||
-          fixas.capaPadrao,
-        logoDaIgreja: fixas.logoDaIgreja,
-        papel: fixas.papel,
-        logoDoEvento: logoUrl
-          ? imagens.get(`crachaLogo:${logoUrl}`)
-          : undefined,
-      };
-
-      // cada imagem vai uma vez só, e não em cada crachá — ver `servirImagens`
-      const enderecos = await servirImagens(page, artes);
+      // a foto vai uma vez só, e não em cada crachá — ver `servirImagens`
+      const enderecos = await servirImagens(page, { arte });
       const folhas = montarFolhas(secoes, brancos);
       const partes: Uint8Array[] = [];
 
       for (let i = 0; i < folhas.length; i += FOLHAS_POR_PARTE) {
         const html = await embutirFonte(
-          htmlDosCrachas(folhas.slice(i, i + FOLHAS_POR_PARTE), enderecos),
+          htmlDosCrachas(folhas.slice(i, i + FOLHAS_POR_PARTE), enderecos.arte),
           URL_DA_FONTE,
         );
 

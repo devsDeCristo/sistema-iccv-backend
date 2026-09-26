@@ -115,9 +115,17 @@ export function montarFolhas(
   return folhas;
 }
 
-function htmlDoCracha(cracha: CrachaDoPdf, artes: ArtesDoCracha): string {
+/**
+ * A parte do crachá que é igual em todos: fundo, logos e papel rasgado.
+ *
+ * Não vai em cada crachá. O Chrome a desenha uma vez (`htmlDaArte`), o
+ * servidor fotografa, e cada crachá leva só a foto por baixo do nome e do QR.
+ * Com as quatro imagens em cada crachá, a impressão as processava de novo em
+ * cada cópia: 200 crachás levavam 9,5s para imprimir; com a foto, 0,1s. O
+ * nome e o QR continuam em vetor, que é o que precisa de nitidez.
+ */
+function camadasDaArte(artes: ArtesDoCracha): string {
   return `
-    <div class="cracha">
       <img class="fundo" src="${artes.fundo}" alt="" />
       <div class="topo">
         <img class="logo-igreja" src="${artes.logoDaIgreja}" alt="" />
@@ -125,7 +133,14 @@ function htmlDoCracha(cracha: CrachaDoPdf, artes: ArtesDoCracha): string {
           artes.logoDoEvento ? `<img src="${artes.logoDoEvento}" alt="" />` : ''
         }</div>
         <img class="papel" src="${artes.papel}" alt="" />
-      </div>
+      </div>`;
+}
+
+/** @param arte a foto de `htmlDaArte`, o fundo de todos os crachás */
+function htmlDoCracha(cracha: CrachaDoPdf, arte: string): string {
+  return `
+    <div class="cracha">
+      <img class="fundo" src="${arte}" alt="" />
       <div class="nome-area${cracha.qr ? '' : ' sem-qr'}">
         <div class="nome">${escapeHtml(cracha.nome)}</div>
         ${cracha.qr ?? ''}
@@ -133,10 +148,16 @@ function htmlDoCracha(cracha: CrachaDoPdf, artes: ArtesDoCracha): string {
     </div>`;
 }
 
-export function htmlDosCrachas(
-  folhas: FolhaDeCrachas[],
-  artes: ArtesDoCracha,
-): string {
+/**
+ * Um crachá só, sem nome nem QR, no canto da página: é ele que se fotografa
+ * para servir de arte. Mesmo CSS das folhas, então as camadas caem no mesmo
+ * lugar em que caíam em cada crachá.
+ */
+export function htmlDaArte(artes: ArtesDoCracha): string {
+  return documento(`<div class="cracha">${camadasDaArte(artes)}</div>`, false);
+}
+
+export function htmlDosCrachas(folhas: FolhaDeCrachas[], arte: string): string {
   const corpo = folhas
     .map((folha) => {
       // a folha incompleta leva lugares vazios: com `space-between`, o crachá
@@ -152,7 +173,7 @@ export function htmlDosCrachas(
           }
           <div class="grade">
             ${folha.crachas
-              .map((cracha) => htmlDoCracha(cracha, artes))
+              .map((cracha) => htmlDoCracha(cracha, arte))
               .join('')}
             ${'<div class="cracha vazio"></div>'.repeat(lugaresVazios)}
           </div>
@@ -160,11 +181,16 @@ export function htmlDosCrachas(
     })
     .join('');
 
+  return documento(corpo, true);
+}
+
+/** A arte não tem texto: sem a fonte, a foto não espera por ela */
+function documento(corpo: string, comFonte: boolean): string {
   return `<!DOCTYPE html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    ${linkDaFonte(URL_DA_FONTE)}
+    ${comFonte ? linkDaFonte(URL_DA_FONTE) : ''}
     <style>
       @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
