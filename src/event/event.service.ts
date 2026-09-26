@@ -273,10 +273,18 @@ export class EventService {
     userId: string,
     eventId: string,
     body: ProductPurchaseDto,
-    options?: { requesterId?: string; attempt?: number },
+    options?: {
+      requesterId?: string;
+      attempt?: number;
+      porOutraPessoa?: boolean;
+    },
   ) {
     const MAX_RETRIES = 5;
     const attempt = options?.attempt ?? 1;
+    // a nova tentativa não traz o `requesterId`; a resposta vem junto
+    const porOutraPessoa =
+      options?.porOutraPessoa ??
+      (!!options?.requesterId && options.requesterId !== userId);
 
     if (options?.requesterId) {
       await this.assertEventIsVisible(eventId, options.requesterId);
@@ -296,6 +304,7 @@ export class EventService {
             eventId,
             pedido,
             body.attachToRegistration ?? false,
+            porOutraPessoa,
           ),
         { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 },
       );
@@ -307,6 +316,7 @@ export class EventService {
         return this.comprarProdutos(userId, eventId, body, {
           // as travas de acesso já passaram na primeira tentativa
           attempt: attempt + 1,
+          porOutraPessoa,
         });
       }
 
@@ -320,6 +330,7 @@ export class EventService {
     eventId: string,
     pedido: Map<string, number>,
     juntoDaInscricao: boolean,
+    porOutraPessoa: boolean,
   ) {
     const variantIds = [...pedido.keys()];
 
@@ -329,10 +340,24 @@ export class EventService {
         include: { product: { select: { name: true, price: true } } },
       }),
       tx.eventOnUsersRolesRegistration.count({ where: { userId, eventId } }),
-      tx.event.findUnique({ where: { id: eventId }, select: { data: true } }),
+      tx.event.findUnique({
+        where: { id: eventId },
+        select: { data: true, status: true },
+      }),
     ]);
 
-    if (!podeComprarNaLoja(inscricoesConfirmadas > 0, evento?.data)) {
+    // desligado some da área do usuário; a rota não pode continuar vendendo
+    if (evento?.status === EventStatus.INACTIVE) {
+      throw new BadRequestException('A loja deste evento está fechada');
+    }
+
+    if (
+      !podeComprarNaLoja(
+        inscricoesConfirmadas > 0,
+        evento?.data,
+        porOutraPessoa,
+      )
+    ) {
       throw new ForbiddenException(
         'As compras da loja deste evento são exclusivas para quem tem inscrição confirmada',
       );
@@ -360,6 +385,17 @@ export class EventService {
         Math.round(variante.product.price * 100) * pedido.get(variante.id)!,
       0,
     );
+
+    /**
+     * Compra de valor zero nasce paga, sem passar pelo gateway. Na loja
+     * pública, qualquer conta nova levaria o brinde inteiro — e sem estoque
+     * definido, sem fim. Gratuito é de quem tem inscrição.
+     */
+    if (totalEmCentavos === 0 && !inscricoesConfirmadas) {
+      throw new ForbiddenException(
+        'Produtos gratuitos são exclusivos para quem tem inscrição confirmada',
+      );
+    }
 
     const ingresso = juntoDaInscricao
       ? await this.ingressoQueAceitaProdutos(tx, userId, eventId)
@@ -2510,11 +2546,22 @@ export class EventService {
 
     const deleted = await this.prisma.$transaction(
       async (tx) => {
+        /**
+         * Só os pagamentos de ingresso saem com a inscrição. A compra avulsa
+         * da loja não depende dela — e paga, é dinheiro recebido: apagar
+         * levava junto o registro e a entrega. O checkout dela também fica,
+         * senão o retorno de um link ainda aberto não acharia a quem dar baixa.
+         */
+        const dosIngressos = {
+          userId: idUser,
+          eventId: idEvent,
+          roleRegistrationId: { not: null },
+        };
         const paymentCheckouts = await tx.paymentCheckout.deleteMany({
-          where: { payment: { userId: idUser, eventId: idEvent } },
+          where: { payment: dosIngressos },
         });
         const payments = await tx.payment.deleteMany({
-          where: { userId: idUser, eventId: idEvent },
+          where: dosIngressos,
         });
         const bedroomUsers = await tx.bedroomsOnUsers.deleteMany({
           where: { userId: idUser, bedrooms: { eventId: idEvent } },
@@ -2629,6 +2676,18 @@ export class EventService {
       // nada para quem opera o painel, nem quantos inscritos impedem a exclusão
       throw new BadRequestException(
         `Este evento tem ${userCount} inscrito(s) e por isso não pode ser apagado. Remova as inscrições antes.`,
+      );
+    }
+
+    // Na loja pública compra quem não se inscreve: sem inscritos, ainda pode
+    // haver compra paga, ou com link de pagamento aberto
+    const comprasEmAberto = await this.prisma.payment.count({
+      where: { eventId: id, status: { notIn: STATUS_QUE_LIBERAM_ESTOQUE } },
+    });
+
+    if (comprasEmAberto > 0) {
+      throw new BadRequestException(
+        `Este evento tem ${comprasEmAberto} compra(s) na loja pagas ou aguardando pagamento e por isso não pode ser apagado. Cancele as pendentes antes.`,
       );
     }
 

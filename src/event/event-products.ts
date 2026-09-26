@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { PaymentStatus } from '@prisma/client';
+import { PaymentStatus, Prisma } from '@prisma/client';
 
 /**
  * Pagamentos que devolvem a unidade ao estoque. Recusado (`DECLINED`) não
@@ -224,9 +224,79 @@ export function conferirEstoque(
  * quem tem inscrição confirmada; pública, qualquer pessoa com cadastro.
  * Restrita é o padrão — era a única regra antes de a opção existir.
  */
-export function podeComprarNaLoja(inscrito: boolean, dadosDoEvento: unknown) {
+export function podeComprarNaLoja(
+  inscrito: boolean,
+  dadosDoEvento: unknown,
+  /**
+   * Compra feita pelo painel em nome de outra pessoa. A loja pública é aberta
+   * a quem compra para si; em nome de terceiro vale só para inscrito, senão
+   * o admin criaria cobrança na conta de qualquer usuário do sistema.
+   */
+  porOutraPessoa = false,
+) {
   return (
     inscrito ||
-    (dadosDoEvento as { publicStore?: unknown } | null)?.publicStore === true
+    (!porOutraPessoa &&
+      (dadosDoEvento as { publicStore?: unknown } | null)?.publicStore === true)
+  );
+}
+
+/**
+ * Compra cancelada ou estornada devolveu as unidades ao estoque. Voltar a
+ * valer — pagar de novo, ou o admin mudar o status — é pegar as unidades outra
+ * vez, e elas podem ter sido vendidas nesse meio tempo: confere como numa
+ * compra nova. Pagamento que não está num desses status passa direto.
+ */
+export async function conferirEstoqueAoReativar(
+  tx: Prisma.TransactionClient,
+  paymentIds: string[],
+) {
+  const itens = await tx.paymentProductItem.findMany({
+    where: {
+      paymentId: { in: paymentIds },
+      payment: { status: { in: STATUS_QUE_LIBERAM_ESTOQUE } },
+    },
+    include: {
+      variant: {
+        select: {
+          name: true,
+          stock: true,
+          product: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  if (!itens.length) return;
+
+  const pedido = new Map<string, number>();
+  for (const item of itens) {
+    pedido.set(
+      item.variantId,
+      (pedido.get(item.variantId) ?? 0) + item.quantity,
+    );
+  }
+
+  // os próprios itens não entram: estão em pagamento cancelado ou estornado
+  const vendidos = await tx.paymentProductItem.groupBy({
+    by: ['variantId'],
+    where: {
+      variantId: { in: [...pedido.keys()] },
+      payment: { status: { notIn: STATUS_QUE_LIBERAM_ESTOQUE } },
+    },
+    _sum: { quantity: true },
+  });
+
+  conferirEstoque(
+    itens.map((item) => ({
+      id: item.variantId,
+      name: item.variant.name,
+      stock: item.variant.stock,
+      productName: item.variant.product.name,
+    })),
+    new Map(
+      vendidos.map((linha) => [linha.variantId, linha._sum.quantity ?? 0]),
+    ),
+    pedido,
   );
 }

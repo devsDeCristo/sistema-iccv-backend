@@ -35,6 +35,10 @@ import { randomUUID } from 'crypto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
+import {
+  STATUS_QUE_LIBERAM_ESTOQUE,
+  conferirEstoqueAoReativar,
+} from 'src/event/event-products';
 /**
  * Os estados que só se alcançam quando alguém declara, pela mão, que o
  * dinheiro chegou ou está a caminho: baixa direta e comprovante anexado.
@@ -266,15 +270,30 @@ export class PaymentService {
         throw new NotFoundException('No registrations found for payment');
       }
 
+      // estornado é dinheiro devolvido: cobrar de novo seria vender outra vez
+      // o que já voltou ao estoque, sem conferir nada
       const unpaidPayments = payments.filter(
-        (p) => p.status !== PaymentStatus.PAID,
+        (p) =>
+          p.status !== PaymentStatus.PAID &&
+          p.status !== PaymentStatus.REFUNDED,
       );
 
       if (!unpaidPayments.length) {
         throw new BadRequestException(
-          'Alguns itens possuem pagamentos em andamento. Por favor, atualize a página.',
+          payments.some((p) => p.status === PaymentStatus.REFUNDED)
+            ? 'Pagamento estornado não pode ser pago de novo. Fale com a organização do evento.'
+            : 'Alguns itens possuem pagamentos em andamento. Por favor, atualize a página.',
         );
       }
+
+      // compra cancelada devolveu as unidades: pagar de novo é pegá-las outra
+      // vez. Antes do gateway, para não abrir cobrança do que esgotou
+      // ponytail: fora de transação serializável; duas pessoas no mesmo
+      // segundo ainda podem levar a última unidade — travar aqui se aparecer
+      await conferirEstoqueAoReativar(
+        this.prisma,
+        unpaidPayments.map((p) => p.id),
+      );
 
       const activeCheckouts = unpaidPayments
         .flatMap((p) => p.checkouts)
@@ -795,6 +814,10 @@ export class PaymentService {
       throw new BadRequestException(
         'Não é possível alterar um pagamento já pago, exceto para reembolso',
       );
+    }
+    // tirar do cancelado ou do estornado devolve os produtos à compra
+    if (!STATUS_QUE_LIBERAM_ESTOQUE.includes(payload.status)) {
+      await conferirEstoqueAoReativar(this.prisma, [paymentId]);
     }
     // compra avulsa de produto não tem inscrição: o evento vem do pagamento
     const eventId =

@@ -9,6 +9,7 @@ import {
   validarFotos,
   MAXIMO_DE_FOTOS,
   podeComprarNaLoja,
+  conferirEstoqueAoReativar,
   validarProdutos,
 } from './event-products';
 
@@ -185,5 +186,47 @@ describe('podeComprarNaLoja', () => {
 
   it('pública: qualquer pessoa com cadastro compra', () => {
     expect(podeComprarNaLoja(false, { publicStore: true })).toBe(true);
+  });
+
+  it('em nome de outra pessoa, só para inscrito — mesmo na pública', () => {
+    expect(podeComprarNaLoja(false, { publicStore: true }, true)).toBe(false);
+    expect(podeComprarNaLoja(true, { publicStore: true }, true)).toBe(true);
+  });
+});
+
+describe('conferirEstoqueAoReativar', () => {
+  // o `tx` só precisa das duas consultas que a conferência faz
+  const tx = (vendidas: number, stock: number | null = 10) =>
+    ({
+      paymentProductItem: {
+        findMany: async () => [
+          {
+            variantId: 'v1',
+            quantity: 2,
+            variant: { name: 'P', stock, product: { name: 'Camisa' } },
+          },
+        ],
+        groupBy: async () => [
+          { variantId: 'v1', _sum: { quantity: vendidas } },
+        ],
+      },
+    } as any);
+
+  it('recusa quando as unidades foram vendidas no meio tempo', async () => {
+    await expect(conferirEstoqueAoReativar(tx(9), ['p1'])).rejects.toThrow(
+      'Camisa (P): restam só 1 unidade',
+    );
+    await expect(conferirEstoqueAoReativar(tx(10), ['p1'])).rejects.toThrow(
+      'Camisa (P) esgotou',
+    );
+  });
+
+  it('libera quando ainda cabe, ou sem limite de estoque', async () => {
+    await expect(conferirEstoqueAoReativar(tx(8), ['p1'])).resolves.toBe(
+      undefined,
+    );
+    await expect(
+      conferirEstoqueAoReativar(tx(500, null), ['p1']),
+    ).resolves.toBe(undefined);
   });
 });
