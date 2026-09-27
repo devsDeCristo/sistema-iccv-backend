@@ -25,11 +25,20 @@ const quando = (data: Date) =>
     })
     .replace(', ', ' às ');
 
-/** Por que o grupo não recebe inscrição agora; `null` quando recebe. */
+/**
+ * Por que o grupo não recebe inscrição agora; `null` quando recebe.
+ *
+ * Sem data de encerramento no grupo, a inscrição vai até o fim do evento
+ * (`fimDoEvento`): depois disso não há mais do que participar. A data do grupo,
+ * quando existe, manda — mais cedo ou mais tarde que o fim do evento.
+ */
 export function grupoFechado(
   grupo: JanelaDoGrupo,
   agora = new Date(),
+  fimDoEvento?: Date | null,
 ): string | null {
+  const encerramento = grupo.closesAt ?? fimDoEvento ?? null;
+
   if (!grupo.active) {
     return `O grupo "${grupo.name}" não está recebendo inscrições`;
   }
@@ -38,9 +47,9 @@ export function grupoFechado(
       grupo.opensAt,
     )}`;
   }
-  if (grupo.closesAt && agora >= grupo.closesAt) {
+  if (encerramento && agora >= encerramento) {
     return `As inscrições do grupo "${grupo.name}" encerraram em ${quando(
-      grupo.closesAt,
+      encerramento,
     )}`;
   }
   return null;

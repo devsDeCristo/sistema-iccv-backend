@@ -46,6 +46,30 @@ describe('grupoFechado', () => {
   });
 });
 
+describe('grupoFechado — fim do evento', () => {
+  const fimDoEvento = new Date('2026-10-12T21:00:00.000Z');
+
+  it('sem data no grupo, encerra no fim do evento', () => {
+    expect(
+      grupoFechado(
+        grupo(),
+        new Date(fimDoEvento.getTime() - 1000),
+        fimDoEvento,
+      ),
+    ).toBeNull();
+    expect(grupoFechado(grupo(), fimDoEvento, fimDoEvento)).toBe(
+      'As inscrições do grupo "Jovens" encerraram em 12/10 às 18:00',
+    );
+  });
+
+  it('a data do grupo manda, mesmo depois do fim do evento', () => {
+    const depois = new Date(fimDoEvento.getTime() + 86400000);
+    expect(
+      grupoFechado(grupo({ closesAt: depois }), fimDoEvento, fimDoEvento),
+    ).toBeNull();
+  });
+});
+
 describe('janelaRecebida', () => {
   it('ausente não mexe; vazio apaga a data', () => {
     expect(janelaRecebida({ name: 'Jovens' })).toEqual({

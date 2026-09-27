@@ -583,7 +583,7 @@ export class EventService {
     // antes da vaga: grupo fechado não recebe nem na lista de espera
     if (respeitarJanela) {
       for (const role of roles) {
-        const motivo = grupoFechado(role.group);
+        const motivo = grupoFechado(role.group, new Date(), event.endDate);
         if (motivo) throw new BadRequestException(motivo);
       }
     }
