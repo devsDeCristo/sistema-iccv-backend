@@ -25,11 +25,16 @@ export class AuthController {
       properties: {
         document: { type: 'string', example: '10647145448' },
         password: { type: 'string', example: 'password123' },
+        captchaToken: {
+          type: 'string',
+          description: 'Token do Cloudflare Turnstile, exigido depois de 2 senhas erradas',
+        },
       },
     },
   })
   async login(
-    @Body() loginDto: { document: string; password: string },
+    @Body()
+    loginDto: { document: string; password: string; captchaToken?: string },
     @Req() req: any,
   ) {
     // de onde veio a tentativa: é o que separa "alguém errou a senha duas
@@ -37,7 +42,11 @@ export class AuthController {
     const user = await this.authService.validateUser(
       loginDto.document,
       loginDto.password,
-      { ip: req.ip, userAgent: req.headers?.['user-agent'] },
+      {
+        ip: req.ip,
+        userAgent: req.headers?.['user-agent'],
+        captchaToken: loginDto.captchaToken,
+      },
     );
     this.logger.debug(
       `User ${user.id} - ${user.fullName} logged in successfully`,

@@ -228,6 +228,8 @@ model LoginAttempt {
   /// Atende o gráfico do painel, que varre uma janela de dias
   @@index([createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
+  /// Atende o freio de senha errada, que conta as falhas por documento
+  @@index([document, createdAt(sort: Desc)])
   @@map("login_attempts")
 }
 
