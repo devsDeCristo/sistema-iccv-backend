@@ -57,17 +57,11 @@ export class LoggingInterceptor implements NestInterceptor {
             .join('&')}`
         : '';
 
-    // Silencia logs de sucesso para rotas de validação (só loga erros)
-    const isSilentRoute =
-      path === '/auth/validate' || path === '/auth/admin/validate';
-
     return next.handle().pipe(
       tap(() => {
         const duracao = Date.now() - inicio;
         const status = response.statusCode;
         const prefixo = userName ? `[${userName}]` : '';
-
-        if (isSilentRoute) return;
 
         this.logger.log(
           `${prefixo} ${method} ${path}${queryStr} - ${status} | ${duracao}ms`,

@@ -47,6 +47,9 @@ As duas relêem o usuário no banco (`validateUserGuardRouter`) — não confiam
 no payload do token — e devolvem `churchRoles`, que o painel usa para saber em
 quais igrejas a pessoa administra.
 
+- **Log:** as duas rotas aparecem no log de requisições como qualquer outra (método, caminho, status e tempo), em `src/common/interceptors/logging.interceptor.ts`. Até 28/09 elas eram silenciadas quando davam certo, o que escondia o tempo delas na investigação de lentidão.
+- **Frequência:** o front chama a validação no loader de cada área, antes de mostrar a tela, sempre que o caminho muda (`shouldRevalidate` em `src/routes/index.tsx` do `ic-front`). Detalhes no `ic-front`, em `docs/login-e-cadastro.md`.
+
 ## Esqueci a senha / redefinição
 
 Fluxo em três etapas, todo público (quem esqueceu a senha não tem token). O

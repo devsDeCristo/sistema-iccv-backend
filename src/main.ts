@@ -8,6 +8,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { initializeFirebase } from './firebase.config';
 import { json, NextFunction, Request, Response, urlencoded } from 'express';
 import { timingSafeEqual } from 'crypto';
+import { iniciarMonitorDoProcesso } from './common/monitor-do-processo';
 
 dotenv.config();
 initializeFirebase();
@@ -62,6 +63,8 @@ const protectSwagger = (req: Request, res: Response, next: NextFunction) => {
 };
 
 async function bootstrap() {
+  // antes de tudo: a subida do app (Prisma, WhatsApp) também conta
+  iniciarMonitorDoProcesso();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   /**
@@ -106,6 +109,11 @@ async function bootstrap() {
     // sem isto o navegador esconde o Content-Disposition do JS, e quem baixa um
     // arquivo (PDF do quadrante) não consegue ler o nome que o servidor mandou
     exposedHeaders: ['Content-Disposition'],
+    // Quanto tempo o navegador guarda a resposta do preflight (OPTIONS). Sem
+    // isto o Chrome guarda por 5s: quase toda troca de página, depois de uma
+    // pausa, pedia permissão de novo antes de cada chamada — e esse pedido não
+    // passa pelo interceptor de log. 2h é o teto do Chrome.
+    maxAge: 7200,
   });
 
   const config = new DocumentBuilder()
