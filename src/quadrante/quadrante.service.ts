@@ -73,8 +73,9 @@ export class QuadranteService {
   /**
    * Quem pode abrir o quadrante. Com ele desligado no evento
    * (`data.showQuadrante`), ninguém — nem o admin: a opção decide se o evento
-   * tem quadrante, não só quem o vê. Ligado, abrem o admin da igreja e os
-   * inscritos.
+   * tem quadrante, não só quem o vê. Ligado, o admin da igreja abre a
+   * qualquer momento (é quem imprime antes do evento); o inscrito, a partir
+   * do primeiro dia do evento.
    *
    * A rota não passa pelo `EventTenantGuard` porque ele recortaria o admin de
    * outra igreja que está inscrito aqui como qualquer pessoa — e é justamente
@@ -92,7 +93,7 @@ export class QuadranteService {
       }),
       this.prisma.event.findUnique({
         where: { id: eventId },
-        select: { churchId: true, data: true },
+        select: { churchId: true, data: true, startDate: true },
       }),
     ]);
 
@@ -121,6 +122,18 @@ export class QuadranteService {
     if (!inscricao) {
       throw new ForbiddenException(
         'O quadrante só pode ser visto por quem está inscrito no evento',
+      );
+    }
+
+    // para o inscrito, o quadrante abre no primeiro dia do evento. A data é
+    // gravada na meia-noite de Brasília (03:00 UTC), então comparar o instante
+    // já é comparar o dia
+    if (new Date() < event.startDate) {
+      throw new ForbiddenException(
+        `O quadrante fica disponível a partir de ${event.startDate.toLocaleDateString(
+          'pt-BR',
+          { timeZone: 'America/Sao_Paulo' },
+        )}, primeiro dia do evento`,
       );
     }
   }
