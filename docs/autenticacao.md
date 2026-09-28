@@ -47,6 +47,9 @@ As duas relêem o usuário no banco (`validateUserGuardRouter`) — não confiam
 no payload do token — e devolvem `churchRoles`, que o painel usa para saber em
 quais igrejas a pessoa administra.
 
+- **Log:** as duas rotas são silenciadas no log de sucesso (`isSilentRoute` em `src/common/interceptors/logging.interceptor.ts`); só erros aparecem.
+- **Frequência:** o front chama a validação ao entrar em cada área e depois em segundo plano a cada troca de página, sem travar a navegação. Detalhes no `ic-front`, em `docs/layout-e-navegacao.md`.
+
 ## Esqueci a senha / redefinição
 
 Fluxo em três etapas, todo público (quem esqueceu a senha não tem token). O
