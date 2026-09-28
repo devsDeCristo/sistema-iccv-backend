@@ -39,17 +39,19 @@ A cada minuto o processo mede o atraso do event loop e a memória. Serve para
 descobrir travamentos que o log de requisições não mostra: um pedido que
 esperou na fila com o Node ocupado, ou um preflight lento.
 
-- **Aviso (`WARN`, contexto `[Processo]`):** sai quando, no último minuto, o p99 do atraso passou de **200ms** ou o pior caso passou de **1s**. O texto é "Processo travou no último minuto", seguido dos números.
+- **Aviso (`WARN`, contexto `[Processo]`):** sai quando, no último minuto, o p99 do atraso passou de **200ms**, o pior caso passou de **1s** ou a memória do container chegou a **90% do limite**. O texto é "Processo travou no último minuto", seguido dos números.
 - **Linha de rotina (`LOG`):** a cada 10 minutos, mesmo sem nada anormal. É a linha de base para comparar.
 - **O que cada linha traz:**
   - atraso do event loop: p50, p99 e o pior caso do minuto;
   - `ocupado`: fração do tempo em que o loop trabalhou;
-  - memória: `rss` (o processo do Node; o Chrome do Puppeteer é outro processo e não entra, embora divida a memória do container), heap usado e total, limite do heap e memória externa (buffers).
+  - memória do Node: `rss` (só o processo do Node), heap usado e total, limite do heap e memória externa (buffers);
+  - `container: usado/limite`: o container inteiro, incluindo o Chrome do Puppeteer, que é outro processo e não entra no `rss`. Vem do cgroup (`/sys/fs/cgroup`, v2 ou v1), descontando o cache de arquivo inativo, a mesma conta do `docker stats`. Não aparece fora de container nem em container sem limite de memória.
 - **Piso de ~20ms:** o histograma amostra a cada 20ms, então p50 e p99 em torno de 20ms são o normal, não atraso.
 - **Como ler um travamento:**
   - `pior` alto com `ocupado` alto: CPU na thread principal (processar mensagens do WhatsApp, juntar PDF, JSON grande).
   - heap usado perto do limite, subindo ao longo das horas: pressão de memória, com pausas do coletor de lixo. Isso some ao reiniciar.
+  - `container` perto do limite com o `rss` baixo: quem ocupa é o Chrome. Perto do limite, o kernel toma memória à força e tudo no container fica lento, até o Node ser morto. A API roda com `memory: 512M` na stack, dividida com o Chrome.
   - Cruze o horário com o resto do log: WhatsApp reconectando, PDF sendo gerado, cron de conciliação.
-- **Custo:** um histograma nativo do Node e um timer por minuto, que não segura o processo aberto (`unref`).
+- **Custo:** um histograma nativo do Node, um timer por minuto, que não segura o processo aberto (`unref`), e a leitura de três arquivos pequenos do cgroup por minuto.
 
 Arquivos: `src/common/monitor-do-processo.ts` (e o `.spec.ts`), iniciado no começo do `bootstrap` em `src/main.ts`.
