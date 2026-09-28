@@ -31,6 +31,7 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 | Logs e auditoria | `src/logs`, `src/context`, `src/prisma` | [logs-e-auditoria.md](logs-e-auditoria.md) |
 | Rotinas agendadas | `src/cron` | [cron.md](cron.md) |
 | Servidor HTTP (CORS, log e monitor do processo) | `src/main.ts`, `src/common` | [servidor.md](servidor.md) |
+| Deploy (CI, imagem e secrets) | `.github/workflows` | [deploy.md](deploy.md) |
 
 As telas estão documentadas no repositório `ic-front`, em `docs/` (índice em
 `docs/README.md`).
