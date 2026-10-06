@@ -37,6 +37,21 @@ Arquivos: `src/church/church.controller.ts`, `src/church/church.service.ts`,
 - **`ACTIVE`:** aparece no filtro de igrejas da home.
 - **`INACTIVE`:** a igreja continua no sistema com eventos e histórico, mas
   some do filtro de quem procura evento.
+- **Igreja inativa não dá painel.** Admin e financeiro dela passam a ser
+  usuários comuns ali: não entram na área de admin pela igreja nem alcançam
+  dados dela. Quem tem vínculo também em outra igreja ativa continua com o
+  perfil de lá, só lá. Dev e super admin não mudam.
+  - **Como:** o vínculo (`UserChurchRole`) continua gravado, mas toda leitura
+    de permissão o descarta (`VINCULO_VALE` em `SELECT_TENANT`,
+    `src/auth/tenant.ts`).
+  - **`User.role`:** salvar a igreja recalcula, na mesma transação, o perfil
+    de todos que têm vínculo com ela (`recalcularPerfis`). Desativar derruba
+    para usuário comum; **reativar devolve o perfil** sem ninguém refazer as
+    permissões.
+  - **Sessão aberta:** perde o acesso na próxima chamada. Os guards e o
+    `/auth/admin/validate` releem o banco, sem confiar no token.
+  - **`TEST` (implantação) continua dando painel:** é quando a igreja está
+    sendo montada.
 - Editar sem mandar `status` no corpo não reativa nem desativa nada — quem só
   renomeia não corre o risco de reverter uma desativação de outra pessoa.
 
@@ -46,8 +61,9 @@ Vincular alguém como `spiritualLeaderId`:
 
 - **Vira admin automaticamente** daquela igreja: grava (ou atualiza) um
   `UserChurchRole` com perfil `ADMIN` para essa pessoa, na mesma transação do
-  cadastro/edição da igreja. Dev e super admin não são rebaixados por essa
-  gravação — a checagem só sobe o perfil, nunca desce.
+  cadastro/edição da igreja. O `User.role` sai do recálculo da igreja: em
+  igreja inativa o vínculo fica gravado, mas não dá o painel. Dev e super
+  admin não são rebaixados.
 - **Assina e-mails:** é o nome que aparece assinando os e-mails de confirmação
   dos eventos daquela igreja (substituiu uma assinatura fixa que saía igual
   para todas).

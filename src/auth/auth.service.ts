@@ -7,11 +7,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { LoginFailureReason } from '@prisma/client';
+import { ChurchStatus, LoginFailureReason } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UserService } from 'src/user/user.service';
 import { ADMIN_AREA_ROLES } from './roles';
+import { perfilEfetivo } from './tenant';
 import {
   captchaValido,
   FALHAS_PARA_BLOQUEIO,
@@ -56,15 +57,22 @@ export class AuthService {
     if (!userConsult) {
       throw new NotFoundException('Usuário não encontrado');
     }
+    // o painel usa os vínculos para saber em quais igrejas a pessoa trabalha;
+    // igreja inativa não dá painel (ver `VINCULO_VALE`)
+    const churchRoles = userConsult.churchRoles.filter(
+      (vinculo) => vinculo.church.status !== ChurchStatus.INACTIVE,
+    );
+    // o perfil sai dos vínculos que valem, e não do gravado, que pode estar
+    // atrasado (igreja desativada antes do recálculo existir)
+    const role = perfilEfetivo({ role: userConsult.role, churchRoles });
     // o financeiro também entra no painel, mas com abas restritas no front
-    if (test === 'admin' && !ADMIN_AREA_ROLES.includes(userConsult.role)) {
+    if (test === 'admin' && !ADMIN_AREA_ROLES.includes(role)) {
       throw new UnauthorizedException('Usuário não é administrador');
     }
     return {
       id: userConsult.id,
-      role: userConsult.role,
-      // o painel usa os vínculos para saber em quais igrejas a pessoa trabalha
-      churchRoles: userConsult.churchRoles,
+      role,
+      churchRoles,
       fullName: userConsult.fullName,
       email: userConsult.email,
       cpf: userConsult.cpf,
@@ -121,9 +129,11 @@ export class AuthService {
         contexto,
       });
 
-      // Remove a senha antes de retornar
+      // Remove a senha antes de retornar. O perfil é o efetivo, e não o
+      // gravado: é por ele que o front decide abrir o painel, e o gravado pode
+      // estar atrasado em relação aos vínculos (igreja desativada)
       const { password: _, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      return { ...userWithoutPassword, role: perfilEfetivo(user) };
     }
 
     await this.registrarTentativa({

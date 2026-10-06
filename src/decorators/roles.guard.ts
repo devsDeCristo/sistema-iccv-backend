@@ -8,6 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma';
 import { Role } from 'src/auth/roles';
+import { perfilEfetivo, SELECT_TENANT } from 'src/auth/tenant';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -16,6 +17,10 @@ import { ROLES_KEY } from './roles.decorator';
  * O perfil é lido do banco (e não do JWT) de propósito: o token dura 24h, então
  * ler do payload manteria um usuário rebaixado com acesso de admin até o token
  * expirar. É uma busca por chave primária, irrelevante perto das queries destas rotas.
+ *
+ * E vale o perfil efetivo, calculado dos vínculos que valem, não o `User.role`
+ * gravado: quem só administra igreja desativada é usuário comum, mesmo que o
+ * gravado ainda diga admin.
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -40,14 +45,16 @@ export class RolesGuard implements CanActivate {
       throw new UnauthorizedException('Usuário não autenticado');
     }
 
-    const user = await this.prisma.user.findUnique({
+    const pessoa = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true },
+      select: SELECT_TENANT,
     });
 
-    if (!user) {
+    if (!pessoa) {
       throw new UnauthorizedException('Usuário não encontrado');
     }
+
+    const user = { role: perfilEfetivo(pessoa) };
 
     if (!requiredRoles.includes(user.role as Role)) {
       throw new ForbiddenException(

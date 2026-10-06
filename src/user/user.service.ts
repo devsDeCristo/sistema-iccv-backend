@@ -20,7 +20,9 @@ import {
 } from 'src/auth/roles';
 import { JwtService } from '@nestjs/jwt';
 import {
+  perfilEfetivo,
   SELECT_TENANT,
+  VINCULO_VALE,
   TenantRequester,
   VinculoDeIgreja,
   churchIdsComPerfil,
@@ -246,11 +248,12 @@ export class UserService {
     if (!document) return null;
 
     // os vínculos vão junto: é com eles que o painel monta o que a pessoa
-    // administra em cada igreja logo depois do login
+    // administra em cada igreja logo depois do login — só os que valem
     return this.prisma.user.findUnique({
       where: { cpf: document },
       include: {
         churchRoles: {
+          where: VINCULO_VALE,
           select: { role: true, church: { select: { id: true, name: true } } },
         },
       },
@@ -267,9 +270,14 @@ export class UserService {
     const user = await this.prisma.user.findFirst({
       where: { id },
       include: {
-        // o painel precisa saber em quais igrejas a pessoa trabalha
+        // o painel precisa saber em quais igrejas a pessoa trabalha. A
+        // situação vai junto: a sessão (`/auth/validate`) descarta as
+        // inativas, e a tela de permissões mostra todas
         churchRoles: {
-          select: { role: true, church: { select: { id: true, name: true } } },
+          select: {
+            role: true,
+            church: { select: { id: true, name: true, status: true } },
+          },
         },
       },
     });
@@ -279,31 +287,6 @@ export class UserService {
     // não tem por que sair do banco.
     const { password: _password, ...userWithoutPassword } = user;
     return userWithoutPassword;
-  }
-
-  /**
-   * Perfil efetivo da pessoa: super admin manda, senão vale o mais alto dos
-   * vínculos, e sem vínculo nenhum ela é usuário comum. É o que os guards de
-   * rota leem para saber se ela pode chegar na rota; em qual igreja, quem
-   * responde são os vínculos.
-   */
-  private perfilEfetivo(pessoa: TenantRequester | null): number {
-    if (!pessoa) return Role.USER;
-
-    // Dev e super admin são perfis globais: não derivam de vínculo e não podem
-    // ser rebaixados pelo recálculo. Sem o dev nesta linha, ele não casava com
-    // nenhum vínculo, caía em `Role.USER` e perdia o acesso na primeira vez que
-    // alguém salvasse o cadastro dele — inclusive ele mesmo.
-    if (SUPER_ADMIN_ROLES.includes(pessoa.role as Role)) {
-      return pessoa.role as Role;
-    }
-
-    const perfis = (pessoa.churchRoles ?? []).map((vinculo) => vinculo.role);
-
-    if (perfis.includes(Role.ADMIN)) return Role.ADMIN;
-    if (perfis.includes(Role.FINANCE)) return Role.FINANCE;
-
-    return Role.USER;
   }
 
   /**
@@ -661,7 +644,7 @@ export class UserService {
           select: SELECT_TENANT,
         });
 
-        const efetivo = this.perfilEfetivo(atual);
+        const efetivo = perfilEfetivo(atual);
 
         if (atual && atual.role !== efetivo) {
           await tx.user.update({ where: { id }, data: { role: efetivo } });

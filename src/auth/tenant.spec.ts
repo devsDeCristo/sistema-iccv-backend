@@ -3,7 +3,9 @@ import { ADMIN_AREA_ROLES, Role } from './roles';
 import {
   assertChurchAccess,
   churchIdsComPerfil,
+  perfilEfetivo,
   perfilNaIgreja,
+  SELECT_TENANT,
   tenantChurchIds,
   userChurchScope,
 } from './tenant';
@@ -133,5 +135,23 @@ describe('userChurchScope', () => {
 
   it('não filtra nada para o super admin', () => {
     expect(userChurchScope(superAdmin)).toEqual({});
+  });
+});
+
+describe('igreja inativa', () => {
+  it('toda leitura de permissão descarta o vínculo de igreja inativa', () => {
+    // guards, services e recálculo do perfil leem por aqui: sem este filtro,
+    // o admin de uma igreja desativada continuaria no painel dela
+    expect(SELECT_TENANT.churchRoles.where).toEqual({
+      church: { status: { not: 'INACTIVE' } },
+    });
+  });
+
+  it('sem vínculo que valha, o perfil efetivo é usuário comum', () => {
+    expect(perfilEfetivo({ role: Role.ADMIN, churchRoles: [] })).toBe(
+      Role.USER,
+    );
+    expect(perfilEfetivo(doisChapeus)).toBe(Role.ADMIN);
+    expect(perfilEfetivo({ role: Role.DEV, churchRoles: [] })).toBe(Role.DEV);
   });
 });

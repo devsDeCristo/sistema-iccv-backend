@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { ChurchStatus } from '@prisma/client';
 import {
   ADMIN_AREA_ROLES,
   CHURCH_ROLES,
@@ -31,14 +32,59 @@ export type TenantRequester = {
 };
 
 /**
+ * Vínculo com igreja inativa não dá permissão. Desativada a igreja, quem a
+ * administrava vira inscrito como outro qualquer ali: sem painel, sem dados
+ * dela. O vínculo continua gravado — reativar devolve o acesso sem ninguém
+ * precisar refazer as permissões.
+ */
+export const VINCULO_VALE = {
+  church: { status: { not: ChurchStatus.INACTIVE } },
+};
+
+/**
  * O que o Prisma precisa trazer do usuário para responder qualquer pergunta de
  * tenant. Num lugar só para que nenhuma consulta esqueça os vínculos e conclua,
- * por engano, que a pessoa não administra nada.
+ * por engano, que a pessoa não administra nada — nem esqueça de descartar os
+ * vínculos de igreja inativa.
  */
 export const SELECT_TENANT = {
   role: true,
-  churchRoles: { select: { churchId: true, role: true } },
+  churchRoles: {
+    where: VINCULO_VALE,
+    select: { churchId: true, role: true },
+  },
 } as const;
+
+/**
+ * Perfil efetivo da pessoa: super admin manda, senão vale o mais alto dos
+ * vínculos, e sem vínculo nenhum ela é usuário comum. É o que os guards de
+ * rota leem para saber se ela pode chegar na rota; em qual igreja, quem
+ * responde são os vínculos. Recebe os vínculos já sem as igrejas inativas
+ * (`SELECT_TENANT`): quem só administra igreja desativada é usuário comum.
+ */
+export function perfilEfetivo(
+  pessoa: {
+    role?: number | null;
+    churchRoles?: { role: number }[] | null;
+  } | null,
+): number {
+  if (!pessoa) return Role.USER;
+
+  // Dev e super admin são perfis globais: não derivam de vínculo e não podem
+  // ser rebaixados pelo recálculo. Sem o dev nesta linha, ele não casava com
+  // nenhum vínculo, caía em `Role.USER` e perdia o acesso na primeira vez que
+  // alguém salvasse o cadastro dele — inclusive ele mesmo.
+  if (SUPER_ADMIN_ROLES.includes(pessoa.role as Role)) {
+    return pessoa.role as Role;
+  }
+
+  const perfis = (pessoa.churchRoles ?? []).map((vinculo) => vinculo.role);
+
+  if (perfis.includes(Role.ADMIN)) return Role.ADMIN;
+  if (perfis.includes(Role.FINANCE)) return Role.FINANCE;
+
+  return Role.USER;
+}
 
 /**
  * Tem poder de super admin, e portanto atravessa todas as igrejas.

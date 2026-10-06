@@ -5,7 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { Role, SUPER_ADMIN_ROLES } from 'src/auth/roles';
+import { Role } from 'src/auth/roles';
+import { perfilEfetivo, SELECT_TENANT } from 'src/auth/tenant';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateChurchDto } from './dto/create-church.dto';
 
@@ -52,6 +53,7 @@ export class ChurchService {
       });
 
       if (lider) await this.vincularLider(tx, church.id, lider);
+      await this.recalcularPerfis(tx, church.id);
 
       return church;
     });
@@ -78,6 +80,7 @@ export class ChurchService {
       });
 
       if (lider) await this.vincularLider(tx, id, lider);
+      await this.recalcularPerfis(tx, id);
 
       return church;
     });
@@ -91,26 +94,49 @@ export class ChurchService {
    * Trocar de líder não rebaixa o anterior: ele continua admin até alguém
    * tirar a permissão pela tela de usuários — perder o acesso ao painel não é
    * consequência óbvia de deixar de assinar o e-mail.
+   *
+   * O `User.role` do líder sai de `recalcularPerfis`, logo depois: em igreja
+   * inativa o vínculo fica gravado, mas não dá o painel.
    */
   private async vincularLider(
     tx: Prisma.TransactionClient,
     churchId: string,
-    lider: { id: string; role: number },
+    lider: { id: string },
   ) {
     await tx.userChurchRole.upsert({
       where: { userId_churchId: { userId: lider.id, churchId } },
       create: { userId: lider.id, churchId, role: Role.ADMIN },
       update: { role: Role.ADMIN },
     });
+  }
 
-    // `User.role` é derivado do mais alto dos vínculos, e admin é o mais alto
-    // que um vínculo dá. Dev e super admin são perfis globais: escrever admin
-    // por cima deles seria rebaixá-los.
-    if (!SUPER_ADMIN_ROLES.includes(lider.role as Role)) {
-      await tx.user.update({
-        where: { id: lider.id },
-        data: { role: Role.ADMIN },
-      });
+  /**
+   * `User.role` é derivado dos vínculos que valem — os de igreja não inativa
+   * (`SELECT_TENANT`). Desativar a igreja derruba para usuário comum quem só
+   * administrava ela; reativar devolve o perfil. Quem tem vínculo em outra
+   * igreja ativa continua com o perfil de lá, e dev e super admin não mudam.
+   *
+   * Roda em todo salvamento da igreja, na mesma transação: é o `RolesGuard` e
+   * o `/auth/admin/validate` que leem `User.role`, e ele não pode ficar
+   * dizendo admin de uma igreja que já saiu do ar.
+   */
+  private async recalcularPerfis(
+    tx: Prisma.TransactionClient,
+    churchId: string,
+  ) {
+    const pessoas = await tx.user.findMany({
+      where: { churchRoles: { some: { churchId } } },
+      select: { id: true, ...SELECT_TENANT },
+    });
+
+    for (const pessoa of pessoas) {
+      const efetivo = perfilEfetivo(pessoa);
+      if (pessoa.role !== efetivo) {
+        await tx.user.update({
+          where: { id: pessoa.id },
+          data: { role: efetivo },
+        });
+      }
     }
   }
 
@@ -123,7 +149,7 @@ export class ChurchService {
 
     const pessoa = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, role: true },
+      select: { id: true },
     });
 
     if (!pessoa) {

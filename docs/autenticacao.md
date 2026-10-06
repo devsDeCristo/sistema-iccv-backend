@@ -113,10 +113,24 @@ Arquivo: `src/auth/senha.ts`.
 - `ADMIN_ROLES` = Dev + Super Admin + Admin (acesso total ao painel).
 - `ADMIN_AREA_ROLES` = `ADMIN_ROLES` + Financeiro (entra no painel, com abas
   restritas no front).
-- `role` é **derivado**: sempre igual ao mais alto perfil entre os vínculos da
-  pessoa (`UserService.perfilEfetivo`), recalculado na mesma transação que
-  grava `UserChurchRole`. Dev e Super Admin são globais e não derivam de
-  vínculo.
+- `role` é **derivado**: sempre igual ao mais alto perfil entre os vínculos
+  que valem (`perfilEfetivo`, `src/auth/tenant.ts`). É recalculado na mesma
+  transação que grava `UserChurchRole`, e também quando a igreja é salva
+  (`ChurchService.recalcularPerfis`). Dev e Super Admin são globais e não
+  derivam de vínculo.
+- **Vínculo com igreja inativa não vale:** `SELECT_TENANT` só traz os de igreja
+  não `INACTIVE` (`VINCULO_VALE`). Como todo guard e service lê por ele, quem
+  só administrava uma igreja desativada vira usuário comum. O login e o
+  `/auth/validate` também descartam esses vínculos.
+- **Quem decide o acesso é o perfil efetivo, não o gravado.** O login (é por
+  ele que o front decide abrir o painel), o `/auth/validate`, o
+  `/auth/admin/validate` e o `RolesGuard` calculam `perfilEfetivo` a partir
+  dos vínculos que valem. O `User.role` gravado pode estar atrasado: igreja
+  desativada antes de 06/10/2026, quando o recálculo ainda não existia. Com o
+  cálculo na leitura, o valor atrasado não abre nada. Ele só aparece como
+  rótulo na lista de usuários, e se corrige quando a igreja é salva de novo. A tela de permissões
+  (`GET /users/:id`) mostra todos, com a situação da igreja. Ver
+  `docs/igrejas.md`.
 
 ## Recorte por igreja (`src/auth/tenant.ts`)
 
