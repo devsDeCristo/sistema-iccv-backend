@@ -780,7 +780,12 @@ export class DashboardService {
 
     const [items, drafts] = await Promise.all([
       this.prisma.news.findMany({
-        where: { churchId: { in: churchIds }, isPublished: true },
+        // no ar: a agendada (publicada sem data) ainda não saiu
+        where: {
+          churchId: { in: churchIds },
+          isPublished: true,
+          publishedAt: { not: null },
+        },
         orderBy: { publishedAt: 'desc' },
         take: 3,
         select: {

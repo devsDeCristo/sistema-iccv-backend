@@ -56,6 +56,23 @@ export class NewsDto {
   @ApiProperty({
     example: 'false',
     description:
+      'Publicar no agendamento, e não agora: a notícia fica publicada mas ' +
+      'fora do mural, sem disparo, até o primeiro horário agendado.',
+    required: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+    return Boolean(value);
+  })
+  @IsBoolean()
+  scheduled?: boolean;
+
+  @ApiProperty({
+    example: 'false',
+    description:
       'Remove a imagem atual. Vale para o update, quando não vem arquivo novo.',
     required: false,
   })

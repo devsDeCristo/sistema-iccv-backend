@@ -17,7 +17,12 @@ const semanal = (
   time: '12:00',
   runAt: null,
   nextRunAt,
-  news: { id: newsId, isPublished: publicada, publishedAt: null },
+  // publicada e já no ar; o teste da agendada sobrescreve `publishedAt`
+  news: {
+    id: newsId,
+    isPublished: publicada,
+    publishedAt: publicada ? brt('2026-10-01T10:00') : null,
+  },
 });
 
 /**
@@ -84,18 +89,34 @@ describe('NewsService — disparos agendados', () => {
     );
   });
 
-  it('rascunho é publicado antes de disparar', async () => {
+  it('rascunho fica parado: não publica nem envia, mas reagenda', async () => {
     const { service, prisma, dispara } = montar([
       semanal('a1', 'n1', brt('2026-10-06T12:00'), false),
     ]);
 
     await service.dispararVencidos(AGORA);
 
+    expect(dispara).not.toHaveBeenCalled();
+    expect(prisma.news.update).not.toHaveBeenCalled();
+    expect(prisma.newsSchedule.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { nextRunAt: brt('2026-10-13T12:00'), lastRunAt: AGORA },
+      }),
+    );
+  });
+
+  it('agendada que ainda não estava no ar: entra no mural e dispara', async () => {
+    const agendada = semanal('a1', 'n1', brt('2026-10-06T12:00'));
+    agendada.news.publishedAt = null;
+    const { service, prisma, dispara } = montar([agendada]);
+
+    await service.dispararVencidos(AGORA);
+
     expect(prisma.news.update).toHaveBeenCalledWith({
       where: { id: 'n1' },
-      data: { isPublished: true, publishedAt: AGORA },
+      data: { publishedAt: AGORA },
     });
-    expect(dispara).toHaveBeenCalled();
+    expect(dispara).toHaveBeenCalledWith('n1', 'SCHEDULE');
   });
 
   it('dois agendamentos da mesma notícia no mesmo minuto: sai uma vez', async () => {
@@ -115,16 +136,14 @@ describe('NewsService — calendário', () => {
     const noticia = { id: 'n1', title: 'Aviso' };
     const prisma = {
       newsDispatch: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([
-            {
-              id: 'd1',
-              newsId: 'n1',
-              at: brt('2026-10-02T12:00'),
-              news: noticia,
-            },
-          ]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'd1',
+            newsId: 'n1',
+            at: brt('2026-10-02T12:00'),
+            news: noticia,
+          },
+        ]),
       },
       newsSchedule: {
         findMany: jest

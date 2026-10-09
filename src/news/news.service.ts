@@ -79,6 +79,15 @@ export function normalizaLinks(links?: string[]): string[] | undefined {
   return unicos;
 }
 
+/**
+ * No ar = publicada e com data de publicação. A notícia agendada é publicada,
+ * mas fica sem data — fora do mural e sem disparo — até o primeiro horário,
+ * quando o relógio a põe no ar.
+ */
+const NO_AR = { isPublished: true, publishedAt: { not: null } };
+const noAr = (news: { isPublished: boolean; publishedAt: Date | null }) =>
+  news.isPublished && !!news.publishedAt;
+
 /** O calendário pede um mês por vez; folga para a grade de semanas cheias */
 const PERIODO_MAXIMO_DO_CALENDARIO_MS = 62 * 24 * 60 * 60 * 1000;
 const LIMITE_DA_LEGENDA = 950;
@@ -160,7 +169,7 @@ export class NewsService {
   async findPublished(take?: number, requesterId?: string) {
     return this.prisma.news.findMany({
       where: {
-        isPublished: true,
+        ...NO_AR,
         ...this.filtroDoFeed(requesterId),
       },
       select: CAMPOS_DO_FEED,
@@ -226,7 +235,9 @@ export class NewsService {
         summary: data.summary?.trim() || null,
         content: data.content,
         isPublished: data.isPublished,
-        publishedAt: data.isPublished ? new Date() : null,
+        // agendada: publicada, mas sem data até o primeiro horário — fica fora
+        // do mural e não dispara agora (ver `noAr`)
+        publishedAt: data.isPublished && !data.scheduled ? new Date() : null,
         authorId: authorId ?? null,
         // quem publicou; o mural não filtra por isso. Quem administra mais de
         // uma igreja publica pela igreja do evento escolhido, e sem evento
@@ -254,7 +265,7 @@ export class NewsService {
     }
 
     // Depois da imagem subir: a mensagem no WhatsApp sai com a foto junto.
-    if (salva.isPublished) {
+    if (noAr(salva)) {
       this.disparaEmSegundoPlano(salva.id, NewsDispatchOrigin.PUBLISH);
     }
 
@@ -299,9 +310,10 @@ export class NewsService {
         eventId,
         imageUrl,
         // a data de publicação é a da primeira vez: republicar depois de virar
-        // rascunho não muda a ordem do feed
+        // rascunho não muda a ordem do feed. Agendada e nunca publicada fica
+        // sem data, esperando o primeiro horário
         publishedAt:
-          data.isPublished && !atual.publishedAt
+          data.isPublished && !data.scheduled && !atual.publishedAt
             ? new Date()
             : atual.publishedAt,
       },
@@ -310,9 +322,9 @@ export class NewsService {
     await this.sincronizaDestinos(id, data.groupRoleIds);
     await this.sincronizaLinks(id, links);
 
-    // Só a virada de rascunho para publicada dispara. Corrigir uma vírgula numa
-    // notícia já publicada não pode mandar tudo de novo para os grupos.
-    if (!atual.isPublished && atualizada.isPublished) {
+    // Só a entrada no ar dispara. Corrigir uma vírgula numa notícia já
+    // publicada não pode mandar tudo de novo para os grupos.
+    if (!noAr(atual) && noAr(atualizada)) {
       this.disparaEmSegundoPlano(id, NewsDispatchOrigin.PUBLISH);
     }
 
@@ -508,13 +520,18 @@ export class NewsService {
         continue;
       }
 
+      // rascunho fica parado: o horário passa e segue para o próximo, sem
+      // publicar nem enviar nada
+      if (!news.isPublished) continue;
+
       if (disparadas.has(news.id)) continue;
       disparadas.add(news.id);
 
-      if (!news.isPublished) {
+      // agendada que ainda não estava no ar: entra no mural agora
+      if (!news.publishedAt) {
         await this.prisma.news.update({
           where: { id: news.id },
-          data: { isPublished: true, publishedAt: news.publishedAt ?? agora },
+          data: { publishedAt: agora },
         });
       }
 

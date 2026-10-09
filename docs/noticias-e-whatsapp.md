@@ -11,6 +11,7 @@ dela via Baileys. Tela correspondente em `ic-front/docs/noticias.md`.
 | --- | --- |
 | `title`, `summary`, `content` | título, chamada curta (feed) e corpo em HTML (editor rico) |
 | `isPublished` | rascunho não aparece no feed |
+| `publishedAt` nulo com `isPublished` | **agendada**: publicada, mas fora do mural até o primeiro horário agendado |
 | `publishedAt` | data da **primeira** publicação — republicar depois de virar rascunho não muda a ordem |
 | `churchId` | igreja dona da notícia (quem administra/reenvia); `null` só no histórico do super admin |
 | `eventId` | público do anúncio: `null` é geral (todo mundo vê), preenchido restringe a quem está inscrito ou na lista de espera do evento |
@@ -100,8 +101,15 @@ Regras:
   depender do fuso do container (`src/news/agendamento.ts`).
 - **O que sai:** na hora marcada, a notícia vai para **todos** os grupos
   marcados, com o texto e a imagem atuais, como no reenvio manual.
-- **Rascunho é publicado na hora marcada:** o agendamento é o "publicar mais
-  tarde".
+- **Publicar no agendamento (`scheduled: true` no salvar):** a notícia é
+  gravada publicada, mas **sem `publishedAt`**. No ar (`NO_AR`/`noAr`) é
+  publicada **e** com data, então ela fica fora do mural e não dispara ao
+  salvar. No primeiro horário, o relógio grava `publishedAt` e ela entra no
+  mural e sai no WhatsApp. O dashboard também conta só as que estão no ar.
+- **Rascunho fica parado:** o horário passa e o agendamento segue para o
+  próximo, mas nada é publicado nem enviado. Até 09/10/2026 o rascunho era
+  publicado na hora marcada; agora rascunho e agendamento são escolhas
+  separadas no formulário.
 - **Relógio:** uma tarefa a cada minuto (`NewsService.dispararAgendados`, com
   `@Cron`) procura os agendamentos com `nextRunAt` vencido, dispara e grava o
   próximo `nextRunAt`. O "uma vez" fica com `nextRunAt` nulo depois de sair.
