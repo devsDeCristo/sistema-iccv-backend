@@ -25,6 +25,21 @@ O campo `scope` da resposta diz qual dos dois formatos veio:
 - **`church`:** quando há recorte por igreja — seja porque `churchId` foi passado, seja porque quem pediu (admin/financeiro) só alcança as suas. Vem com `events`, `recentRegistrations`, `treasury` (se financeiro) e `news` (mural).
 - **`system`:** quando quem pediu é super admin ou dev **sem** `churchId` (`tenantChurchIds` devolve `null`, ou seja, nenhum recorte). Vem com `byChurch` (leitura por igreja), e, dependendo do perfil, `panorama` (super admin) ou `insights` (dev). `events`, `recentRegistrations` e `news` saem `null` nesse modo.
 
+## Perfil por igreja (multitenant)
+
+O perfil que decide o formato da home é o da pessoa **na igreja vista**:
+
+- **com `churchId`** (e quem pede não é super admin/dev): vale
+  `perfilNaIgreja`. Quem é admin na A e financeiro na B, ao abrir a B,
+  recebe a home do financeiro (`treasury`, sem `recentRegistrations` nem
+  `news`);
+- **sem `churchId`:** vale o perfil efetivo (`perfilEfetivo`), e as
+  inscrições recentes e o mural, que são blocos de admin, só incluem as
+  igrejas onde a pessoa é admin.
+
+Até 09/10/2026 valia o `User.role` gravado (o mais alto) em qualquer igreja,
+e o financeiro da B via a B como admin: inscrições recentes e mural.
+
 ## Conteúdo por perfil
 
 | Bloco | Quem recebe | Descrição |

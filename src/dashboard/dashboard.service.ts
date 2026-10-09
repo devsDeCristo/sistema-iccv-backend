@@ -9,6 +9,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import {
   assertChurchAccess,
+  isSuperAdmin,
+  perfilEfetivo,
   perfilNaIgreja,
   SELECT_TENANT,
   TenantRequester,
@@ -152,14 +154,40 @@ export class DashboardService {
     const doVinculo = tenantChurchIds(requester, ADMIN_AREA_ROLES);
     const churchIds = churchId ? [churchId] : doVinculo;
     const todasAsIgrejas = churchIds === null;
-    const perfil = requester?.role ?? null;
+
+    /**
+     * O perfil é **por igreja**. Com uma igreja aberta, vale o que a pessoa é
+     * nela: quem é admin na A e financeiro na B, ao abrir a B, vê a home do
+     * financeiro. Sem igreja escolhida vale o perfil efetivo (o mais alto dos
+     * vínculos que valem), e os blocos de admin — inscrições recentes e mural
+     * — se limitam às igrejas onde ela é admin.
+     *
+     * Até 09/10/2026 valia o `User.role` gravado, o mais alto, em qualquer
+     * igreja: o financeiro de B via a B como admin.
+     */
+    const perfil =
+      churchId && !isSuperAdmin(requester)
+        ? perfilNaIgreja(requester, churchId)
+        : requester
+        ? perfilEfetivo(requester)
+        : null;
+    const igrejasDeAdmin = todasAsIgrejas
+      ? null
+      : churchIds.filter(
+          (id) =>
+            isSuperAdmin(requester) ||
+            perfilNaIgreja(requester, id) === Role.ADMIN,
+        );
+    const doRecorteDeAdmin: Prisma.EventWhereInput = igrejasDeAdmin
+      ? { churchId: { in: igrejasDeAdmin } }
+      : {};
 
     const doRecorte: Prisma.EventWhereInput = todasAsIgrejas
       ? {}
       : { churchId: { in: churchIds } };
 
     /** Publicar notícia é do admin: o financeiro não entra no mural */
-    const veMural = !todasAsIgrejas && perfil !== Role.FINANCE;
+    const veMural = !!igrejasDeAdmin?.length;
 
     const ehDev = perfil === Role.DEV;
     const ehFinanceiro = perfil === Role.FINANCE;
@@ -171,8 +199,8 @@ export class DashboardService {
        * O financeiro não recebe a lista de quem entrou: para ele o que importa
        * não é quem se inscreveu, e sim quem ainda não pagou.
        */
-      ehFinanceiro ? null : this.inscricoesRecentes(doRecorte),
-      veMural ? this.mural(churchIds) : null,
+      ehFinanceiro ? null : this.inscricoesRecentes(doRecorteDeAdmin),
+      veMural ? this.mural(igrejasDeAdmin) : null,
     ]);
 
     const treasury = ehFinanceiro ? await this.tesouraria(doRecorte) : null;
