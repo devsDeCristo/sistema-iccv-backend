@@ -48,6 +48,8 @@ import {
 import { normalizarMostrarQuadrante } from './event-quadrante';
 import {
   SELECT_TENANT,
+  perfilEfetivo,
+  userChurchScope,
   assertChurchAccess,
   churchIdsComPerfil,
   isSuperAdmin,
@@ -1972,17 +1974,41 @@ export class EventService {
    *
    * A igreja do evento já foi conferida pelo `EventTenantGuard`.
    */
+  /**
+   * Inscrever (ou comprar, anexar termo) em nome de outra pessoa é trabalho de
+   * painel, e só para quem já está no cadastro da igreja de quem pede — o
+   * mesmo recorte da lista de usuários, de onde a tela tira a pessoa.
+   *
+   * Sem essa segunda condição, o admin da igreja A inscrevia qualquer pessoa
+   * pelo id num evento da A e, com isso, a trazia para o próprio escopo: daí
+   * lia o cadastro completo dela. Foi metade do caminho da tomada de conta
+   * corrigida em 09/10/2026 (ver `docs/usuarios.md`).
+   */
   private async assertPodeInscrever(requesterId: string, userId: string) {
     if (requesterId === userId) return;
 
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
-      select: { role: true },
+      select: SELECT_TENANT,
     });
 
-    if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) {
+    // o perfil efetivo, e não o gravado (que pode estar atrasado)
+    if (!ADMIN_AREA_ROLES.includes(perfilEfetivo(requester) as Role)) {
       throw new ForbiddenException(
         'Você só pode inscrever a si mesmo neste evento',
+      );
+    }
+
+    if (isSuperAdmin(requester)) return;
+
+    const noCadastro = await this.prisma.user.findFirst({
+      where: { id: userId, ...userChurchScope(requester) },
+      select: { id: true },
+    });
+
+    if (!noCadastro) {
+      throw new ForbiddenException(
+        'Esta pessoa não está no cadastro da sua igreja',
       );
     }
   }

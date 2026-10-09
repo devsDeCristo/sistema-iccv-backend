@@ -32,7 +32,11 @@ import {
   userChurchScope,
 } from 'src/auth/tenant';
 
-import { aplicarConsentimento, separarSensiveis } from './dados-sensiveis';
+import {
+  aplicarConsentimento,
+  CAMPOS_SENSIVEIS,
+  separarSensiveis,
+} from './dados-sensiveis';
 import { ContextoDoAceite, registrarAceite } from 'src/terms/terms.service';
 import { conferirSenhaAtual, hashDaSenha } from 'src/auth/senha';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -163,7 +167,8 @@ export class UserService {
   ): Promise<UserDTO> {
     // as duas travas: a igreja diz quem o admin alcança, e a do dev protege
     // uma conta que não pertence a igreja nenhuma
-    await this.assertCanReachUser(requesterId, id);
+    // trocar a foto é alterar o cadastro: só admin, não financeiro
+    await this.assertCanReachUser(requesterId, id, [Role.ADMIN]);
     await this.assertDevAccountIsUntouchableById(requesterId, id);
 
     return this.prisma.user.update({
@@ -297,7 +302,35 @@ export class UserService {
     // `password` fica de fora: a rota é aberta a qualquer autenticado e o hash
     // não tem por que sair do banco.
     const { password: _password, ...userWithoutPassword } = user;
+
+    // Saúde e religião (LGPD, art. 11) só para quem administra a pessoa: o
+    // financeiro chega ao cadastro para cobrar, e não precisa desses campos
+    if (!(await this.podeVerSensiveis(requesterId, id))) {
+      for (const campo of CAMPOS_SENSIVEIS) delete userWithoutPassword[campo];
+    }
+
     return userWithoutPassword;
+  }
+
+  /**
+   * Os dados sensíveis saem para o próprio titular, chamada interna, super
+   * admin/dev e quem é **admin** de uma igreja que alcança a pessoa.
+   */
+  private async podeVerSensiveis(
+    requesterId: string | undefined,
+    targetId: string,
+  ) {
+    if (!requesterId || requesterId === targetId) return true;
+
+    const requester = await this.getRequester(requesterId);
+    const scope = userChurchScope(requester, [Role.ADMIN]);
+    if (!Object.keys(scope).length) return true; // super admin/dev
+
+    const alcancavel = await this.prisma.user.findFirst({
+      where: { id: targetId, ...scope },
+      select: { id: true },
+    });
+    return !!alcancavel;
   }
 
   /**
@@ -388,6 +421,7 @@ export class UserService {
   private async assertCanReachUser(
     requesterId: string | undefined,
     targetId: string,
+    roles: number[] = ADMIN_AREA_ROLES,
   ) {
     if (!requesterId || requesterId === targetId) return;
 
@@ -397,7 +431,7 @@ export class UserService {
       throw new ForbiddenException('Você só pode ver o seu cadastro');
     }
 
-    await this.assertUserInScope(requester, targetId);
+    await this.assertUserInScope(requester, targetId, roles);
   }
 
   private async getRequester(requesterId: string) {
@@ -411,8 +445,10 @@ export class UserService {
   private async assertUserInScope(
     requester: { role?: number | null; churchId?: string | null } | null,
     targetId: string,
+    // quem alcança: admin e financeiro para ler; só admin para alterar
+    roles: number[] = ADMIN_AREA_ROLES,
   ) {
-    const scope = userChurchScope(requester);
+    const scope = userChurchScope(requester, roles);
     if (!Object.keys(scope).length) return;
 
     const alcancavel = await this.prisma.user.findFirst({
@@ -485,7 +521,8 @@ export class UserService {
    * autenticado subir arquivo para o storage em nome de outra pessoa.
    */
   async assertPodeTrocarFoto(requesterId: string | undefined, id: string) {
-    await this.assertCanReachUser(requesterId, id);
+    // trocar a foto é alterar o cadastro: só admin, não financeiro
+    await this.assertCanReachUser(requesterId, id, [Role.ADMIN]);
     await this.assertDevAccountIsUntouchableById(requesterId, id);
   }
 
@@ -557,7 +594,9 @@ export class UserService {
             );
           }
 
-          await this.assertUserInScope(requester, id);
+          // só as igrejas onde ele é admin: quem é admin em A e financeiro
+          // em B não edita o cadastro de quem só tem relação com B
+          await this.assertUserInScope(requester, id, [Role.ADMIN]);
 
           // Tomada de conta entre igrejas: com o e-mail trocado, o "esqueci a
           // senha" manda o código para o endereço novo. Estar no escopo não
@@ -780,40 +819,45 @@ export class UserService {
       usersWithEvents,
     };
   }
+  /**
+   * Grupos de inscrição em que a pessoa está — confirmada ou na lista de
+   * espera.
+   *
+   * Para o painel, só os de eventos das igrejas de quem pede: a pessoa pode
+   * estar em evento de outra igreja, e aquilo (inclusive o link do grupo de
+   * WhatsApp) não é da conta dele. O link também não sai nos grupos da lista
+   * de espera: quem espera ainda não entrou.
+   */
   async findUserGroups(userId: string, requesterId?: string) {
     await this.assertCanReachUser(requesterId, userId);
 
+    const requester =
+      requesterId && requesterId !== userId
+        ? await this.getRequester(requesterId)
+        : null;
+    const churchIds = requester ? tenantChurchIds(requester) : null;
+    const daIgreja = churchIds
+      ? { event: { churchId: { in: churchIds } } }
+      : {};
+
     const [presentGroups, waitlistGroups] = await Promise.all([
-      // Grupos onde o usuário está confirmado (inscrito)
       this.prisma.groupRoles.findMany({
         where: {
-          roles: {
-            some: {
-              EventOnUsers: {
-                some: { userId },
-              },
-            },
-          },
+          ...daIgreja,
+          roles: { some: { EventOnUsers: { some: { userId } } } },
         },
       }),
-
-      // Grupos onde o usuário está na lista de espera
       this.prisma.groupRoles.findMany({
         where: {
-          roles: {
-            some: {
-              Waitlist: {
-                some: { userId },
-              },
-            },
-          },
+          ...daIgreja,
+          roles: { some: { Waitlist: { some: { userId } } } },
         },
       }),
     ]);
 
     return {
       present: presentGroups,
-      waitlist: waitlistGroups,
+      waitlist: waitlistGroups.map(({ link: _link, ...grupo }) => grupo),
     };
   }
 }

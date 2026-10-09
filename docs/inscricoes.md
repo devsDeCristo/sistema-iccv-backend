@@ -113,8 +113,7 @@ início do evento** (`event.startDate`), não na data da inscrição.
 
 **Envio do termo assinado** — `POST :idEvent/users/:idUser/guardian-term`
 (multipart, campo `termFile`), sem `@Roles`: vale para o próprio usuário e
-para quem tem permissão de inscrever terceiros (`assertPodeInscrever`,
-`ADMIN_AREA_ROLES`). Recusa `404` sem inscrição, `400` se `NOT_REQUIRED`. O
+para quem tem permissão de inscrever terceiros (`assertPodeInscrever`). Recusa `404` sem inscrição, `400` se `NOT_REQUIRED`. O
 arquivo vira data URI gravado em `signedTermUrl` (sem Storage — cada termo
 é um arquivo só). Todo reenvio, mesmo após recusa, volta o status para
 `PENDING` e limpa motivo e dados de revisão anteriores.
@@ -179,3 +178,20 @@ organizadora — sem líder vinculado, sai sem assinatura.
 Arquivo: `src/event/event.service.ts` (`sendEmailConfirmation`,
 `renderTickets`, `renderEventBanner`, `renderSignature`). Tela relacionada:
 `ic-front, docs/minhas-inscricoes.md`.
+
+## Inscrição em nome de outra pessoa (`assertPodeInscrever`)
+
+Vale para inscrever, comprar na loja e anexar termo por outra pessoa
+(`POST :idEvent/users/:idUser`, `…/products`, `…/guardian-term`). Para fazer
+isso é preciso:
+
+- ter perfil de painel efetivo (`ADMIN_AREA_ROLES`, o perfil calculado dos
+  vínculos que valem, e não o gravado);
+- a pessoa já estar no cadastro da igreja de quem pede (`userChurchScope`), o
+  mesmo recorte da lista de usuários de onde a tela "adicionar pessoa" tira
+  quem inscrever. Super admin e dev inscrevem qualquer pessoa.
+
+**Por quê (09/10/2026):** antes bastava o perfil de quem pedia. O admin da
+igreja A inscrevia qualquer pessoa pelo id num evento da A e, com isso, a
+trazia para o próprio escopo, onde lia o cadastro completo. Foi metade do
+caminho da tomada de conta descrita em `docs/usuarios.md`.

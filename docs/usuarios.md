@@ -118,9 +118,19 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   pela tela de perfil (`PUT /users/me`) — usar `PUT /users/:id` diretamente
   para o próprio id responde `403` pedindo para usar a tela de perfil (evita
   trocar CPF/e-mail sem a validação de `updateMe`).
-- **Admin/Financeiro/Super admin/Dev:** editam cadastro de gente da própria
-  igreja (`assertUserInScope`); fora dela, `403` ("Este usuário é de outra
-  igreja").
+- **Quem alcança o cadastro de quem (`assertUserInScope`, `assertCanReachUser`):**
+  - **ler** (`GET /users/:id`, `/users/:id/groups`): admin e financeiro das
+    igrejas da pessoa. O financeiro **não recebe saúde nem religião**
+    (`CAMPOS_SENSIVEIS`, LGPD art. 11); só quem é admin de uma igreja da
+    pessoa, o super admin/dev ou o próprio titular recebem;
+  - **alterar** (`PUT /users/:id`, foto): só quem é **admin** de uma igreja
+    da pessoa. Quem é admin na A e financeiro na B não edita quem só tem
+    relação com a B. Até 09/10/2026 o escopo de edição e da foto incluía as
+    igrejas onde ele era só financeiro;
+  - fora disso, `403` ("Este usuário é de outra igreja").
+- **Grupos da pessoa (`GET /users/:id/groups`):** para o painel, só os de
+  eventos das igrejas de quem pede (antes vinham os de todas, com o link do
+  WhatsApp). O link nunca sai nos grupos da lista de espera.
 - **Campo `role` só é considerado se quem edita for admin.** Para os demais,
   `role` e `churchRoles` são descartados do corpo antes de gravar (o
   formulário de perfil manda o objeto inteiro de volta).
