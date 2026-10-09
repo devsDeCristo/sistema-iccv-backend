@@ -207,7 +207,13 @@ class SessaoDaIgreja {
     this.status = 'CONNECTING';
     this.lastError = null;
 
-    const { fetchLatestBaileysVersion, makeWASocket } = await loadBaileys();
+    const {
+      fetchLatestBaileysVersion,
+      isJidBroadcast,
+      isJidNewsletter,
+      makeCacheableSignalKeyStore,
+      makeWASocket,
+    } = await loadBaileys();
 
     const { state, saveCreds } = await useDatabaseAuthState(
       this.prisma,
@@ -217,10 +223,23 @@ class SessaoDaIgreja {
     // "aparelho desatualizado" que derruba a conexão.
     const { version } = await fetchLatestBaileysVersion();
 
+    const logger = this.criaLogger();
+
     const socket = makeWASocket({
       version,
-      auth: state,
-      logger: this.criaLogger(),
+      auth: {
+        creds: state.creds,
+        // Cache em memória (5 min) na frente do banco: um disparo para vários
+        // grupos seguidos relê as mesmas sessões dos mesmos participantes
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      logger,
+      // Status dos contatos, listas de transmissão e canais: o número da
+      // igreja recebe tudo isso, e decifrar cada um é trabalho jogado fora —
+      // o sistema só envia para grupos. Grupo e conversa individual NÃO entram
+      // aqui: por eles chegam os pedidos de reenvio de quem não conseguiu
+      // decifrar a nossa mensagem e os avisos de troca de chave de contato.
+      shouldIgnoreJid: (jid) => !!(isJidBroadcast(jid) || isJidNewsletter(jid)),
       // nome que aparece na lista de aparelhos conectados do celular
       browser: ['ICCV Eventos', 'Chrome', '1.0.0'],
       // sem isto o sistema fica "online" e o celular deixa de notificar o dono

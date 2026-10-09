@@ -73,16 +73,28 @@ export async function useDatabaseAuthState(
         get: async (tipo, ids) => {
           const encontrados: { [id: string]: any } = {};
 
+          // Uma consulta para todas, e não uma por chave: mandar para um grupo
+          // pede a sessão de cada aparelho de cada participante — num grupo
+          // de mil pessoas, milhares de ids de uma vez.
+          const linhas = await prisma.whatsappAuth.findMany({
+            where: { churchId, id: { in: ids.map((id) => chaveDe(tipo, id)) } },
+            select: { id: true, data: true },
+          });
+          const porChave = new Map(linhas.map((l) => [l.id, l.data]));
+
           for (const id of ids) {
-            let valor = await ler(chaveDe(tipo, id));
+            const data = porChave.get(chaveDe(tipo, id));
+            if (!data) continue;
+
+            let valor = JSON.parse(data, BufferJSON.reviver);
 
             // A biblioteca espera este tipo já desempacotado; os outros ela
             // consome como vieram.
-            if (tipo === 'app-state-sync-key' && valor) {
+            if (tipo === 'app-state-sync-key') {
               valor = proto.Message.AppStateSyncKeyData.fromObject(valor);
             }
 
-            if (valor) encontrados[id] = valor;
+            encontrados[id] = valor;
           }
 
           return encontrados as {

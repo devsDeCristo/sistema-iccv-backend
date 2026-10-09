@@ -77,6 +77,19 @@ confere o perfil no banco, porque o perfil do token pode estar defasado em até
 - **Credenciais no banco** (`WhatsappAuth`, tabela `whatsapp_auth`), não em
   disco: o container é recriado a cada deploy, e gravar em arquivo obrigaria a
   parear de novo a cada versão.
+- **Leitura das chaves em lote, com cache:** enviar para um grupo pede a
+  sessão de cada aparelho de cada participante, milhares de chaves num grupo
+  grande. O `get` do `useDatabaseAuthState` busca todas numa consulta só
+  (`findMany`). Até 09/10/2026 era uma consulta por chave, em sequência. Na
+  frente do banco fica o cache em memória do Baileys
+  (`makeCacheableSignalKeyStore`, 5 minutos), que poupa o banco num disparo
+  para vários grupos seguidos.
+- **O que a sessão ignora (`shouldIgnoreJid`):** status dos contatos, listas de
+  transmissão e canais. O número recebe tudo isso, e decifrar seria trabalho
+  jogado fora, porque o sistema só envia para grupos. **Grupos e conversas
+  individuais não podem ser ignorados:** por eles chegam os pedidos de reenvio
+  de quem não conseguiu decifrar a nossa mensagem ("Aguardando mensagem") e os
+  avisos de troca de chave dos contatos.
 - **Fila de envio por igreja:** todo envio passa por uma fila única com pausa
   sorteada entre 8s e 25s. Evita rajada de mensagens idênticas, que é
   assinatura de robô e motivo de bloqueio do número.
