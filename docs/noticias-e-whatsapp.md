@@ -12,7 +12,7 @@ dela via Baileys. Tela correspondente em `ic-front/docs/noticias.md`.
 | `title`, `summary`, `content` | título, chamada curta (feed) e corpo em HTML (editor rico) |
 | `isPublished` | rascunho não aparece no feed |
 | `publishedAt` nulo com `isPublished` | **agendada**: publicada, mas fora do mural até o primeiro horário agendado |
-| `publishedAt` | data da **primeira** publicação — republicar depois de virar rascunho não muda a ordem |
+| `publishedAt` | data da publicação, que ordena o feed. Republicar depois de virar rascunho não muda; **cada disparo agendado atualiza** (ver Agendamento) |
 | `churchId` | igreja dona da notícia (quem administra/reenvia); `null` só no histórico do super admin |
 | `eventId` | público do anúncio: `null` é geral (todo mundo vê), preenchido restringe a quem está inscrito ou na lista de espera do evento |
 | `imageUrl` | capa opcional, sobe para o Firebase |
@@ -106,6 +106,9 @@ Regras:
   publicada **e** com data, então ela fica fora do mural e não dispara ao
   salvar. No primeiro horário, o relógio grava `publishedAt` e ela entra no
   mural e sai no WhatsApp. O dashboard também conta só as que estão no ar.
+- **Cada disparo agendado é uma nova publicação:** grava `publishedAt` com
+  o momento do disparo, então a notícia mostra a data mais recente e volta ao
+  topo do mural. Reenvio manual não mexe na data.
 - **Rascunho fica parado:** o horário passa e o agendamento segue para o
   próximo, mas nada é publicado nem enviado. Até 09/10/2026 o rascunho era
   publicado na hora marcada; agora rascunho e agendamento são escolhas
@@ -121,8 +124,18 @@ Regras:
   - **Uma réplica:** a reserva protege contra rodadas sobrepostas no mesmo
     processo e também entre processos. A API roda com 1 réplica de qualquer
     forma, por causa do cron de conciliação.
-- **Salvar:** `PUT /news/:id/schedules` troca a lista inteira e já devolve o
-  `nextRunAt` calculado de cada agendamento.
+- **Salvar:** `PUT /news/:id/schedules` troca os agendamentos **pendentes**
+  pelos do corpo e já devolve o `nextRunAt` calculado de cada um. O "uma vez"
+  que já passou (`nextRunAt` nulo) fica como histórico: a tela o mostra
+  desabilitado, ele não volta no corpo e o salvar não o apaga.
+  - **Transação interativa:** apagar e gravar ficam numa transação
+    interativa, um passo esperando o outro. Até 09/10/2026 era a forma em array
+    (`$transaction([deleteMany, createMany])`). O middleware de auditoria lê
+    as linhas antes do `deleteMany`, e no array o Prisma executava o
+    `createMany` primeiro. O horário era gravado e apagado em seguida, sem erro
+    nenhum: a tela confirmava, mas o agendamento sumia. É a mesma armadilha
+    documentada em `password-reset.service.ts`. **Não use a forma em array
+    neste projeto.**
 
 ## Histórico de disparos (`NewsDispatch`)
 

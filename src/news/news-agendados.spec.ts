@@ -57,6 +57,11 @@ describe('NewsService — disparos agendados', () => {
     await service.dispararVencidos(AGORA);
 
     expect(dispara).toHaveBeenCalledWith('n1', 'SCHEDULE');
+    // nova publicação: a data passa a ser a do disparo
+    expect(prisma.news.update).toHaveBeenCalledWith({
+      where: { id: 'n1' },
+      data: { publishedAt: AGORA },
+    });
     expect(prisma.newsSchedule.updateMany).toHaveBeenCalledWith({
       where: { id: 'a1', nextRunAt: brt('2026-10-06T12:00') },
       data: { nextRunAt: brt('2026-10-13T12:00'), lastRunAt: AGORA },
@@ -176,5 +181,35 @@ describe('NewsService — calendário', () => {
     await expect(
       service.calendar(brt('2026-01-01T00:00'), brt('2026-06-01T00:00')),
     ).rejects.toThrow('62 dias');
+  });
+});
+
+describe('NewsService — salvar agendamentos', () => {
+  it('troca só os pendentes: o "uma vez" que já passou fica de histórico', async () => {
+    const tx = {
+      newsSchedule: { deleteMany: jest.fn(), createMany: jest.fn() },
+    };
+    const prisma = {
+      news: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'n1', churchId: 'c1' }),
+      },
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ role: 1, churchRoles: [] }),
+      },
+      newsSchedule: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
+    };
+    const service = new NewsService(prisma as any, {} as any);
+
+    await service.saveSchedules(
+      'n1',
+      [{ kind: 'WEEKLY', weekdays: [2], time: '12:00' }],
+      'u1',
+    );
+
+    expect(tx.newsSchedule.deleteMany).toHaveBeenCalledWith({
+      where: { newsId: 'n1', NOT: { kind: 'ONCE', nextRunAt: null } },
+    });
+    expect(tx.newsSchedule.createMany).toHaveBeenCalled();
   });
 });

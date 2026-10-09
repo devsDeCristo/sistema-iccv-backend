@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { runAsJob } from 'src/context/request.context';
-import { NewsDispatchOrigin } from '@prisma/client';
+import { NewsDispatchOrigin, NewsScheduleKind } from '@prisma/client';
 import { EventStatus, PrismaService } from '../prisma';
 import {
   SELECT_TENANT,
@@ -362,8 +362,12 @@ export class NewsService {
   }
 
   /**
-   * Troca a lista inteira de agendamentos da notícia pela que veio do
-   * formulário. Lista vazia cancela todos.
+   * Troca os agendamentos **pendentes** da notícia pelos que vieram do
+   * formulário. Lista vazia cancela todos os pendentes.
+   *
+   * O "uma vez" que já passou (`nextRunAt` nulo) fica: é o histórico que a
+   * tela mostra desabilitado, e não volta no corpo — validado de novo, seria
+   * recusado por não ser data futura.
    */
   async saveSchedules(
     id: string,
@@ -389,12 +393,22 @@ export class NewsService {
       validarAgendamento(entrada, agora),
     );
 
-    await this.prisma.$transaction([
-      this.prisma.newsSchedule.deleteMany({ where: { newsId: id } }),
-      this.prisma.newsSchedule.createMany({
+    // Transação interativa, e não a forma em array: o middleware de auditoria
+    // lê as linhas antes do `deleteMany`, e no array o Prisma enfileira as
+    // operações na ordem em que o middleware as solta — o `createMany` passava
+    // na frente e o `deleteMany` apagava o horário recém-gravado. Mesmo caso
+    // do `password-reset.service.ts`.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.newsSchedule.deleteMany({
+        where: {
+          newsId: id,
+          NOT: { kind: NewsScheduleKind.ONCE, nextRunAt: null },
+        },
+      });
+      await tx.newsSchedule.createMany({
         data: prontos.map((pronto) => ({ ...pronto, newsId: id })),
-      }),
-    ]);
+      });
+    });
 
     return this.prisma.newsSchedule.findMany({
       where: { newsId: id },
@@ -527,13 +541,13 @@ export class NewsService {
       if (disparadas.has(news.id)) continue;
       disparadas.add(news.id);
 
-      // agendada que ainda não estava no ar: entra no mural agora
-      if (!news.publishedAt) {
-        await this.prisma.news.update({
-          where: { id: news.id },
-          data: { publishedAt: agora },
-        });
-      }
+      // Cada disparo agendado é uma nova publicação: a data passa a ser a
+      // deste disparo, e a notícia volta ao topo do mural. Vale também para a
+      // agendada que ainda não estava no ar, que entra nele agora.
+      await this.prisma.news.update({
+        where: { id: news.id },
+        data: { publishedAt: agora },
+      });
 
       this.logger.log(`Disparo agendado da notícia ${news.id}`);
       this.disparaEmSegundoPlano(news.id, NewsDispatchOrigin.SCHEDULE);

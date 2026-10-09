@@ -895,7 +895,8 @@ model News {
   imageUrl    String?
   /// rascunho não aparece no feed
   isPublished Boolean            @default(false)
-  /// data da primeira publicação — é por ela que o feed ordena
+  /// data da publicação — é por ela que o feed ordena. Cada disparo agendado
+  /// conta como nova publicação e a atualiza
   publishedAt DateTime?
   authorId    String?
   createdAt   DateTime           @default(now())
