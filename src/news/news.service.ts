@@ -12,6 +12,7 @@ import {
   SELECT_TENANT,
   assertChurchAccess,
   churchIdsComPerfil,
+  isSuperAdmin,
   tenantChurchIds,
 } from 'src/auth/tenant';
 import { Role } from 'src/auth/roles';
@@ -149,6 +150,8 @@ const CAMPOS_DO_FEED = {
   author: { select: { fullName: true } },
   // evento do anúncio restrito: o mural mostra de qual ele fala
   event: { select: { id: true, name: true } },
+  // de qual igreja saiu: no aviso para todos, é o que o mural mostra
+  church: { select: { id: true, name: true } },
 };
 
 @Injectable()
@@ -179,16 +182,18 @@ export class NewsService {
   }
 
   /** Lista do admin: inclui rascunho, ordenada pela última mexida. */
-  async findAll(requesterId?: string) {
+  async findAll(requesterId?: string, churchId?: string) {
     const requester = requesterId ? await this.getRequester(requesterId) : null;
-    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
 
     return this.prisma.news.findMany({
-      where: churchIds ? { churchId: { in: churchIds } } : {},
+      where: this.recorteDaIgreja(requester, churchId),
       select: {
         ...CAMPOS_DO_FEED,
         isPublished: true,
         updatedAt: true,
+        // a igreja define por qual número de WhatsApp a notícia sai: o
+        // formulário consulta a situação dele para avisar quando não há
+        churchId: true,
         // destinos do WhatsApp com o resultado de cada envio: é o que a lista
         // do painel usa para mostrar "enviado", "pendente" ou o motivo da falha
         groups: {
@@ -224,10 +229,18 @@ export class NewsService {
 
     const autor = authorId ? await this.getRequester(authorId) : null;
     const eventId = await this.resolvePublico(autor, data.eventId);
-    await this.assertDestinosDaIgreja(autor, data.groupRoleIds);
+    const igrejaDaNoticia = await this.igrejaDaPublicacao(
+      autor,
+      eventId,
+      data.churchId,
+    );
     const links = normalizaLinks(data.groupLinks);
-
-    const igrejaDaNoticia = await this.igrejaDaPublicacao(autor, eventId);
+    await this.assertEventoDaIgreja(eventId, igrejaDaNoticia);
+    await this.assertDestinosDaIgreja(
+      igrejaDaNoticia,
+      data.groupRoleIds,
+      links,
+    );
 
     const noticia = await this.prisma.news.create({
       data: {
@@ -282,8 +295,16 @@ export class NewsService {
       data.eventId === undefined
         ? atual.eventId
         : await this.resolvePublico(requester, data.eventId);
-    await this.assertDestinosDaIgreja(requester, data.groupRoleIds);
     const links = normalizaLinks(data.groupLinks);
+    // Trocar de igreja na edição: a nova tem que ser uma que a pessoa
+    // administra (a atual já foi conferida acima). Evento e destinos passam a
+    // ser cobrados contra a nova — os da igreja anterior são recusados.
+    const igreja =
+      data.churchId && data.churchId !== atual.churchId
+        ? await this.igrejaDaPublicacao(requester, null, data.churchId)
+        : atual.churchId;
+    await this.assertEventoDaIgreja(eventId, igreja);
+    await this.assertDestinosDaIgreja(igreja, data.groupRoleIds, links);
 
     const extensao = data.imageFile
       ? resolveImageExtension(data.imageFile)
@@ -303,6 +324,7 @@ export class NewsService {
     const atualizada = await this.prisma.news.update({
       where: { id },
       data: {
+        churchId: igreja,
         title: data.title.trim(),
         summary: data.summary?.trim() || null,
         content: data.content,
@@ -425,7 +447,12 @@ export class NewsService {
    *
    * Recortado pelas igrejas que a pessoa administra, como a lista de notícias.
    */
-  async calendar(from: Date, to: Date, requesterId?: string) {
+  async calendar(
+    from: Date,
+    to: Date,
+    requesterId?: string,
+    churchId?: string,
+  ) {
     if (
       Number.isNaN(from.getTime()) ||
       Number.isNaN(to.getTime()) ||
@@ -438,8 +465,7 @@ export class NewsService {
     }
 
     const requester = requesterId ? await this.getRequester(requesterId) : null;
-    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
-    const daIgreja = churchIds ? { churchId: { in: churchIds } } : {};
+    const daIgreja = this.recorteDaIgreja(requester, churchId);
     const noticia = { select: { id: true, title: true } };
 
     const [feitos, agendamentos] = await Promise.all([
@@ -749,7 +775,11 @@ export class NewsService {
         id: true,
         name: true,
         link: true,
-        event: { select: { id: true, name: true, status: true } },
+        // a igreja do evento: o formulário só oferece os grupos da igreja da
+        // notícia
+        event: {
+          select: { id: true, name: true, status: true, churchId: true },
+        },
       },
       orderBy: [{ event: { startDate: 'desc' } }, { name: 'asc' }],
     });
@@ -820,17 +850,26 @@ export class NewsService {
   /**
    * Igreja que assina a notícia — quem vai poder editá-la e reenviá-la depois.
    *
-   * Com um vínculo só não há dúvida. Com mais de um, a igreja do evento
-   * escolhido resolve; sem evento, fica com a primeira igreja da pessoa, que é
-   * a única resposta possível sem inventar uma pergunta a mais no formulário.
-   * Do super admin sai nula: aviso do sistema, sem dono.
+   * Em ordem: a escolhida no formulário (`churchId`, quem administra mais de
+   * uma escolhe); a do evento do público; a primeira igreja da pessoa. Do super
+   * admin sem vínculo e sem evento sai nula: aviso do sistema, sem dono — e
+   * sem WhatsApp.
    */
   private async igrejaDaPublicacao(
     autor: { role?: number | null; churchRoles?: any[] | null } | null,
     eventId: string | null,
+    pedida?: string | null,
   ): Promise<string | null> {
+    // escolhida no formulário: só uma que a pessoa administra
+    if (pedida) {
+      assertChurchAccess(autor, pedida, {
+        roles: [Role.ADMIN],
+        message: 'Você não administra a igreja escolhida para a notícia',
+      });
+      return pedida;
+    }
+
     const minhas = churchIdsComPerfil(autor, [Role.ADMIN]);
-    if (!minhas.length) return null;
 
     if (eventId) {
       const evento = await this.prisma.event.findUnique({
@@ -838,10 +877,34 @@ export class NewsService {
         select: { churchId: true },
       });
 
-      if (evento && minhas.includes(evento.churchId)) return evento.churchId;
+      if (evento && (isSuperAdmin(autor) || minhas.includes(evento.churchId))) {
+        return evento.churchId;
+      }
     }
 
-    return minhas[0];
+    return minhas[0] ?? null;
+  }
+
+  /**
+   * Recorte das telas do admin. Com `churchId`, a tela é daquela igreja — a
+   * visão é por igreja, escolhida no seletor —, e ela precisa ser uma que a
+   * pessoa administra (super admin e dev alcançam todas). Sem `churchId`, todas
+   * as que ela alcança.
+   */
+  private recorteDaIgreja(
+    requester: { role?: number | null; churchRoles?: any[] | null } | null,
+    churchId?: string,
+  ) {
+    if (churchId) {
+      assertChurchAccess(requester, churchId, {
+        roles: [Role.ADMIN],
+        message: 'Você não administra esta igreja',
+      });
+      return { churchId };
+    }
+
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
+    return churchIds ? { churchId: { in: churchIds } } : {};
   }
 
   private async getRequester(requesterId: string) {
@@ -899,27 +962,56 @@ export class NewsService {
   }
 
   /**
-   * Os grupos de WhatsApp vêm do formulário como ids: sem conferir a igreja de
-   * cada um, um admin marcaria o grupo de um evento da igreja vizinha e a
-   * mensagem sairia lá.
+   * Os destinos de WhatsApp têm que ser da igreja **da notícia** — é pelo
+   * número dela que a mensagem sai. Conferir só "igreja que o admin
+   * administra" deixava quem administra duas mandar a notícia de uma nos
+   * grupos dos eventos da outra.
+   *
+   * Notícia sem igreja (super admin sem vínculo) não tem número por onde sair:
+   * destino nenhum é aceito.
    */
   private async assertDestinosDaIgreja(
-    requester: { role?: number | null; churchId?: string | null } | null,
+    igreja: string | null,
     groupRoleIds?: string[],
+    links?: string[],
   ) {
-    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
-    if (!churchIds || !groupRoleIds?.length) return;
+    const temDestino = !!groupRoleIds?.length || !!links?.length;
+    if (!temDestino) return;
 
-    const permitidos = await this.prisma.groupRoles.count({
-      where: {
-        id: { in: groupRoleIds },
-        event: { churchId: { in: churchIds } },
-      },
+    if (!igreja) {
+      throw new BadRequestException(
+        'Notícia sem igreja não sai no WhatsApp: não há número por onde enviar.',
+      );
+    }
+
+    if (!groupRoleIds?.length) return;
+
+    const daIgreja = await this.prisma.groupRoles.count({
+      where: { id: { in: groupRoleIds }, event: { churchId: igreja } },
     });
 
-    if (permitidos !== new Set(groupRoleIds).size) {
+    if (daIgreja !== new Set(groupRoleIds).size) {
       throw new BadRequestException(
         'Há grupos de eventos de outra igreja na lista de destinos',
+      );
+    }
+  }
+
+  /** O evento do público tem que ser da igreja da notícia. */
+  private async assertEventoDaIgreja(
+    eventId: string | null,
+    igreja: string | null,
+  ) {
+    if (!eventId) return;
+
+    const evento = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { churchId: true },
+    });
+
+    if (evento?.churchId !== igreja) {
+      throw new BadRequestException(
+        'O evento escolhido é de outra igreja que não a da notícia',
       );
     }
   }

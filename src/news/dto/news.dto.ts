@@ -152,6 +152,18 @@ export class NewsDto {
   @IsString({ each: true })
   groupLinks?: string[];
 
+  @ApiProperty({
+    description:
+      'Igreja da notícia: define o número de WhatsApp e o nome que o mural ' +
+      'mostra. Na criação, sem ela vale a do evento ou a primeira que quem ' +
+      'publica administra; na edição, ausente mantém a atual.',
+    required: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsString()
+  churchId?: string;
+
   /** Preenchido pelo controller a partir do multipart, não vem no body */
   imageFile?: Express.Multer.File;
 }

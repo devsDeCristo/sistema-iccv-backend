@@ -24,13 +24,13 @@ Arquivos: `src/news/news.service.ts`, `src/news/news.controller.ts`, `src/news/d
 | Método | Caminho | Quem pode | O que faz |
 | --- | --- | --- | --- |
 | GET | `/news` | qualquer autenticado | feed: só publicadas, ordenadas por `publishedAt`/`createdAt` desc |
-| GET | `/news/admin` | admin | lista completa, com rascunho e status de envio por grupo |
+| GET | `/news/admin?churchId` | admin | lista completa da igreja escolhida, com rascunho e status de envio por grupo |
 | GET | `/news/whatsapp-groups` | admin | grupos de inscrição com link preenchido, de eventos ativos ou em teste |
 | POST | `/news` | admin | cria (multipart, por causa da imagem) |
 | PUT | `/news/:id` | admin | edita |
 | POST | `/news/:id/whatsapp` | admin | reenvio manual para todos os destinos marcados |
 | PUT | `/news/:id/schedules` | admin | grava os agendamentos de disparo (a lista substitui a atual; vazia cancela todos) |
-| GET | `/news/calendar?from&to` | admin | disparos feitos e agendados no período (até 62 dias), para o calendário da tela |
+| GET | `/news/calendar?from&to&churchId` | admin | disparos feitos e agendados no período (até 62 dias), para o calendário da tela |
 | DELETE | `/news/:id` | admin | exclui |
 
 `GET /news/admin` é rota separada da pública de propósito: o `RolesGuard`
@@ -39,12 +39,37 @@ confere o perfil no banco, porque o perfil do token pode estar defasado em até
 
 ## Regras de negócio
 
-- **Igreja da notícia:** com um vínculo só, não há dúvida; com mais de um, vale
-  a igreja do evento escolhido, e sem evento a primeira igreja do admin.
-  Notícia de outra igreja não se edita, apaga nem reenvia (`403`).
-- **Destinos (`groupRoleIds`):** grupos de inscrição de eventos, cada um com um
-  link de convite de WhatsApp. Um admin só pode marcar grupos de eventos da
-  própria igreja — misturar grupo de igreja vizinha dá `400`.
+- **Multitenant:** tudo na notícia gira em torno da igreja **dela**, e não das
+  igrejas de quem publica. O caso a cuidar é o admin de duas igrejas.
+- **Igreja da notícia (`churchId`):** é escolhida na criação e pode ser
+  trocada na edição. Para trocar, a pessoa precisa administrar a atual e a
+  nova (senão `403`), e o evento do público e os grupos passam a ser cobrados
+  contra a nova. Ela define o número de WhatsApp por onde a notícia sai e o nome que
+  o mural mostra. A escolha segue esta ordem (`igrejaDaPublicacao`):
+  1. a enviada pelo formulário (`churchId`), que precisa ser uma igreja que a
+     pessoa administra (senão `403`);
+  2. a do evento do público;
+  3. a primeira igreja da pessoa.
+
+  O super admin sem vínculo e sem evento publica uma notícia sem igreja: ela
+  vai ao mural, mas não ao WhatsApp. Notícia de outra igreja não se edita,
+  apaga nem reenvia (`403`).
+- **Público:** o evento escolhido precisa ser da igreja da notícia
+  (`assertEventoDaIgreja`, `400`).
+- **Destinos (`groupRoleIds` e links):** os grupos de inscrição precisam ser
+  de eventos da igreja **da notícia** (`assertDestinosDaIgreja`, `400`).
+  Notícia sem igreja não aceita destino nenhum. Até 09/10/2026 a regra
+  conferia "alguma igreja que o admin administra", e quem administrava duas
+  mandava a notícia de uma nos grupos da outra.
+- **Telas por igreja (`churchId` na lista e no calendário):** sem
+  `churchId`, a resposta traz todas as igrejas que a pessoa alcança; é a visão
+  "Todas as igrejas", padrão da tela. Com `churchId`, só aquela igreja. `recorteDaIgreja` exige que
+  seja uma igreja que a pessoa administra (super admin e dev alcançam todas,
+  senão `403`).
+- **Mural:** o feed traz `church` (id e nome); o aviso para todos mostra de
+  qual igreja saiu. A lista do admin traz `churchId`, e os grupos elegíveis
+  (`GET /news/whatsapp-groups`) trazem `event.churchId`, para o formulário
+  recortar.
 - **Campo ausente vs. vazio:** `eventId` ausente no PUT não mexe no público
   atual; string vazia volta a valer para todos. Mesma lógica de "não mexi
   nisso" usada em outras edições parciais do sistema.

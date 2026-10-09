@@ -64,8 +64,12 @@ export class NewsController {
   @Get('admin')
   @Roles(...ADMIN_ROLES)
   @ApiOperation({ summary: 'Todas as notícias, inclusive rascunhos' })
-  findAll(@Req() req: { user?: { userId?: string } }) {
-    return this.newsService.findAll(req.user?.userId);
+  findAll(
+    @Req() req: { user?: { userId?: string } },
+    // a igreja do seletor da tela; sem ela, todas as que a pessoa alcança
+    @Query('churchId') churchId?: string,
+  ) {
+    return this.newsService.findAll(req.user?.userId, churchId || undefined);
   }
 
   /**
@@ -90,11 +94,13 @@ export class NewsController {
     @Req() req: { user?: { userId?: string } },
     @Query('from') from: string,
     @Query('to') to: string,
+    @Query('churchId') churchId?: string,
   ) {
     return this.newsService.calendar(
       new Date(from),
       new Date(to),
       req.user?.userId,
+      churchId || undefined,
     );
   }
 
