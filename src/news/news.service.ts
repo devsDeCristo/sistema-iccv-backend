@@ -4,6 +4,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { runAsJob } from 'src/context/request.context';
+import { NewsDispatchOrigin } from '@prisma/client';
 import { EventStatus, PrismaService } from '../prisma';
 import {
   SELECT_TENANT,
@@ -18,6 +21,13 @@ import {
 } from 'src/utils/uploadImgFirebase';
 import { WhatsappService } from 'src/whatsapp/whatsapp.service';
 import { NewsDto } from './dto/news.dto';
+import { NewsScheduleDto } from './dto/news-schedule.dto';
+import {
+  MAXIMO_DE_AGENDAMENTOS,
+  proximaExecucao,
+  TOLERANCIA_DE_ATRASO_MS,
+  validarAgendamento,
+} from './agendamento';
 
 /**
  * Tamanho máximo da mensagem.
@@ -27,6 +37,9 @@ import { NewsDto } from './dto/news.dto';
  * 1024 caracteres, então quando a notícia tem foto o limite é bem menor.
  */
 const LIMITE_DO_TEXTO = 3500;
+
+/** O calendário pede um mês por vez; folga para a grade de semanas cheias */
+const PERIODO_MAXIMO_DO_CALENDARIO_MS = 62 * 24 * 60 * 60 * 1000;
 const LIMITE_DA_LEGENDA = 950;
 
 /** Só evento no ar recebe disparo: encerrado não tem por que ser avisado. */
@@ -141,6 +154,8 @@ export class NewsService {
             },
           },
         },
+        // agendamentos de disparo, com o próximo já calculado
+        schedules: { orderBy: { createdAt: 'asc' } },
       },
       orderBy: [{ updatedAt: 'desc' }],
     });
@@ -192,7 +207,9 @@ export class NewsService {
     }
 
     // Depois da imagem subir: a mensagem no WhatsApp sai com a foto junto.
-    if (salva.isPublished) this.disparaEmSegundoPlano(salva.id);
+    if (salva.isPublished) {
+      this.disparaEmSegundoPlano(salva.id, NewsDispatchOrigin.PUBLISH);
+    }
 
     return salva;
   }
@@ -247,7 +264,7 @@ export class NewsService {
     // Só a virada de rascunho para publicada dispara. Corrigir uma vírgula numa
     // notícia já publicada não pode mandar tudo de novo para os grupos.
     if (!atual.isPublished && atualizada.isPublished) {
-      this.disparaEmSegundoPlano(id);
+      this.disparaEmSegundoPlano(id, NewsDispatchOrigin.PUBLISH);
     }
 
     return atualizada;
@@ -280,7 +297,181 @@ export class NewsService {
 
     await this.assertNoticiaDaIgreja(noticia, requesterId);
 
-    return this.disparaNoWhatsapp(id, true);
+    return this.disparaNoWhatsapp(id, NewsDispatchOrigin.MANUAL);
+  }
+
+  /**
+   * Troca a lista inteira de agendamentos da notícia pela que veio do
+   * formulário. Lista vazia cancela todos.
+   */
+  async saveSchedules(
+    id: string,
+    entradas: NewsScheduleDto[],
+    requesterId?: string,
+  ) {
+    const noticia = await this.prisma.news.findUnique({
+      where: { id },
+      select: { id: true, churchId: true },
+    });
+    if (!noticia) throw new NotFoundException('Notícia não encontrada');
+
+    await this.assertNoticiaDaIgreja(noticia, requesterId);
+
+    if (entradas.length > MAXIMO_DE_AGENDAMENTOS) {
+      throw new BadRequestException(
+        `Uma notícia pode ter no máximo ${MAXIMO_DE_AGENDAMENTOS} agendamentos.`,
+      );
+    }
+
+    const agora = new Date();
+    const prontos = entradas.map((entrada) =>
+      validarAgendamento(entrada, agora),
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.newsSchedule.deleteMany({ where: { newsId: id } }),
+      this.prisma.newsSchedule.createMany({
+        data: prontos.map((pronto) => ({ ...pronto, newsId: id })),
+      }),
+    ]);
+
+    return this.prisma.newsSchedule.findMany({
+      where: { newsId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Calendário de disparos da tela de notícias, no período pedido:
+   *
+   * - `feitos`: as rodadas de `NewsDispatch`, com origem e saldo;
+   * - `agendados`: cada ocorrência futura dos agendamentos — "toda terça" vira
+   *   uma entrada por terça do período.
+   *
+   * Recortado pelas igrejas que a pessoa administra, como a lista de notícias.
+   */
+  async calendar(from: Date, to: Date, requesterId?: string) {
+    if (
+      Number.isNaN(from.getTime()) ||
+      Number.isNaN(to.getTime()) ||
+      to <= from
+    ) {
+      throw new BadRequestException('Período inválido.');
+    }
+    if (to.getTime() - from.getTime() > PERIODO_MAXIMO_DO_CALENDARIO_MS) {
+      throw new BadRequestException('O período pode ter no máximo 62 dias.');
+    }
+
+    const requester = requesterId ? await this.getRequester(requesterId) : null;
+    const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
+    const daIgreja = churchIds ? { churchId: { in: churchIds } } : {};
+    const noticia = { select: { id: true, title: true } };
+
+    const [feitos, agendamentos] = await Promise.all([
+      this.prisma.newsDispatch.findMany({
+        where: { at: { gte: from, lt: to }, news: daIgreja },
+        include: { news: noticia },
+        orderBy: { at: 'asc' },
+      }),
+      this.prisma.newsSchedule.findMany({
+        where: { nextRunAt: { not: null, lt: to }, news: daIgreja },
+        include: { news: noticia },
+      }),
+    ]);
+
+    const agendados = agendamentos.flatMap((agendamento) => {
+      const ocorrencias: Date[] = [];
+      let quando = agendamento.nextRunAt;
+
+      // ponytail: teto de ocorrências por agendamento; 62 dias de semanal com
+      // os 7 dias marcados dá 62, bem abaixo
+      while (quando && quando < to && ocorrencias.length < 100) {
+        if (quando >= from) ocorrencias.push(quando);
+        quando = proximaExecucao(agendamento, quando);
+      }
+
+      return ocorrencias.map((at) => ({
+        scheduleId: agendamento.id,
+        kind: agendamento.kind,
+        at,
+        news: agendamento.news,
+      }));
+    });
+
+    agendados.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+    return {
+      feitos: feitos.map(({ newsId: _id, ...feito }) => feito),
+      agendados,
+    };
+  }
+
+  /** O relógio dos agendamentos: a cada minuto, dispara o que venceu. */
+  @Cron(CronExpression.EVERY_MINUTE)
+  dispararAgendados() {
+    return runAsJob('dispararNoticiasAgendadas', () =>
+      this.dispararVencidos(new Date()),
+    );
+  }
+
+  /**
+   * Dispara os agendamentos vencidos e já marca o próximo de cada um.
+   *
+   * - **Sem disparo duplo:** o agendamento só dispara se esta rodada conseguir
+   *   trocar o `nextRunAt` que leu. Uma rodada que atrasou e encontrou a
+   *   próxima no meio do caminho não dispara de novo.
+   * - **Atraso grande:** passou de `TOLERANCIA_DE_ATRASO_MS` (servidor fora do
+   *   ar), pula este e segue para o próximo.
+   * - **Rascunho:** é publicado na hora. O agendamento é o "publicar mais tarde".
+   * - **Dois agendamentos da mesma notícia no mesmo minuto:** sai uma vez só.
+   */
+  async dispararVencidos(agora: Date) {
+    const vencidos = await this.prisma.newsSchedule.findMany({
+      where: { nextRunAt: { lte: agora } },
+      include: {
+        news: { select: { id: true, isPublished: true, publishedAt: true } },
+      },
+    });
+
+    const disparadas = new Set<string>();
+
+    for (const agendamento of vencidos) {
+      const marcado = agendamento.nextRunAt as Date;
+      const atrasado =
+        agora.getTime() - marcado.getTime() > TOLERANCIA_DE_ATRASO_MS;
+
+      const { count } = await this.prisma.newsSchedule.updateMany({
+        where: { id: agendamento.id, nextRunAt: marcado },
+        data: {
+          nextRunAt: proximaExecucao(agendamento, agora),
+          ...(atrasado ? {} : { lastRunAt: agora }),
+        },
+      });
+      if (!count) continue;
+
+      const { news } = agendamento;
+
+      if (atrasado) {
+        this.logger.warn(
+          `Agendamento ${agendamento.id} da notícia ${news.id} perdeu o horário ` +
+            `(${marcado.toISOString()}) e foi pulado.`,
+        );
+        continue;
+      }
+
+      if (disparadas.has(news.id)) continue;
+      disparadas.add(news.id);
+
+      if (!news.isPublished) {
+        await this.prisma.news.update({
+          where: { id: news.id },
+          data: { isPublished: true, publishedAt: news.publishedAt ?? agora },
+        });
+      }
+
+      this.logger.log(`Disparo agendado da notícia ${news.id}`);
+      this.disparaEmSegundoPlano(news.id, NewsDispatchOrigin.SCHEDULE);
+    }
   }
 
   /**
@@ -288,8 +479,8 @@ export class NewsService {
    * ficar esperando o WhatsApp, nem falhar por causa dele. O resultado de cada
    * destino fica gravado em `news_on_group_roles`, que é o que a tela mostra.
    */
-  private disparaEmSegundoPlano(newsId: string) {
-    this.disparaNoWhatsapp(newsId).catch((erro) =>
+  private disparaEmSegundoPlano(newsId: string, origem: NewsDispatchOrigin) {
+    this.disparaNoWhatsapp(newsId, origem).catch((erro) =>
       this.logger.error(`Disparo da notícia ${newsId} falhou: ${erro.message}`),
     );
   }
@@ -306,10 +497,17 @@ export class NewsService {
    * em cada um — pode demorar minutos, e tudo bem, porque roda em segundo
    * plano.
    *
-   * `force` só vem do reenvio manual. No disparo automático ele fica falso para
-   * que republicar uma notícia não repita a mensagem em quem já recebeu.
+   * Reenvio manual e agendamento mandam para todos os destinos. A publicação
+   * pula quem já recebeu, para que republicar uma notícia não repita a
+   * mensagem.
+   *
+   * Cada rodada que tentou algum destino vira uma linha em `NewsDispatch`, o
+   * histórico que o calendário da tela mostra.
    */
-  private async disparaNoWhatsapp(newsId: string, force = false) {
+  private async disparaNoWhatsapp(newsId: string, origem: NewsDispatchOrigin) {
+    const force = origem !== NewsDispatchOrigin.PUBLISH;
+    const inicio = new Date();
+
     const noticia = await this.prisma.news.findUnique({
       where: { id: newsId },
       include: {
@@ -402,6 +600,19 @@ export class NewsService {
           `Notícia ${newsId} não saiu para "${nome}": ${motivo}`,
         );
       }
+    }
+
+    if (enviados + falhas + semLink > 0) {
+      await this.prisma.newsDispatch.create({
+        data: {
+          newsId,
+          origin: origem,
+          at: inicio,
+          sent: enviados,
+          failed: falhas,
+          noLink: semLink,
+        },
+      });
     }
 
     return { enviados, falhas, semLink };

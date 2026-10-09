@@ -911,11 +911,81 @@ model News {
   event       Event?             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   author      User?              @relation(fields: [authorId], references: [id])
   groups      NewsOnGroupRoles[]
+  schedules   NewsSchedule[]
+  dispatches  NewsDispatch[]
 
   @@index([isPublished, publishedAt])
   @@index([churchId])
   @@index([eventId])
   @@map("news")
+}
+
+/// Como um agendamento de disparo se repete
+enum NewsScheduleKind {
+  /// uma vez, em `runAt`
+  ONCE
+  /// toda semana, nos dias de `weekdays`, às `time`
+  WEEKLY
+}
+
+/// Agendamento de disparo da notícia no WhatsApp. Uma notícia pode ter vários:
+/// "sexta às 19h" e "toda terça às 12h" ao mesmo tempo.
+///
+/// Na hora marcada a notícia vai para todos os grupos marcados, como no
+/// reenvio manual. Rascunho é publicado antes: o agendamento é o "publicar
+/// mais tarde". Ver `docs/noticias-e-whatsapp.md`.
+model NewsSchedule {
+  id        String           @id @default(uuid())
+  newsId    String
+  kind      NewsScheduleKind
+  /// `ONCE`: o momento do disparo
+  runAt     DateTime?
+  /// `WEEKLY`: dias da semana, 0 = domingo … 6 = sábado
+  weekdays  Int[]
+  /// `WEEKLY`: horário "HH:mm", no horário de Brasília
+  time      String?
+  /// próximo disparo, já calculado; nulo quando não há mais (o `ONCE` que já
+  /// saiu). É por ele que o relógio procura o que venceu
+  nextRunAt DateTime?
+  /// último disparo feito por este agendamento
+  lastRunAt DateTime?
+  createdAt DateTime         @default(now())
+  news      News             @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@index([nextRunAt])
+  @@index([newsId])
+  @@map("news_schedules")
+}
+
+/// De onde veio um disparo de notícia
+enum NewsDispatchOrigin {
+  /// a publicação da notícia
+  PUBLISH
+  /// o botão de reenviar
+  MANUAL
+  /// um agendamento (`NewsSchedule`)
+  SCHEDULE
+}
+
+/// Histórico dos disparos de notícia no WhatsApp: uma linha por rodada, com o
+/// saldo. É o que o calendário da tela de notícias mostra como "feito".
+/// `NewsOnGroupRoles` guarda só o último envio de cada grupo, e um disparo
+/// semanal apagaria o anterior.
+model NewsDispatch {
+  id     String             @id @default(uuid())
+  newsId String
+  origin NewsDispatchOrigin
+  /// quando a rodada começou
+  at     DateTime           @default(now())
+  sent   Int
+  failed Int
+  /// destinos sem link de WhatsApp preenchido
+  noLink Int
+  news   News               @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@index([at])
+  @@index([newsId])
+  @@map("news_dispatches")
 }
 
 /// Grupos escolhidos como destino da notícia no WhatsApp. O destino é o grupo

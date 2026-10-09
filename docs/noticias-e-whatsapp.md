@@ -28,6 +28,8 @@ Arquivos: `src/news/news.service.ts`, `src/news/news.controller.ts`, `src/news/d
 | POST | `/news` | admin | cria (multipart, por causa da imagem) |
 | PUT | `/news/:id` | admin | edita |
 | POST | `/news/:id/whatsapp` | admin | reenvio manual para todos os destinos marcados |
+| PUT | `/news/:id/schedules` | admin | grava os agendamentos de disparo (a lista substitui a atual; vazia cancela todos) |
+| GET | `/news/calendar?from&to` | admin | disparos feitos e agendados no período (até 62 dias), para o calendário da tela |
 | DELETE | `/news/:id` | admin | exclui |
 
 `GET /news/admin` é rota separada da pública de propósito: o `RolesGuard`
@@ -67,6 +69,55 @@ confere o perfil no banco, porque o perfil do token pode estar defasado em até
   ~3500. O excedente é cortado com reticências.
 - **Eventos elegíveis:** só grupos de eventos `ACTIVE` ou `TEST` aparecem para
   disparo — evento encerrado não recebe aviso.
+
+## Agendamento de disparos (`NewsSchedule`)
+
+A notícia pode ter vários agendamentos, até 20. Cada um é de um destes tipos:
+
+- **Uma vez (`ONCE`):** sai em `runAt`, que precisa ser uma data futura.
+- **Toda semana (`WEEKLY`):** sai em `weekdays` (0 = domingo … 6 = sábado), às
+  `time` ("HH:mm"). Exemplo: toda terça às 12:00.
+
+Regras:
+
+- **Horário de Brasília:** a conta é feita com o fuso explícito (-03:00), sem
+  depender do fuso do container (`src/news/agendamento.ts`).
+- **O que sai:** na hora marcada, a notícia vai para **todos** os grupos
+  marcados, com o texto e a imagem atuais, como no reenvio manual.
+- **Rascunho é publicado na hora marcada:** o agendamento é o "publicar mais
+  tarde".
+- **Relógio:** uma tarefa a cada minuto (`NewsService.dispararAgendados`, com
+  `@Cron`) procura os agendamentos com `nextRunAt` vencido, dispara e grava o
+  próximo `nextRunAt`. O "uma vez" fica com `nextRunAt` nulo depois de sair.
+  - **Sem disparo duplo:** o agendamento só dispara se a rodada conseguir
+    trocar o `nextRunAt` que leu (`updateMany` condicional).
+  - **Mesma notícia, mesmo minuto:** dois agendamentos dela disparam uma vez só.
+  - **Servidor fora do ar:** atraso de mais de 1 hora pula aquele disparo e
+    segue para o próximo, porque "terça às 12h" chegando na quinta confunde.
+  - **Uma réplica:** a reserva protege contra rodadas sobrepostas no mesmo
+    processo e também entre processos. A API roda com 1 réplica de qualquer
+    forma, por causa do cron de conciliação.
+- **Salvar:** `PUT /news/:id/schedules` troca a lista inteira e já devolve o
+  `nextRunAt` calculado de cada agendamento.
+
+## Histórico de disparos (`NewsDispatch`)
+
+Toda rodada de disparo que tentou algum destino grava uma linha com:
+
+- a origem: `PUBLISH` (publicação), `MANUAL` (reenvio) ou `SCHEDULE` (agendamento);
+- quando começou;
+- o saldo: enviados, falhas e destinos sem link.
+
+`NewsOnGroupRoles` guarda só o último envio de cada grupo, e um disparo semanal
+apagaria o anterior. Por isso existe esta tabela. Disparos anteriores a
+09/10/2026 não estão nela.
+
+**Calendário (`GET /news/calendar`):** junta, no período, os disparos feitos
+(`NewsDispatch`) e as próximas ocorrências dos agendamentos. "Toda terça" vira
+uma entrada por terça. O recorte é pelas igrejas que a pessoa administra.
+
+Arquivos: `src/news/agendamento.ts` (calendário, com testes), `src/news/news.service.ts`,
+`src/news/dto/news-schedule.dto.ts`, migração `20261009120000_news_schedules`.
 
 ## Sessão de WhatsApp por igreja (`src/whatsapp`)
 

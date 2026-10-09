@@ -27,6 +27,7 @@ import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 import { NewsService } from './news.service';
 import { NewsDto } from './dto/news.dto';
+import { SaveNewsSchedulesDto } from './dto/news-schedule.dto';
 
 const IMAGEM = FileFieldsInterceptor([{ name: 'imageFile', maxCount: 1 }]);
 
@@ -78,6 +79,25 @@ export class NewsController {
     return this.newsService.findWhatsappGroups(req.user?.userId);
   }
 
+  /**
+   * Calendário de disparos: os feitos (histórico) e os agendados (próximas
+   * ocorrências) no período `from`–`to`, em ISO. Até 62 dias.
+   */
+  @Get('calendar')
+  @Roles(...ADMIN_ROLES)
+  @ApiOperation({ summary: 'Disparos feitos e agendados no período' })
+  calendar(
+    @Req() req: { user?: { userId?: string } },
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    return this.newsService.calendar(
+      new Date(from),
+      new Date(to),
+      req.user?.userId,
+    );
+  }
+
   @Post()
   @Roles(...ADMIN_ROLES)
   @UseInterceptors(IMAGEM)
@@ -124,6 +144,22 @@ export class NewsController {
     @Req() req: { user?: { userId?: string } },
   ) {
     return this.newsService.resendToWhatsapp(id, req.user?.userId);
+  }
+
+  /**
+   * Agendamentos de disparo da notícia: a lista enviada substitui a atual, e
+   * lista vazia cancela todos. Na hora marcada, a notícia vai para todos os
+   * grupos marcados, como no reenvio manual.
+   */
+  @Put(':id/schedules')
+  @Roles(...ADMIN_ROLES)
+  @ApiOperation({ summary: 'Agendar disparos da notícia no WhatsApp' })
+  saveSchedules(
+    @Param('id') id: string,
+    @Req() req: { user?: { userId?: string } },
+    @Body() body: SaveNewsSchedulesDto,
+  ) {
+    return this.newsService.saveSchedules(id, body.schedules, req.user?.userId);
   }
 
   @Delete(':id')
