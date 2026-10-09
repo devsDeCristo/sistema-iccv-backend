@@ -51,6 +51,7 @@ Arquivos: `src/mail/mail.service.ts`, `src/mail/templates/*.html`.
 | `registration-confirmation.html` | confirmação de inscrição no evento | `eventTitle`, `eventDescription`, `userName`, `eventDate`, `INSERT_TICKETS` (lista de ingressos/tipos), `EVENT_BANNER` (capa/logo do evento), `LOCAL`, `ASSINATURA` |
 | `password-reset-code.html` | pedido de redefinição de senha (código) | `userName`, `code`, `expiraEm` |
 | `password-changed.html` | aviso de senha alterada | `userName` |
+| `email-changed.html` | aviso ao e-mail **antigo** quando outra pessoa troca o e-mail da conta (`UserService.update`) | `userName`, `novoEmail` (mascarado), `quem` |
 | `waiting-list-notice.html` | — | não está referenciado por nenhum serviço no código atual; o template existe mas o disparo não foi encontrado |
 
 ### Confirmação de inscrição
@@ -79,6 +80,10 @@ Disparados por `PasswordResetService` (`src/auth/password-reset/password-reset.s
 
 Ambos passam por `trySend`, que engole erro de envio e só loga — a resposta ao
 front é a mesma independente de o e-mail ter saído ou não.
+
+O logo inline (`cid:logo`) dos avisos de conta vem de `LOGO_DO_EMAIL`
+(`src/mail/logo.ts`), usado pela redefinição de senha e pelo aviso de troca de
+e-mail.
 
 ## Testes
 

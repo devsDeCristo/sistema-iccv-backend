@@ -128,6 +128,19 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   Vale para editar dados, trocar foto e mudar permissão; protege contra tomar
   a conta trocando e-mail e pedindo redefinição de senha por fora da trava de
   perfil.
+- **E-mail e CPF de quem tem painel em outra igreja:** quem não é super admin
+  só troca o e-mail ou o CPF de outra pessoa com vínculo de painel
+  (admin/financeiro) se administrar **todas** as igrejas dela
+  (`assertAdministraTodasAsIgrejasDe`); senão, `403`. Os outros campos
+  continuam editáveis dentro do escopo.
+  - **Por quê (09/10/2026):** estar no escopo basta para ter a pessoa inscrita
+    num evento da igreja, e o próprio admin pode inscrever alguém pelo id. O
+    admin da igreja A trocava o e-mail de um admin da igreja B, pedia
+    "esqueci a senha" e assumia a conta: o código ia para o endereço novo.
+- **Troca de e-mail feita por outra pessoa avisa o endereço antigo** (modelo
+  `email-changed`, com o endereço novo mascarado: `fu***@gmail.com`). Vale
+  para qualquer conta, inclusive de usuário comum. Falha de envio não desfaz a
+  troca; fica no log.
 - **Super admin não é editável por quem está abaixo dele** (só outro super
   admin edita um super admin).
 - **Conceder Super Admin:** só quem já é super admin concede.

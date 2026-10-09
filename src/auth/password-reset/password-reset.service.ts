@@ -7,9 +7,9 @@ import {
 import * as bcrypt from 'bcrypt';
 import { BCRYPT_ROUNDS, conferirSenhaAtual } from '../senha';
 import { createHash, randomBytes, randomInt } from 'crypto';
-import * as path from 'path';
 import { PrismaService } from 'src/prisma';
 import { MailService } from 'src/mail/mail.service';
+import { LOGO_DO_EMAIL } from 'src/mail/logo';
 
 /**
  * Tipos de `UserToken`. Redefinição de senha é o 0; um fluxo novo entra como 1
@@ -294,22 +294,6 @@ export class PasswordResetService {
    * branca: o cabeçalho destes dois e-mails é a faixa índigo da marca, e o
    * `logo.png` original é preto — sumiria dentro dela.
    */
-  private get logoAttachment() {
-    return [
-      {
-        filename: 'logo.png',
-        path: path.join(
-          process.cwd(),
-          'src',
-          'mail',
-          'templates',
-          'assets',
-          'logo-branca.png',
-        ),
-        cid: 'logo',
-      },
-    ];
-  }
 
   private async sendCodeEmail(email: string, fullName: string, code: string) {
     const html = this.mailService.loadTemplate('password-reset-code', {
@@ -339,7 +323,7 @@ export class PasswordResetService {
         to,
         subject,
         html,
-        attachments: this.logoAttachment,
+        attachments: LOGO_DO_EMAIL,
       });
     } catch (error) {
       this.logger.error(`Falha ao enviar "${subject}"`, error);

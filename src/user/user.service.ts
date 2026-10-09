@@ -5,6 +5,7 @@ import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma';
@@ -35,6 +36,10 @@ import { aplicarConsentimento, separarSensiveis } from './dados-sensiveis';
 import { ContextoDoAceite, registrarAceite } from 'src/terms/terms.service';
 import { conferirSenhaAtual, hashDaSenha } from 'src/auth/senha';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { MailService } from 'src/mail/mail.service';
+import { LOGO_DO_EMAIL } from 'src/mail/logo';
+import { escapeHtml } from 'src/quadrante/quadrante-pdf';
+import { mascararEmail, mudaAcesso } from './acesso';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -42,7 +47,13 @@ const SENHA_PADRAO =
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService, private jwtService: JwtService) {}
+  private readonly logger = new Logger(UserService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+    private mailService: MailService,
+  ) {}
 
   async create(data: UserDTO, contexto: ContextoDoAceite = {}) {
     const userCpfExists = await this.prisma.user.findFirst({
@@ -547,6 +558,15 @@ export class UserService {
           }
 
           await this.assertUserInScope(requester, id);
+
+          // Tomada de conta entre igrejas: com o e-mail trocado, o "esqueci a
+          // senha" manda o código para o endereço novo. Estar no escopo não
+          // basta — basta a pessoa ter se inscrito num evento da igreja (ou
+          // ser inscrita por ela) —, então o acesso de quem tem painel em
+          // outra igreja só é trocado por quem administra todas as dela.
+          if (requesterId !== id && mudaAcesso(data, userExists)) {
+            await this.assertAdministraTodasAsIgrejasDe(requester, id);
+          }
         }
 
         // o perfil global só tem três valores: dev, super admin e usuário
@@ -654,6 +674,73 @@ export class UserService {
       if (error instanceof HttpException) throw error;
       console.log(error);
       throw new InternalServerErrorException();
+    }
+
+    // Troca de e-mail feita por outra pessoa: o endereço antigo é avisado. Se
+    // a troca foi indevida, é o único jeito de o dono saber — o "esqueci a
+    // senha" já vai para o endereço novo.
+    if (
+      requesterId &&
+      requesterId !== id &&
+      data.email !== undefined &&
+      data.email !== userExists.email &&
+      userExists.email
+    ) {
+      await this.avisaTrocaDeEmail(userExists, data.email, requesterId);
+    }
+  }
+
+  /**
+   * Quem tem vínculo de painel (admin/financeiro) em alguma igreja que o
+   * requisitante não administra não tem o acesso (e-mail, CPF) trocado por
+   * ele. Só o super admin, que alcança todas, ou quem administra todas elas.
+   */
+  private async assertAdministraTodasAsIgrejasDe(
+    requester: TenantRequester | null,
+    targetId: string,
+  ) {
+    const vinculos = await this.prisma.userChurchRole.findMany({
+      where: { userId: targetId },
+      select: { churchId: true },
+    });
+    const minhas = churchIdsComPerfil(requester, [Role.ADMIN]);
+
+    if (vinculos.some((vinculo) => !minhas.includes(vinculo.churchId))) {
+      throw new ForbiddenException(
+        'Esta pessoa tem acesso ao painel de outra igreja: só quem administra ' +
+          'todas as igrejas dela troca o e-mail ou o CPF.',
+      );
+    }
+  }
+
+  /** Falha de e-mail não desfaz a troca: fica no log. */
+  private async avisaTrocaDeEmail(
+    pessoa: { email: string | null; fullName: string },
+    novoEmail: string,
+    requesterId: string,
+  ) {
+    try {
+      const quem = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: { fullName: true },
+      });
+
+      const html = this.mailService.loadTemplate('email-changed', {
+        userName: escapeHtml(pessoa.fullName),
+        novoEmail: escapeHtml(mascararEmail(novoEmail)),
+        quem: escapeHtml(quem?.fullName ?? 'a administração'),
+      });
+
+      await this.mailService.sendMail({
+        to: pessoa.email as string,
+        subject: 'O e-mail da sua conta foi alterado',
+        html,
+        attachments: LOGO_DO_EMAIL,
+      });
+    } catch (erro) {
+      this.logger.error(
+        `Aviso de troca de e-mail não saiu: ${(erro as Error).message}`,
+      );
     }
   }
   async findInsightsEvents(requesterId?: string) {

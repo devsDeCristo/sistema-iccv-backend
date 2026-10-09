@@ -45,7 +45,7 @@ async function logar(
     },
   };
 
-  const users = new UserService(prisma as any, {} as any);
+  const users = new UserService(prisma as any, {} as any, {} as any);
   const auth = new AuthService(users, {} as any, prisma as any);
   return auth.validateUser('123', senha);
 }

@@ -4,10 +4,13 @@ import { UserController } from './user.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from 'src/auth/jwt.strategy/jwt.strategy';
 import { EventModule } from 'src/event/event.module';
+import { MailModule } from 'src/mail/mail.module';
 
 @Module({
   imports: [
     EventModule,
+    // aviso ao e-mail antigo quando outra pessoa troca o e-mail da conta
+    MailModule,
     UserModule,
     //PassportModule,
     JwtModule.register({
