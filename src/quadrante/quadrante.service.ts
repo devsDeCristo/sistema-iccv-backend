@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
 import { PDFDocument } from 'pdf-lib';
+import { MinorApprovalStatus, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { TeamService } from '../team/team.service';
 import { Role } from '../auth/roles';
@@ -116,7 +117,7 @@ export class QuadranteService {
 
     const inscricao = await this.prisma.eventOnUsers.findUnique({
       where: { userId_eventId: { userId: requesterId, eventId } },
-      select: { userId: true },
+      select: { minorApprovalStatus: true },
     });
 
     if (!inscricao) {
@@ -136,6 +137,50 @@ export class QuadranteService {
         )}, primeiro dia do evento`,
       );
     }
+
+    // Inscrição confirmada, e não só feita. O quadrante traz telefone,
+    // e-mail e foto da equipe, e a inscrição é aberta até o fim do evento:
+    // sem esta trava, qualquer pessoa se inscrevia no primeiro dia, sem
+    // pagar, e levava os contatos de todos.
+    if (
+      inscricao.minorApprovalStatus === MinorApprovalStatus.PENDING ||
+      inscricao.minorApprovalStatus === MinorApprovalStatus.REJECTED
+    ) {
+      throw new ForbiddenException(
+        'O quadrante abre depois que o termo do responsável for aprovado',
+      );
+    }
+
+    if (!(await this.inscricaoConfirmada(requesterId, eventId))) {
+      throw new ForbiddenException(
+        'O quadrante abre depois que a inscrição for paga',
+      );
+    }
+  }
+
+  /**
+   * Inscrição confirmada para o quadrante: nenhuma cobrança da inscrição em
+   * aberto (gratuita conta como quitada) — ou a recepção já entregou o
+   * crachá no check-in. A segunda saída cobre quem paga no local e a igreja
+   * com a cobrança online desligada, em que a baixa demora a chegar.
+   */
+  private async inscricaoConfirmada(userId: string, eventId: string) {
+    const [checkin, emAberto] = await Promise.all([
+      this.prisma.checkin.findUnique({
+        where: { userId_eventId: { userId, eventId } },
+        select: { badgeDeliveredAt: true },
+      }),
+      this.prisma.payment.count({
+        where: {
+          userId,
+          eventId,
+          amount: { gt: 0 },
+          status: { not: PaymentStatus.PAID },
+        },
+      }),
+    ]);
+
+    return !!checkin?.badgeDeliveredAt || emAberto === 0;
   }
 
   /**

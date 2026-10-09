@@ -21,6 +21,22 @@ Regra em `QuadranteService.assertPodeVer`:
 2. **Evento inexistente:** `404` "Evento não encontrado".
 3. **Quadrante desligado no evento** (`quadranteAtivo(event.data)` falso): `403` "O quadrante está desligado nas configurações deste evento" — vale até para o admin da própria igreja.
 4. **Quadrante ligado:** entram o super admin, o admin da igreja dona do evento (`perfilNaIgreja(...) === Role.ADMIN`), e qualquer pessoa **inscrita no evento** (linha em `EventOnUsers`). Quem não está em nenhuma dessas situações recebe `403` "O quadrante só pode ser visto por quem está inscrito no evento".
+5. **Inscrito: inscrição confirmada.** Além de estar inscrito e de o evento já
+   ter começado, o inscrito precisa:
+   - **termo do responsável** aprovado ou não exigido (`minorApprovalStatus`
+     `APPROVED` ou `NOT_REQUIRED`); `PENDING` e `REJECTED` recebem `403` "O
+     quadrante abre depois que o termo do responsável for aprovado";
+   - **inscrição paga:** nenhuma cobrança com valor maior que zero fora de
+     `PAID` (a gratuita conta como quitada), **ou** crachá entregue pela
+     recepção no check-in (`Checkin.badgeDeliveredAt`). A segunda saída cobre
+     quem paga no local e a igreja com a cobrança online desligada. Sem
+     nenhuma das duas, `403` "O quadrante abre depois que a inscrição for
+     paga".
+
+   **Por quê (09/10/2026):** a inscrição fica aberta até o fim do evento, e
+   antes bastava a linha em `EventOnUsers`. Qualquer pessoa, de qualquer
+   igreja, se inscrevia no primeiro dia sem pagar e levava telefone, e-mail e
+   foto da equipe inteira. Admin e super admin não mudaram.
 
 ### Quando o quadrante está ativo (`src/event/event-quadrante.ts`)
 
