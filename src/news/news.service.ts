@@ -19,7 +19,10 @@ import {
   resolveImageExtension,
   uploadImageFirebase,
 } from 'src/utils/uploadImgFirebase';
-import { WhatsappService } from 'src/whatsapp/whatsapp.service';
+import {
+  extraiCodigoDoConvite,
+  WhatsappService,
+} from 'src/whatsapp/whatsapp.service';
 import { NewsDto } from './dto/news.dto';
 import { NewsScheduleDto } from './dto/news-schedule.dto';
 import {
@@ -37,6 +40,44 @@ import {
  * 1024 caracteres, então quando a notícia tem foto o limite é bem menor.
  */
 const LIMITE_DO_TEXTO = 3500;
+
+/** Links avulsos por notícia — mais que isso é engano */
+const MAXIMO_DE_LINKS = 20;
+
+/** `motivo` nulo marca como enviado; preenchido guarda a falha. */
+const resultadoDoEnvio = (motivo: string | null) =>
+  motivo
+    ? { error: motivo.slice(0, 500) }
+    : { sentAt: new Date(), error: null };
+
+/**
+ * Confere e padroniza os links avulsos. Cada um vira
+ * `https://chat.whatsapp.com/CODIGO`: o mesmo grupo colado com e sem
+ * `?mode=...` não vira dois destinos. `undefined` é "não mexi nos links".
+ */
+export function normalizaLinks(links?: string[]): string[] | undefined {
+  if (!links) return undefined;
+
+  const prontos = links.map((link) => {
+    const codigo = extraiCodigoDoConvite(link);
+    if (!codigo) {
+      throw new BadRequestException(
+        `"${link}" não é um link de grupo do WhatsApp (https://chat.whatsapp.com/...).`,
+      );
+    }
+    return `https://chat.whatsapp.com/${codigo}`;
+  });
+
+  const unicos = [...new Set(prontos)];
+
+  if (unicos.length > MAXIMO_DE_LINKS) {
+    throw new BadRequestException(
+      `Uma notícia pode ter no máximo ${MAXIMO_DE_LINKS} links de grupo.`,
+    );
+  }
+
+  return unicos;
+}
 
 /** O calendário pede um mês por vez; folga para a grade de semanas cheias */
 const PERIODO_MAXIMO_DO_CALENDARIO_MS = 62 * 24 * 60 * 60 * 1000;
@@ -154,6 +195,10 @@ export class NewsService {
             },
           },
         },
+        // grupos avulsos, colados como link, com o resultado de cada envio
+        groupLinks: {
+          select: { id: true, link: true, sentAt: true, error: true },
+        },
         // agendamentos de disparo, com o próximo já calculado
         schedules: { orderBy: { createdAt: 'asc' } },
       },
@@ -171,6 +216,7 @@ export class NewsService {
     const autor = authorId ? await this.getRequester(authorId) : null;
     const eventId = await this.resolvePublico(autor, data.eventId);
     await this.assertDestinosDaIgreja(autor, data.groupRoleIds);
+    const links = normalizaLinks(data.groupLinks);
 
     const igrejaDaNoticia = await this.igrejaDaPublicacao(autor, eventId);
 
@@ -191,6 +237,7 @@ export class NewsService {
     });
 
     await this.sincronizaDestinos(noticia.id, data.groupRoleIds);
+    await this.sincronizaLinks(noticia.id, links);
 
     let salva = noticia;
 
@@ -225,6 +272,7 @@ export class NewsService {
         ? atual.eventId
         : await this.resolvePublico(requester, data.eventId);
     await this.assertDestinosDaIgreja(requester, data.groupRoleIds);
+    const links = normalizaLinks(data.groupLinks);
 
     const extensao = data.imageFile
       ? resolveImageExtension(data.imageFile)
@@ -260,6 +308,7 @@ export class NewsService {
     });
 
     await this.sincronizaDestinos(id, data.groupRoleIds);
+    await this.sincronizaLinks(id, links);
 
     // Só a virada de rascunho para publicada dispara. Corrigir uma vírgula numa
     // notícia já publicada não pode mandar tudo de novo para os grupos.
@@ -523,6 +572,7 @@ export class NewsService {
             },
           },
         },
+        groupLinks: true,
       },
     });
 
@@ -548,20 +598,37 @@ export class NewsService {
     let falhas = 0;
     let semLink = 0;
 
-    for (const destino of noticia.groups) {
+    // Os dois tipos de destino — grupo de inscrição e link avulso — viram a
+    // mesma coisa: um nome para o log, o link e onde anotar o resultado.
+    const destinos = [
+      ...noticia.groups.map((destino) => ({
+        sentAt: destino.sentAt,
+        nome: `${destino.groupRole.event.name} / ${destino.groupRole.name}`,
+        link: destino.groupRole.link?.trim(),
+        marca: (motivo: string | null) =>
+          this.marcaDestino(newsId, destino.groupRoleId, motivo),
+      })),
+      ...noticia.groupLinks.map((destino) => ({
+        sentAt: destino.sentAt,
+        nome: destino.link,
+        link: destino.link,
+        marca: (motivo: string | null) =>
+          this.prisma.newsGroupLink.update({
+            where: { id: destino.id },
+            data: resultadoDoEnvio(motivo),
+          }),
+      })),
+    ];
+
+    for (const destino of destinos) {
       if (!force && destino.sentAt) continue;
 
-      const nome = `${destino.groupRole.event.name} / ${destino.groupRole.name}`;
-      const link = destino.groupRole.link?.trim();
+      const { nome, link } = destino;
 
       if (!link) {
         semLink++;
 
-        await this.marcaDestino(
-          newsId,
-          destino.groupRoleId,
-          'O grupo não tem link de WhatsApp preenchido.',
-        );
+        await destino.marca('O grupo não tem link de WhatsApp preenchido.');
 
         continue;
       }
@@ -573,8 +640,8 @@ export class NewsService {
         );
 
         if (jidsAtendidos.has(jid)) {
-          // outro grupo de inscrição já cobriu este mesmo grupo do WhatsApp
-          await this.marcaDestino(newsId, destino.groupRoleId, null);
+          // outro destino já cobriu este mesmo grupo do WhatsApp
+          await destino.marca(null);
           enviados++;
           continue;
         }
@@ -589,13 +656,13 @@ export class NewsService {
         jidsAtendidos.add(jid);
         enviados++;
 
-        await this.marcaDestino(newsId, destino.groupRoleId, null);
+        await destino.marca(null);
       } catch (erro) {
         falhas++;
 
         const motivo = String(erro.message ?? erro);
 
-        await this.marcaDestino(newsId, destino.groupRoleId, motivo);
+        await destino.marca(motivo);
         this.logger.error(
           `Notícia ${newsId} não saiu para "${nome}": ${motivo}`,
         );
@@ -626,9 +693,7 @@ export class NewsService {
   ) {
     await this.prisma.newsOnGroupRoles.update({
       where: { newsId_groupRoleId: { newsId, groupRoleId } },
-      data: motivo
-        ? { error: motivo.slice(0, 500) }
-        : { sentAt: new Date(), error: null },
+      data: resultadoDoEnvio(motivo),
     });
   }
 
@@ -859,6 +924,25 @@ export class NewsService {
           data: { newsId, groupRoleId },
         });
       }
+    }
+  }
+
+  /**
+   * Acerta os links avulsos. Como em `sincronizaDestinos`, o que continua na
+   * lista não é recriado: perderia o registro de que a mensagem já saiu.
+   */
+  private async sincronizaLinks(newsId: string, links?: string[]) {
+    if (!links) return;
+
+    await this.prisma.newsGroupLink.deleteMany({
+      where: { newsId, link: { notIn: links } },
+    });
+
+    if (links.length) {
+      await this.prisma.newsGroupLink.createMany({
+        data: links.map((link) => ({ newsId, link })),
+        skipDuplicates: true,
+      });
     }
   }
 }

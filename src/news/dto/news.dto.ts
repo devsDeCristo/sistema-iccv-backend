@@ -109,6 +109,32 @@ export class NewsDto {
   @IsString({ each: true })
   groupRoleIds?: string[];
 
+  @ApiProperty({
+    description:
+      'Grupos de WhatsApp avulsos, pelo link de convite ' +
+      '(https://chat.whatsapp.com/...): grupos que não são de inscrição de ' +
+      'evento. Ausente não mexe nos atuais; lista vazia remove todos.',
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  // multipart: chega como JSON, como os `groupRoleIds`
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string' && value.trim().startsWith('[')) {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+    return value === '' ? [] : [value];
+  })
+  @IsArray()
+  @IsString({ each: true })
+  groupLinks?: string[];
+
   /** Preenchido pelo controller a partir do multipart, não vem no body */
   imageFile?: Express.Multer.File;
 }

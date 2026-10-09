@@ -913,6 +913,7 @@ model News {
   groups      NewsOnGroupRoles[]
   schedules   NewsSchedule[]
   dispatches  NewsDispatch[]
+  groupLinks  NewsGroupLink[]
 
   @@index([isPublished, publishedAt])
   @@index([churchId])
@@ -986,6 +987,25 @@ model NewsDispatch {
   @@index([at])
   @@index([newsId])
   @@map("news_dispatches")
+}
+
+/// Grupo de WhatsApp avulso como destino da notícia: o link de convite colado
+/// no formulário, de um grupo que não é grupo de inscrição de evento (o grupo
+/// geral da igreja, de um ministério). Guarda o resultado do envio como
+/// `NewsOnGroupRoles`.
+model NewsGroupLink {
+  id     String    @id @default(uuid())
+  newsId String
+  /// link de convite (`https://chat.whatsapp.com/...`)
+  link   String
+  /// preenchido quando o WhatsApp aceitou a mensagem
+  sentAt DateTime?
+  /// motivo da última falha; volta a null quando o envio dá certo
+  error  String?
+  news   News      @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@unique([newsId, link])
+  @@map("news_group_links")
 }
 
 /// Grupos escolhidos como destino da notícia no WhatsApp. O destino é o grupo

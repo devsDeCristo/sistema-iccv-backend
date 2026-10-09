@@ -61,6 +61,22 @@ confere o perfil no banco, porque o perfil do token pode estar defasado em até
 - **Grupo do WhatsApp repetido:** dois grupos de inscrição podem apontar para
   o mesmo grupo de WhatsApp (mesmo link); a mensagem sai uma vez só, e o
   segundo destino é marcado como enviado também.
+- **Links avulsos (`groupLinks`, tabela `NewsGroupLink`):** além dos grupos de
+  inscrição, a notícia pode ir para grupos colados pelo link de convite. São
+  grupos que não são de evento, como o geral da igreja ou o de um ministério.
+  - **Validação e padronização:** `normalizaLinks` usa o mesmo
+    `extraiCodigoDoConvite` do WhatsApp e grava como
+    `https://chat.whatsapp.com/CODIGO`. Assim o mesmo grupo colado com e sem
+    `?mode=...` vira um destino só.
+  - **Limites e erros:** até 20 links; o que não for link de grupo dá `400`.
+  - **Resultado do envio:** fica por link (`sentAt`/`error`), como nos grupos de
+    inscrição, e entra nas mesmas regras: reenvio, agendamento, grupo repetido
+    e histórico.
+  - **Gravação:** vai no mesmo multipart da notícia, como JSON. Ausente não
+    mexe nos links; lista vazia remove todos. O que continua na lista não é
+    recriado, para não perder o registro de envio.
+  - **O número da igreja precisa estar no grupo:** o link só resolve o grupo,
+    e quem não é membro não envia.
 - **Sem link preenchido:** destino fica marcado com o erro "O grupo não tem
   link de WhatsApp preenchido", sem tentar enviar.
 - **Formatação:** o HTML do editor é convertido para o texto do WhatsApp
@@ -115,6 +131,8 @@ apagaria o anterior. Por isso existe esta tabela. Disparos anteriores a
 **Calendário (`GET /news/calendar`):** junta, no período, os disparos feitos
 (`NewsDispatch`) e as próximas ocorrências dos agendamentos. "Toda terça" vira
 uma entrada por terça. O recorte é pelas igrejas que a pessoa administra.
+
+Migração dos links avulsos: `20261009150000_news_group_links`.
 
 Arquivos: `src/news/agendamento.ts` (calendário, com testes), `src/news/news.service.ts`,
 `src/news/dto/news-schedule.dto.ts`, migração `20261009120000_news_schedules`.
