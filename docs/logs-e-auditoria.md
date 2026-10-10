@@ -95,9 +95,14 @@ o marcador `(atualizado)`. Consulta: `GET
 
 - **Rota:** `GET /logs` (lista agrupada), `GET /logs/:id` (detalhe de uma
   ação), `GET /logs/operations` (catálogo de operações para o filtro),
-  `GET /logs/login-attempts`. Todas exigem `Role.DEV` — nem super admin entra,
-  porque o antes/depois expõe dado pessoal de qualquer pessoa e o
-  funcionamento interno do sistema.
+  `GET /logs/login-attempts`.
+  - **Atividades** (`/logs`, `/logs/:id`, `/logs/operations`): dev e super
+    admin (`SUPER_ADMIN_ROLES`). O antes e o depois expõem dado pessoal de
+    qualquer pessoa, de todas as igrejas, então só entra quem já atravessa
+    todas elas. Admin de igreja não entra. Até 10/10/2026 era só o dev.
+  - **Tentativas de login** (`/logs/login-attempts`): só o dev (`@Roles` na
+    rota, que vence o da classe), porque documento, IP e aparelho de cada
+    tentativa são investigação de segurança.
 - **Agrupamento:** as linhas de uma mesma `requestId` (ou o próprio `id`, no
   histórico anterior à coluna) viram uma "ação" só na listagem, paginada por
   ação e não por linha — inscrever alguém não pode ser cortado ao meio entre
@@ -132,7 +137,8 @@ paginação do log de atividades, com resumo de sucesso/falha.
 
 | Trilha | Rota | Quem pode |
 | --- | --- | --- |
-| Atividades gerais e logins | `GET /logs*` | `Role.DEV` |
+| Atividades gerais | `GET /logs`, `/logs/:id`, `/logs/operations` | dev e super admin |
+| Tentativas de login | `GET /logs/login-attempts` | `Role.DEV` |
 | Dinheiro do evento | `GET /events/:idEvent/payments/logs` | `ADMIN_AREA_ROLES`, restrito à própria igreja |
 
 Tela correspondente: `ic-front/docs/logs-e-logins.md` (atividades e login) e

@@ -174,6 +174,7 @@ igreja). A mesma pessoa pode ser admin de uma igreja e financeiro de outra.
 | `POST /auth/login`, `POST /auth/password/forgot\|verify-code\|reset` | público |
 | `GET /auth/validate`, `POST /auth/password/change` | qualquer autenticado |
 | `GET /auth/admin/validate` | `ADMIN_AREA_ROLES` |
-| `GET /logs`, `/logs/operations`, `/logs/login-attempts`, `/logs/:id` | só `DEV` |
+| `GET /logs`, `/logs/operations`, `/logs/:id` | dev e super admin |
+| `GET /logs/login-attempts` | só `DEV` |
 | Rotas sob `/events/:idEvent/...` de painel | perfil de igreja exigido, na igreja daquele evento |
 | Rotas sob `/churches/:churchId/...` de painel | perfil de igreja exigido, naquela igreja |
