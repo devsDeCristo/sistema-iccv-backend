@@ -2172,7 +2172,8 @@ export class EventService {
           // O módulo de cobrança da igreja dona do evento. A tela de inscrição
           // decide por ele se oferece pagamento ou confirma direto — antes isso
           // vinha de uma variável de ambiente do front, igual para todas.
-          church: { select: { modulePayment: true } },
+          // o nome vai no cabeçalho das planilhas exportadas da página
+          church: { select: { modulePayment: true, name: true } },
           groupRoles: {
             include: {
               roles: {
