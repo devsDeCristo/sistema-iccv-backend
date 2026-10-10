@@ -20,6 +20,13 @@ Arquivos: `src/mail/mail.service.ts`, `src/mail/templates/*.html`.
   monta e envia a mensagem. `from` tem padrão fixo ("Igreja de Cristo Cidade
   Verde <...>") quando não informado; aceita `to` (um destinatário) ou `bcc`
   (lista), nunca os dois.
+- **`EMAIL_DEV_MODE`:** preenchido, todo e-mail vai só para esse endereço,
+  em qualquer disparo (`desviarParaDev`, aplicado dentro do `sendMail`). O
+  destinatário original vai no assunto: `[DEV → fulano@gmail.com] Inscrição
+  confirmada`; cópia oculta vira `[DEV → cco: ...]` e ninguém da lista recebe.
+  Serve para dev e homologação, onde o banco tem e-mails reais. A API avisa no
+  log, ao subir, que o desvio está ativo; em produção a variável fica vazia.
+  Teste: `src/mail/desvio-dev.spec.ts`.
 - **Falha de envio não derruba a operação:** os pontos que chamam `sendMail`
   capturam o erro e só registram no log — inscrever alguém ou redefinir senha
   não pode falhar por causa do e-mail.

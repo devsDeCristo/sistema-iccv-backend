@@ -10,6 +10,28 @@ import axios from 'axios';
 import { ConfigService } from '@nestjs/config';
 import type { SendMailOptions } from 'nodemailer';
 
+/**
+ * Com `EMAIL_DEV_MODE` preenchido, todo e-mail vai para esse endereço, e
+ * nenhum para quem seria o destinatário de verdade: em desenvolvimento e
+ * homologação o banco tem e-mails reais, e um teste de inscrição não pode
+ * chegar na caixa de ninguém. Quem seria o destinatário vai no assunto, para
+ * dar para conferir. Cópia oculta (o envio em massa) também cai aqui, numa
+ * mensagem só.
+ */
+export function desviarParaDev(
+  envio: { to?: string; bcc?: string; subject: string },
+  emailDev?: string,
+) {
+  if (!emailDev?.trim()) return envio;
+
+  const original = envio.to || (envio.bcc ? `cco: ${envio.bcc}` : '—');
+  return {
+    to: emailDev.trim(),
+    bcc: undefined,
+    subject: `[DEV → ${original}] ${envio.subject}`,
+  };
+}
+
 @Injectable()
 export class MailService {
   private readonly clientId: string;
@@ -29,6 +51,15 @@ export class MailService {
     this.clientSecret = this.mustGetEnv('CLIENT_SECRET_SERVER_EMAIL');
     this.refreshToken = this.mustGetEnv('REFRESH_TOKEN_SERVER_EMAIL');
     this.clientEmail = this.mustGetEnv('USER_CLIENT_SERVER_EMAIL');
+
+    const emailDev = this.configService.get<string>('EMAIL_DEV_MODE');
+    if (emailDev?.trim()) {
+      // em produção isso seria nenhum e-mail chegando a ninguém: precisa
+      // aparecer no log logo na subida
+      this.logger.warn(
+        `EMAIL_DEV_MODE ativo: todo e-mail vai para ${emailDev.trim()}`,
+      );
+    }
   }
 
   loadTemplate(
@@ -120,12 +151,17 @@ export class MailService {
         },
       });
 
+      const destino = desviarParaDev(
+        { to, bcc, subject },
+        this.configService.get<string>('EMAIL_DEV_MODE'),
+      );
+
       const mailOptions: SendMailOptions = {
         from:
           from || 'Igreja de Cristo Cidade Verde <' + this.clientEmail + '>',
-        ...(to ? { to: to } : { bcc: bcc }),
+        ...(destino.to ? { to: destino.to } : { bcc: destino.bcc }),
         replyTo: replyTo || this.clientEmail,
-        subject: subject,
+        subject: destino.subject,
         html: html,
         text: text,
         attachments: attachments || [],
