@@ -25,8 +25,15 @@ import { mascararEmail } from 'src/user/acesso';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 
-const SEM_CADASTRO =
-  'Nenhum cadastro está vinculado a esta conta Google. Entre com CPF e senha e vincule o Google em Meu perfil › Segurança.';
+/**
+ * A mesma resposta para toda recusa do login com Google — sem cadastro, e-mail
+ * de mais de um cadastro, cadastro já ligado a outro Google. Dizer o motivo
+ * contaria a quem está do outro lado o que existe no sistema com aquele
+ * e-mail. O motivo fica no registro de tentativas (`userId` preenchido quando
+ * havia um cadastro).
+ */
+const RECUSA =
+  'Esta conta Google não pode ser usada para entrar. Entre com CPF e senha.';
 
 /** `UserToken.type` do código que confirma o vínculo pelo perfil */
 export const TOKEN_TYPE_GOOGLE_LINK = 1;
@@ -106,7 +113,7 @@ export class GoogleService {
     conta: ContaGoogle,
     contexto?: ContextoDeLogin,
   ) {
-    const recusar = async (mensagem: string, userId?: string) => {
+    const recusar = async (userId?: string) => {
       await this.authService.registrarTentativa({
         document: conta.email,
         userId,
@@ -115,11 +122,11 @@ export class GoogleService {
         method: LoginMethod.GOOGLE,
         contexto,
       });
-      return new NotFoundException(mensagem);
+      return new NotFoundException(RECUSA);
     };
 
     if (!conta.emailVerificado || !conta.googleEhAutoridade) {
-      throw await recusar(SEM_CADASTRO);
+      throw await recusar();
     }
 
     // dois bastam para saber que é ambíguo
@@ -135,25 +142,20 @@ export class GoogleService {
       take: 2,
     });
 
-    if (!donos.length) throw await recusar(SEM_CADASTRO);
+    if (!donos.length) throw await recusar();
 
     // e-mail de mais de um cadastro (repetido antigo, ou uma família que
     // divide a caixa): não há como saber de quem é a conta Google. Não entra
     // nem vincula; cada pessoa vincula pelo perfil
     if (donos.length > 1) {
-      throw await recusar(
-        'Este e-mail está em mais de um cadastro. Entre com CPF e senha e vincule o Google em Meu perfil › Segurança.',
-      );
+      throw await recusar();
     }
 
     const [user] = donos;
 
     // o cadastro já tem outra conta Google: trocar é pelo perfil, com a senha
     if (user.identities.length) {
-      throw await recusar(
-        'Este cadastro já está vinculado a outra conta Google. Entre com ela, ou com CPF e senha.',
-        user.id,
-      );
+      throw await recusar(user.id);
     }
 
     const vinculo = await this.criarVinculo(user.id, conta);

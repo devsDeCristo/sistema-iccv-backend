@@ -11,6 +11,10 @@ jest.mock('./google', () => ({
 
 const tokenDoGoogle = conferirTokenDoGoogle as jest.Mock;
 
+/** toda recusa do login com Google tem a mesma cara: não conta o motivo */
+const RECUSA =
+  'Esta conta Google não pode ser usada para entrar. Entre com CPF e senha.';
+
 const conta = (dados: Partial<ContaGoogle> = {}): ContaGoogle => ({
   sub: 'google-1',
   email: 'fulano@gmail.com',
@@ -168,9 +172,7 @@ describe('GoogleService.entrar', () => {
     tokenDoGoogle.mockResolvedValue(contaDoGoogle);
     const { servico, identidades, auth } = await montar();
 
-    await expect(servico.entrar('token')).rejects.toThrow(
-      'Nenhum cadastro está vinculado',
-    );
+    await expect(servico.entrar('token')).rejects.toThrow(RECUSA);
     expect(identidades).toHaveLength(0);
     expect(auth.registrarTentativa).toHaveBeenCalledWith(
       expect.objectContaining({ success: false, method: 'GOOGLE' }),
@@ -186,9 +188,7 @@ describe('GoogleService.entrar', () => {
       ],
     });
 
-    await expect(servico.entrar('token')).rejects.toThrow(
-      'mais de um cadastro',
-    );
+    await expect(servico.entrar('token')).rejects.toThrow(RECUSA);
     expect(identidades).toHaveLength(0);
   });
 
@@ -198,7 +198,7 @@ describe('GoogleService.entrar', () => {
       identidades: [{ id: 'i1', userId: 'u1', subject: 'google-antigo' }],
     });
 
-    await expect(servico.entrar('token')).rejects.toThrow('outra conta Google');
+    await expect(servico.entrar('token')).rejects.toThrow(RECUSA);
     expect(identidades).toHaveLength(1);
   });
 });

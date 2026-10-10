@@ -67,14 +67,19 @@ pessoa: guards, recorte por igreja e sessão continuam iguais.
   responde pelo e-mail**: `email_verified` verdadeiro **e** endereço
   `@gmail.com` ou conta do Workspace (`hd`). Num e-mail de fora usado como
   conta Google, `email_verified` diz só que o endereço foi confirmado um dia, e
-  ele pode ter mudado de dono depois. Nesses casos a resposta é `404` ("vincule
-  pelo perfil").
-- **E-mail de mais de um cadastro:** não entra nem vincula (`404`, "este
-  e-mail está em mais de um cadastro"). Não há como saber de quem é a conta
-  Google; cada pessoa vincula pelo perfil. O e-mail não tem índice único no
-  banco por causa de repetidos antigos (ver `docs/usuarios.md`).
-- **Cadastro já ligado a outra conta Google:** não troca sozinho, `404`. Trocar
-  é pelo perfil: desvincular e vincular a nova.
+  ele pode ter mudado de dono depois. Nesses casos o login é recusado.
+- **E-mail de mais de um cadastro:** não entra nem vincula. Não há como saber
+  de quem é a conta Google; cada pessoa vincula pelo perfil. O e-mail não tem
+  índice único no banco por causa de repetidos antigos (ver
+  `docs/usuarios.md`).
+- **Cadastro já ligado a outra conta Google:** não troca sozinho. Trocar é
+  pelo perfil: desvincular e vincular a nova.
+- **Recusa sem motivo:** todos os casos acima respondem `404` com a mesma
+  mensagem, "Esta conta Google não pode ser usada para entrar. Entre com CPF e
+  senha." (`RECUSA`). Dizer o motivo contaria a quem tenta o que existe no
+  sistema com aquele e-mail: se há cadastro, se há mais de um, se já tem
+  Google. O motivo fica só no registro de tentativas: `userId` preenchido
+  quando havia um cadastro.
 - **Vínculo pelo perfil, em dois passos.** São duas provas: a senha diz que é
   o dono da conta, e o código diz que é o dono da caixa de entrada (o sistema
   nunca confirmou os e-mails do cadastro).
