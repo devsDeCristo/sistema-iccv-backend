@@ -2250,6 +2250,72 @@ export class EventService {
     //.then((event) => this.handlerReturnEvent(event));
   }
 
+  /**
+   * O mesmo status para vários eventos — a barra de seleção da lista de
+   * eventos.
+   *
+   * Cada evento é conferido sozinho, como na edição: só admin da igreja dele
+   * (ou super admin) altera. O que não pode é devolvido em `falhas`, com o
+   * motivo, e não impede os outros. Trocar o status é só gravar o campo — a
+   * edição completa (`update`) não faz nada além disso com ele.
+   */
+  async atualizarStatusEmMassa(
+    requesterId: string,
+    dto: { eventIds: string[]; status: EventStatus },
+  ) {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: SELECT_TENANT,
+    });
+
+    const ids = [...new Set(dto.eventIds)];
+    const eventos = await this.prisma.event.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, churchId: true, status: true },
+    });
+    const porId = new Map(eventos.map((evento) => [evento.id, evento]));
+
+    const permitidos: string[] = [];
+    const falhas: { eventId: string; nome: string | null; motivo: string }[] =
+      [];
+
+    for (const id of ids) {
+      const evento = porId.get(id);
+      if (!evento) {
+        falhas.push({
+          eventId: id,
+          nome: null,
+          motivo: 'Evento não encontrado',
+        });
+        continue;
+      }
+
+      try {
+        assertChurchAccess(requester, evento.churchId, {
+          roles: [Role.ADMIN],
+          message: 'Você não administra a igreja deste evento',
+        });
+        permitidos.push(id);
+      } catch (erro) {
+        falhas.push({
+          eventId: id,
+          nome: evento.name,
+          motivo: (erro as Error).message,
+        });
+      }
+    }
+
+    // um `updateMany` só, com os que passaram: ou todos eles mudam, ou nenhum
+    const { count } = permitidos.length
+      ? await this.prisma.event.updateMany({
+          where: { id: { in: permitidos } },
+          data: { status: dto.status },
+        })
+      : { count: 0 };
+
+    return { atualizados: count, falhas };
+  }
+
   async update(id: string, updateEvent: EventDto, requesterId?: string) {
     // valida os arquivos antes de qualquer escrita
     const coverExtension = updateEvent.coverFile

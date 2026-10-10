@@ -28,6 +28,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
+import { StatusEmMassaDto } from './dto/status-em-massa.dto';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { aquecerImagensDoCracha } from 'src/cracha/cracha.service';
 import { Roles } from 'src/decorators/roles.decorator';
@@ -132,6 +133,18 @@ export class EventController {
     if (painel === 'true') aquecerImagensDoCracha(event?.data);
 
     return event;
+  }
+
+  /**
+   * Antes de `PUT :idEvent`: depois dele o Nest casaria "status" como um id.
+   * Sem id na URL o `EventTenantGuard` deixa passar, e quem confere a igreja
+   * de cada evento é o serviço.
+   */
+  @ApiOperation({ summary: 'O mesmo status para vários eventos' })
+  @Roles(...ADMIN_ROLES)
+  @Put('status')
+  atualizarStatusEmMassa(@Body() dto: StatusEmMassaDto, @Req() req: any) {
+    return this.eventService.atualizarStatusEmMassa(req.user.userId, dto);
   }
 
   @ApiOperation({ summary: 'Edit event' })

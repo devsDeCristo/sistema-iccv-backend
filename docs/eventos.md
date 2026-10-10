@@ -23,6 +23,25 @@ Prisma: nada lê ou escreve nele hoje, quem manda é `status`.
 
 Arquivo: `prisma/schema.prisma` (enum `EventStatus`).
 
+### Status em massa (`PUT /events/status`)
+
+O mesmo status para vários eventos de uma vez — a barra de seleção da lista de
+eventos do painel.
+
+- **Corpo:** `{ eventIds, status }`, até 200 eventos (`MAXIMO_DE_EVENTOS_EM_MASSA`).
+- **Rota:** `@Roles(ADMIN_ROLES)`. Fica antes de `PUT :idEvent` no controller,
+  senão o Nest casaria "status" como um id. Sem id na URL o `EventTenantGuard`
+  deixa passar, e quem confere a igreja de cada evento é o serviço.
+- **Por evento:** só admin da igreja dele, ou super admin (`assertChurchAccess`
+  com `Role.ADMIN`, a mesma régua da edição). Financeiro não muda status.
+- **Gravação:** um `updateMany` só, com os que passaram. Trocar o status é só
+  gravar o campo; a edição completa não faz nada além disso com ele.
+- **Resposta:** `{ atualizados, falhas: [{ eventId, nome, motivo }] }`. Evento
+  de outra igreja ou id que não existe volta em `falhas`, sem impedir os outros.
+
+Arquivos: `src/event/event.service.ts` (`atualizarStatusEmMassa`),
+`src/event/dto/status-em-massa.dto.ts`, `src/event/status-em-massa.spec.ts`.
+
 ## Visibilidade
 
 - **Catálogo (área do usuário):** todo evento `ACTIVE`/`INACTIVE` aparece,
