@@ -1050,6 +1050,7 @@ export class EventService {
           ...event,
           bedroom: event._count.bedrooms,
           team: event._count.Team,
+          transport: event._count.transports,
           waitlist: event._count.waitlist,
           users: event._count.users,
           capacity: event.groupRoles.reduce(
@@ -2131,6 +2132,8 @@ export class EventService {
               waitlist: true,
               bedrooms: true,
               Team: true,
+              // a coluna Módulos da lista do painel mostra os três
+              transports: true,
               users: true,
             },
           },

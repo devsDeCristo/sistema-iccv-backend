@@ -23,6 +23,13 @@ Prisma: nada lê ou escreve nele hoje, quem manda é `status`.
 
 Arquivo: `prisma/schema.prisma` (enum `EventStatus`).
 
+### Contagens da lista do painel
+
+A lista de eventos do painel devolve, por evento, `users`, `capacity` (soma das
+vagas dos grupos), `waitlist`, `bedroom`, `team` e `transport` (contagem de
+transportes, para a coluna Módulos), além do `data` com os módulos ligados.
+Arquivo: `src/event/event.service.ts` (`handlerReturnAllEvents`).
+
 ### Status em massa (`PUT /events/status`)
 
 O mesmo status para vários eventos de uma vez — a barra de seleção da lista de
