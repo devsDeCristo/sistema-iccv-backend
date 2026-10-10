@@ -768,6 +768,100 @@ export class UserService {
   }
 
   /**
+   * O mesmo perfil, numa igreja, para várias pessoas — a edição em massa da
+   * tela de usuários.
+   *
+   * Cada pessoa passa pelo mesmo `update` da edição individual, com a lista
+   * de vínculos que resulta da troca: todas as travas valem igual (conta dev,
+   * super admin, escopo do admin, igreja que ele administra, perfil efetivo
+   * recalculado). Uma pessoa recusada não derruba as outras: ela volta em
+   * `falhas`, com o motivo.
+   */
+  async atualizarPermissoesEmMassa(
+    requesterId: string,
+    dto: { userIds: string[]; churchId: string; role: number | null },
+  ) {
+    const requester = await this.getRequester(requesterId);
+
+    // o `update` descarta vínculos de quem não é admin sem dar erro: aqui
+    // isso viraria "atualizado" sem nada mudar
+    if (!isAdminRole(perfilEfetivo(requester))) {
+      throw new ForbiddenException('Só admin altera permissões');
+    }
+
+    await this.assertChurchExists(dto.churchId);
+
+    const minhas = churchIdsComPerfil(requester, [Role.ADMIN]);
+    const todas = isSuperAdmin(requester);
+    if (!todas && !minhas.includes(dto.churchId)) {
+      throw new ForbiddenException(
+        'Você só dá permissão nas igrejas que administra',
+      );
+    }
+
+    const ids = [...new Set(dto.userIds)];
+    const pessoas = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        fullName: true,
+        role: true,
+        churchRoles: { select: { churchId: true, role: true } },
+      },
+    });
+    const porId = new Map(pessoas.map((pessoa) => [pessoa.id, pessoa]));
+
+    let atualizados = 0;
+    const falhas: { userId: string; nome: string | null; motivo: string }[] =
+      [];
+
+    for (const id of ids) {
+      const pessoa = porId.get(id);
+      const falhou = (motivo: string) =>
+        falhas.push({ userId: id, nome: pessoa?.fullName ?? null, motivo });
+
+      if (!pessoa) {
+        falhou('Usuário não encontrado');
+        continue;
+      }
+      // a própria permissão não muda em lote: um clique a mais tirava o
+      // admin do próprio painel
+      if (id === requesterId) {
+        falhou('A sua própria permissão não muda pela edição em massa');
+        continue;
+      }
+      // super admin e dev não são de igreja: vínculo não muda o acesso deles
+      if (pessoa.role === Role.SUPER_ADMIN || pessoa.role === Role.DEV) {
+        falhou('Super admin e dev não têm perfil por igreja');
+        continue;
+      }
+
+      // o admin só manda nas igrejas dele: as outras ficam com o `update`,
+      // que as preserva
+      const gerenciaveis = pessoa.churchRoles.filter(
+        (vinculo) => todas || minhas.includes(vinculo.churchId),
+      );
+      const vinculos = [
+        ...gerenciaveis.filter((vinculo) => vinculo.churchId !== dto.churchId),
+        ...(dto.role ? [{ churchId: dto.churchId, role: dto.role }] : []),
+      ];
+
+      try {
+        await this.update(
+          id,
+          { churchRoles: vinculos } as unknown as UserDTO,
+          requesterId,
+        );
+        atualizados++;
+      } catch (erro) {
+        falhou((erro as Error).message);
+      }
+    }
+
+    return { atualizados, falhas };
+  }
+
+  /**
    * Quem tem vínculo de painel (admin/financeiro) em alguma igreja que o
    * requisitante não administra não tem o acesso (e-mail, CPF) trocado por
    * ele. Só o super admin, que alcança todas, ou quem administra todas elas.

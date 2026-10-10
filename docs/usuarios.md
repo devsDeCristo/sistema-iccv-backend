@@ -177,6 +177,34 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   Financeiro são definidos por igreja em `churchRoles`, não pelo perfil
   global.
 
+## Permissão em massa (`PUT /users/permissions`)
+
+O mesmo perfil, numa igreja, para várias pessoas de uma vez — a barra de
+seleção da tela de usuários.
+
+- **Corpo:** `{ userIds, churchId, role }`. `role` é admin (2) ou financeiro
+  (3); `null` tira o perfil da pessoa naquela igreja. Até 200 pessoas por
+  pedido (`MAXIMO_EM_MASSA`).
+- **Antes de tudo:** quem pede precisa ser admin (perfil efetivo) — a edição
+  individual descarta os vínculos de quem não é, sem erro, e aqui isso
+  contaria como "atualizado". A igreja precisa existir e, para quem não é
+  super admin, ser uma que ele administra (`403`).
+- **Por pessoa, a edição individual:** cada uma passa pelo mesmo
+  `UserService.update`, com a lista de vínculos que resulta da troca (os
+  vínculos que quem pede gerencia, com a igreja escolhida trocada ou
+  removida). Valem todas as travas de lá: conta dev, super admin, escopo do
+  admin, vínculos das outras igrejas preservados, perfil efetivo recalculado.
+- **Ficam de fora, com o motivo:** a própria conta de quem pede (um clique a
+  mais tirava o admin do próprio painel), super admin e dev (não são de
+  igreja), id que não existe, e quem o `update` recusar.
+- **Resposta:** `{ atualizados, falhas: [{ userId, nome, motivo }] }`. Uma
+  recusa não desfaz nem bloqueia as outras.
+- **Rota antes de `PUT :id`** no controller: depois dela o Nest casaria
+  "permissions" como um id.
+
+Arquivos: `src/user/user.service.ts` (`atualizarPermissoesEmMassa`),
+`src/user/dto/permissoes-em-massa.dto.ts`, `src/user/permissoes-em-massa.spec.ts`.
+
 ## Foto de perfil
 
 - `POST /users/me/profile-photo` (a própria) e `POST /users/:id/profile-photo`

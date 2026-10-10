@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { UserDTO } from './dto/user.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { PermissoesEmMassaDto } from './dto/permissoes-em-massa.dto';
 import { UserService } from './user.service';
 import { uploadImageFirebase } from 'src/utils/uploadImgFirebase';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -147,6 +148,17 @@ export class UserController {
   @Get(':id/groups')
   async findUserGroups(@Param('id') id: string, @Req() req: any) {
     return this.userService.findUserGroups(id, req.user?.userId);
+  }
+
+  /** Antes de `:id`: depois dele o Nest casaria "permissions" como um id */
+  @ApiOperation({ summary: 'O mesmo perfil, numa igreja, para várias pessoas' })
+  @UseGuards(JwtAuthGuard)
+  @Put('permissions')
+  async atualizarPermissoesEmMassa(
+    @Body() dto: PermissoesEmMassaDto,
+    @Req() req: any,
+  ) {
+    return this.userService.atualizarPermissoesEmMassa(req.user.userId, dto);
   }
 
   @ApiOperation({ summary: 'Edit user' })
