@@ -74,7 +74,12 @@ export class UserService {
       throw new ConflictException('Já existe um usuario com este cpf!');
     }
 
-    if (data.email && (await this.emailEmUso(data.email))) {
+    // o DTO deixa o e-mail opcional por causa da edição; no cadastro ele é
+    // obrigatório — é por ele que chegam a redefinição de senha e os avisos
+    if (!data.email) {
+      throw new BadRequestException('Informe o e-mail.');
+    }
+    if (await this.emailEmUso(data.email)) {
       throw new ConflictException(EMAIL_EM_USO);
     }
 

@@ -10,6 +10,8 @@ export type ContaGoogle = {
   /** id da pessoa no Google: não muda quando o e-mail muda */
   sub: string;
   email: string;
+  /** o nome na conta Google, para adiantar o cadastro de quem ainda não tem */
+  nome: string | null;
   emailVerificado: boolean;
   /**
    * O Google responde pela caixa de entrada: Gmail ou domínio do Workspace
@@ -63,6 +65,7 @@ export async function conferirTokenDoGoogle(
   return {
     sub: payload.sub,
     email,
+    nome: payload.name?.trim() || null,
     emailVerificado: payload.email_verified === true,
     googleEhAutoridade: email.endsWith('@gmail.com') || !!payload.hd,
   };

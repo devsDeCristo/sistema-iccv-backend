@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { UserService } from './user.service';
 
 /**
@@ -35,6 +35,15 @@ describe('UserService — e-mail repetido', () => {
     await expect(
       servico.create({ cpf: '1', email: 'usado@gmail.com' } as any),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('cadastro sem e-mail: 400', async () => {
+    const { servico, prisma } = montar([]);
+
+    await expect(
+      servico.create({ cpf: '1', email: '' } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
 

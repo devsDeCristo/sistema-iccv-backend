@@ -26,8 +26,10 @@ import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 
 /**
- * A mesma resposta para toda recusa do login com Google — sem cadastro, e-mail
- * de mais de um cadastro, cadastro já ligado a outro Google. Dizer o motivo
+ * A mesma resposta para toda recusa do login com Google — e-mail de mais de um
+ * cadastro, cadastro já ligado a outro Google, e-mail que o Google não
+ * controla. A exceção é não haver cadastro nenhum: aí a tela leva ao cadastro
+ * (ver `vincularPeloEmail`). Dizer o motivo
  * contaria a quem está do outro lado o que existe no sistema com aquele
  * e-mail. O motivo fica no registro de tentativas (`userId` preenchido quando
  * havia um cadastro).
@@ -113,7 +115,10 @@ export class GoogleService {
     conta: ContaGoogle,
     contexto?: ContextoDeLogin,
   ) {
-    const recusar = async (userId?: string) => {
+    const recusar = async (
+      userId?: string,
+      resposta: string | object = RECUSA,
+    ) => {
       await this.authService.registrarTentativa({
         document: conta.email,
         userId,
@@ -122,12 +127,10 @@ export class GoogleService {
         method: LoginMethod.GOOGLE,
         contexto,
       });
-      return new NotFoundException(RECUSA);
+      return new NotFoundException(resposta);
     };
 
-    if (!conta.emailVerificado || !conta.googleEhAutoridade) {
-      throw await recusar();
-    }
+    if (!conta.emailVerificado) throw await recusar();
 
     // dois bastam para saber que é ambíguo
     const donos = await this.prisma.user.findMany({
@@ -142,7 +145,24 @@ export class GoogleService {
       take: 2,
     });
 
-    if (!donos.length) throw await recusar();
+    // Ninguém com esse e-mail: a tela leva ao cadastro, como no CPF não
+    // cadastrado, já com o e-mail e o nome da conta Google. Só aqui o motivo
+    // aparece — e só para quem provou ser dono do e-mail (verificado pelo
+    // Google). O cadastro não vincula nada: a próxima entrada com o Google é
+    // que vincula, pelas regras de sempre.
+    if (!donos.length) {
+      throw await recusar(undefined, {
+        message:
+          'Você ainda não tem cadastro. Complete o seu cadastro para continuar.',
+        semCadastro: true,
+        email: conta.email,
+        nome: conta.nome,
+      });
+    }
+
+    // o Google não responde por este e-mail (ver `googleEhAutoridade`): não
+    // vincula sozinho a um cadastro que já existe
+    if (!conta.googleEhAutoridade) throw await recusar();
 
     // e-mail de mais de um cadastro (repetido antigo, ou uma família que
     // divide a caixa): não há como saber de quem é a conta Google. Não entra

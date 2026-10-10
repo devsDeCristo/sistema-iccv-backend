@@ -74,7 +74,13 @@ pessoa: guards, recorte por igreja e sessão continuam iguais.
   `docs/usuarios.md`).
 - **Cadastro já ligado a outra conta Google:** não troca sozinho. Trocar é
   pelo perfil: desvincular e vincular a nova.
-- **Recusa sem motivo:** todos os casos acima respondem `404` com a mesma
+- **Sem cadastro com o e-mail:** é a única recusa que diz o motivo, e só
+  quando o Google confirma o e-mail (`email_verified`): `404` com
+  `{ semCadastro: true, email, nome }`. O front leva para o cadastro, como no
+  CPF não cadastrado, com e-mail e nome preenchidos. Quem recebe isso provou
+  ser dono do e-mail, então não há nada a esconder dele. O cadastro não
+  vincula o Google; a próxima entrada vincula pelas regras acima.
+- **Recusa sem motivo:** os outros casos respondem `404` com a mesma
   mensagem, "Esta conta Google não pode ser usada para entrar. Entre com CPF e
   senha." (`RECUSA`). Dizer o motivo contaria a quem tenta o que existe no
   sistema com aquele e-mail: se há cadastro, se há mais de um, se já tem

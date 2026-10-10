@@ -18,6 +18,7 @@ const RECUSA =
 const conta = (dados: Partial<ContaGoogle> = {}): ContaGoogle => ({
   sub: 'google-1',
   email: 'fulano@gmail.com',
+  nome: 'Fulano de Tal',
   emailVerificado: true,
   googleEhAutoridade: true,
   ...dados,
@@ -167,7 +168,10 @@ describe('GoogleService.entrar', () => {
   it.each([
     ['e-mail que o Google não controla', conta({ googleEhAutoridade: false })],
     ['e-mail não verificado', conta({ emailVerificado: false })],
-    ['sem cadastro com o e-mail', conta({ email: 'outro@gmail.com' })],
+    [
+      'e-mail não verificado e sem cadastro',
+      conta({ email: 'outro@gmail.com', emailVerificado: false }),
+    ],
   ])('não vincula sozinho: %s', async (_caso, contaDoGoogle) => {
     tokenDoGoogle.mockResolvedValue(contaDoGoogle);
     const { servico, identidades, auth } = await montar();
@@ -177,6 +181,25 @@ describe('GoogleService.entrar', () => {
     expect(auth.registrarTentativa).toHaveBeenCalledWith(
       expect.objectContaining({ success: false, method: 'GOOGLE' }),
     );
+  });
+
+  it('sem cadastro com o e-mail: manda para o cadastro com e-mail e nome', async () => {
+    tokenDoGoogle.mockResolvedValue(
+      conta({ email: 'novo@outlook.com', googleEhAutoridade: false }),
+    );
+    const { servico, identidades } = await montar();
+
+    const erro = await servico.entrar('token').catch((e) => e);
+
+    expect(erro.getStatus()).toBe(404);
+    expect(erro.getResponse()).toEqual(
+      expect.objectContaining({
+        semCadastro: true,
+        email: 'novo@outlook.com',
+        nome: 'Fulano de Tal',
+      }),
+    );
+    expect(identidades).toHaveLength(0);
   });
 
   it('e-mail de mais de um cadastro: não entra nem vincula', async () => {
@@ -341,6 +364,7 @@ describe('conferirTokenDoGoogle', () => {
     expect(await real('token')).toEqual({
       sub: 's',
       email: 'fulano@gmail.com',
+      nome: null,
       emailVerificado: true,
       googleEhAutoridade: true,
     });

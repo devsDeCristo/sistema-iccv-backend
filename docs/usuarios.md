@@ -20,6 +20,9 @@ correspondente no `ic-front`: `docs/login-e-cadastro.md`, `docs/perfil.md` e
   versão vigente dos Termos de Uso, com IP e aparelho de quem cadastrou. Ver
   `docs/termos.md`.
 - **CPF único:** CPF repetido responde `409 Conflict`.
+- **E-mail obrigatório no cadastro:** sem e-mail responde `400`. O `UserDTO`
+  deixa o campo opcional por causa da edição; a regra fica em
+  `UserService.create`.
 - **E-mail sem repetido novo:** guardado sempre em minúsculas e sem espaço
   nas pontas (`normalizarEmail`, aplicado no `UserDTO`, que serve ao cadastro,
   à edição pelo painel e ao `PUT /users/me`). Cadastrar ou **trocar para** um
