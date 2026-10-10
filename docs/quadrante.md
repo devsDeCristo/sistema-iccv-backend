@@ -65,6 +65,10 @@ Reaproveita a mesma infraestrutura do crachá:
 - **Aquecimento (`aquecerImagens`):** disparado assim que a tela `GET` do quadrante é aberta, sem esperar a resposta — quando a pessoa clica em "Baixar PDF" as fotos já estão em cache ou a caminho.
 - **Chrome compartilhado (`src/pdf/navegador.ts`) e fonte embutida (`src/pdf/fonte.ts`):** mesmo mecanismo do crachá — ver `docs/crachas-e-pdf.md`.
 
+- **Fila:** a geração do PDF entra na fila única de PDFs do servidor, um de
+  cada vez, com a posição informada a quem espera — ver
+  `docs/crachas-e-pdf.md`, "Fila de geração".
+
 ## Tela correspondente
 
 Front (`ic-front/docs`): `quadrante.md`.

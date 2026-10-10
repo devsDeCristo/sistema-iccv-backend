@@ -1,6 +1,14 @@
-import { Body, Controller, Param, Post, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Param,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
@@ -8,6 +16,7 @@ import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { CrachaService } from './cracha.service';
 import { GerarCrachasDto } from './dto/gerar-crachas.dto';
+import { naFilaDaRequisicao } from 'src/pdf/fila';
 
 /**
  * Os mesmos perfis que abrem a lista de inscritos do evento — é dela que saem
@@ -27,11 +36,12 @@ export class CrachaController {
   async gerarPdf(
     @Param('idEvent') idEvent: string,
     @Body() dto: GerarCrachasDto,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
-    const { buffer, fileName } = await this.crachaService.gerarPdf(
-      idEvent,
-      dto,
+    // um PDF de cada vez no servidor — ver `src/pdf/fila.ts`
+    const { buffer, fileName } = await naFilaDaRequisicao(req, res, () =>
+      this.crachaService.gerarPdf(idEvent, dto),
     );
 
     res.setHeader('Content-Type', 'application/pdf');

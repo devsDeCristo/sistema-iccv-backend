@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { QuadranteService } from './quadrante.service';
+import { naFilaDaRequisicao } from 'src/pdf/fila';
 
 /**
  * Sem `@Roles` nem `EventTenantGuard`: além do admin da igreja, o inscrito
@@ -36,8 +37,10 @@ export class QuadranteController {
   ) {
     await this.quadranteService.assertPodeVer(idEvent, req.user?.userId);
 
-    const { buffer, fileName } =
-      await this.quadranteService.generatePdf(idEvent);
+    // um PDF de cada vez no servidor — ver `src/pdf/fila.ts`
+    const { buffer, fileName } = await naFilaDaRequisicao(req, res, () =>
+      this.quadranteService.generatePdf(idEvent),
+    );
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(

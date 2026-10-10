@@ -23,6 +23,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { LogsModule } from './logs/logs.module';
 import { ChurchModule } from './church/church.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { PdfModule } from './pdf/pdf.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestContextInterceptor } from './middleware/request-context.middleware';
 
@@ -51,6 +52,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     LogsModule,
     ChurchModule,
     DashboardModule,
+    PdfModule,
   ],
   controllers: [AuthController],
   providers: [

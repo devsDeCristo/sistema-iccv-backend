@@ -47,6 +47,42 @@ O módulo carrega comentários de motivo no próprio código — resumo do que e
 - **Artes fixas e imagens do evento em paralelo:** logo da igreja e papel rasgado (arquivos fixos em `src/cracha/assets`) são lidos e reduzidos uma vez por processo (`carregarArtesFixas`). Capa e logo do evento são baixadas do Firebase e reduzidas (`src/pdf/imagens.ts`, formatos `crachaFundo`/`crachaLogo`) com cache em memória por URL, concorrência de até 32 downloads simultâneos e timeout de 10s por imagem — foto que não chega a tempo fica de fora, sem travar o PDF inteiro.
 - **Aquecimento (`aquecerImagensDoCracha`):** disparado quando o admin abre o painel do evento (de onde se baixa o crachá), começa a baixar capa, logo, artes fixas e fonte sem esperar clique em "Baixar Crachá" — o clique real geralmente já encontra tudo em cache.
 
+## Fila de geração (`src/pdf/fila.ts`)
+
+Os PDFs gerados no servidor (crachás e quadrante) passam por uma fila única:
+**um de cada vez**.
+
+- **Por quê:** uma geração grande soma ~400 MB à API, que parada já ocupa
+  ~340 MB, num container de 1 GB (medido em produção: pico de 734 MiB com uma
+  geração). Duas ao mesmo tempo passavam do limite — o container voltava a
+  viver no teto, lento para todo mundo, ou o sistema matava o maior processo,
+  às vezes o Node, derrubando a API inteira. Em fila, o pico é sempre o de
+  uma geração.
+- **Vaga passada adiante:** quem termina entrega a vaga ao próximo da fila
+  (`finally`), mesmo quando a geração falha; quem chega no meio da troca não
+  fura a fila.
+- **Limite:** mais de 20 esperando (`MAXIMO_NA_FILA`), o pedido seguinte
+  recebe `429` na hora ("Muitos PDFs sendo gerados agora. Tente de novo em
+  instantes.").
+- **Desistência:** a conexão fechada antes da resposta (aba fechada,
+  navegação) tira o pedido da fila, e o PDF não é gerado à toa
+  (`naFilaDaRequisicao`, pelo `close` da resposta). Depois que a vez chegou, a
+  geração vai até o fim.
+- **Posição na fila:** o front sorteia um código (UUID) e manda no cabeçalho
+  `X-Pedido-Pdf`; enquanto espera, pergunta `GET /pdf/fila/:codigo`
+  (autenticado), que responde `{ estado: 'fila', posicao }`, `{ estado:
+  'gerando' }` ou `{ estado: 'desconhecido' }` (ainda não chegou, já terminou
+  ou código de ninguém). O código é imprevisível e a resposta não diz nada
+  além da posição. Sem cabeçalho, ou com um valor que não é UUID, o pedido
+  entra na fila do mesmo jeito, só sem acompanhamento.
+- **Uma réplica:** a fila mora na memória do processo. A API roda com uma
+  réplica; com mais, cada uma teria a sua fila — a conta de memória, que é por
+  container, continuaria certa.
+
+Arquivos: `src/pdf/fila.ts`, `src/pdf/pdf.controller.ts`, `src/pdf/pdf.module.ts`,
+`src/pdf/fila.spec.ts`; as rotas `POST /events/:idEvent/crachas/pdf` e
+`GET /events/:idEvent/quadrante/pdf` passam por `naFilaDaRequisicao`.
+
 ## Docker
 
 - **Chromium via `apt`, não pelo Puppeteer:** o pacote Debian já traz as bibliotecas necessárias, evitando baixar um segundo Chromium na imagem. `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` aponta o `puppeteer-core` para esse binário.
