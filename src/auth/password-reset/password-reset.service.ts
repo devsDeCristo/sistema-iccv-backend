@@ -12,8 +12,9 @@ import { MailService } from 'src/mail/mail.service';
 import { LOGO_DO_EMAIL } from 'src/mail/logo';
 
 /**
- * Tipos de `UserToken`. Redefinição de senha é o 0; um fluxo novo entra como 1
- * sem mexer no banco.
+ * Tipos de `UserToken`. Redefinição de senha é o 0; o 1 é o vínculo do Google
+ * (`TOKEN_TYPE_GOOGLE_LINK`). Um fluxo novo entra com o próximo número, sem
+ * mexer no banco.
  */
 export const TOKEN_TYPE_PASSWORD_RESET = 0;
 

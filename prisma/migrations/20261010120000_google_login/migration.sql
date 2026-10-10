@@ -2,38 +2,25 @@
 -- de entrada.
 
 -- O e-mail passa a ser guardado em minúsculas e sem espaço nas pontas
--- (`normalizarEmail`). Os que já existem entram no mesmo formato antes do
--- índice único, senão "Fulano@" e "fulano@" passariam como e-mails diferentes.
+-- (`normalizarEmail`). Os que já existem entram no mesmo formato, para a busca
+-- por e-mail (login com Google, checagem de repetido) achar todos.
 UPDATE "users" SET "email" = lower(trim("email")) WHERE "email" <> lower(trim("email"));
 
--- E-mail repetido nunca foi regra, só falha. Se sobrou algum, a migração para
--- aqui listando quais — o índice falharia do mesmo jeito, só que sem dizer
--- quem. Resolva os cadastros à mão e rode de novo.
-DO $$
-DECLARE repetidos TEXT;
-BEGIN
-  SELECT string_agg("email" || ' (' || quantos || 'x)', ', ')
-    INTO repetidos
-    FROM (
-      SELECT "email", count(*) AS quantos
-        FROM "users"
-       GROUP BY "email"
-      HAVING count(*) > 1
-    ) AS r;
-
-  IF repetidos IS NOT NULL THEN
-    RAISE EXCEPTION 'E-mails repetidos em users, resolva antes de migrar: %', repetidos;
-  END IF;
-END $$;
-
+-- Sem índice único por enquanto: há e-mails repetidos em produção, de antes da
+-- regra. Quem barra repetido novo é o código (`UserService.emailEmUso`); o
+-- índice comum só atende a busca.
 -- CreateIndex
-CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+CREATE INDEX "users_email_idx" ON "users"("email");
 
 -- CreateEnum
 CREATE TYPE "LoginMethod" AS ENUM ('PASSWORD', 'GOOGLE');
 
 -- CreateEnum
 CREATE TYPE "IdentityProvider" AS ENUM ('GOOGLE');
+
+-- AlterTable
+-- o vínculo do Google pelo perfil guarda a conta escolhida até o código voltar
+ALTER TABLE "user_tokens" ADD COLUMN     "payload" JSONB;
 
 -- AlterTable
 ALTER TABLE "login_attempts" ADD COLUMN     "method" "LoginMethod" NOT NULL DEFAULT 'PASSWORD';

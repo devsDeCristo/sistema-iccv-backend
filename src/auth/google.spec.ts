@@ -31,7 +31,35 @@ async function montar({
   const hash = await bcrypt.hash('senha-certa', 4);
   const user = (id: string) => usuarios.find((u) => u.id === id);
 
-  const prisma = {
+  // códigos de vínculo pendentes (`UserToken`)
+  const tokens: any[] = [];
+  const prisma: any = {
+    userToken: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        [...tokens]
+          .reverse()
+          .find((t) => t.userId === where.userId && t.type === where.type),
+      ),
+      create: jest.fn(async ({ data }: any) => {
+        tokens.push({
+          id: `t${tokens.length}`,
+          attempts: 0,
+          createdAt: new Date(),
+          ...data,
+        });
+      }),
+      update: jest.fn(async ({ where, data }: any) =>
+        Object.assign(
+          tokens.find((t) => t.id === where.id),
+          data,
+        ),
+      ),
+      deleteMany: jest.fn(async ({ where }: any) => {
+        for (let i = tokens.length - 1; i >= 0; i--)
+          if (tokens[i].userId === where.userId) tokens.splice(i, 1);
+      }),
+    },
+    $transaction: jest.fn(async (fn: any) => fn(prisma)),
     userIdentity: {
       findUnique: jest.fn(async ({ where }: any) => {
         const achada = where.provider_subject
@@ -57,17 +85,21 @@ async function montar({
     },
     user: {
       findUnique: jest.fn(async ({ where }: any) => {
-        const achado = where.email
-          ? usuarios.find((u) => u.email === where.email)
-          : user(where.id);
-        if (!achado) return null;
-        return {
-          ...achado,
-          fullName: 'Fulano',
-          password: hash,
-          identities: identidades.filter((i) => i.userId === achado.id),
-        };
+        const achado = user(where.id);
+        return achado
+          ? { ...achado, fullName: 'Fulano', password: hash }
+          : null;
       }),
+      findMany: jest.fn(async ({ where, take }: any) =>
+        usuarios
+          .filter((u) => u.email === where.email)
+          .slice(0, take)
+          .map((achado) => ({
+            ...achado,
+            fullName: 'Fulano',
+            identities: identidades.filter((i) => i.userId === achado.id),
+          })),
+      ),
     },
   };
 
@@ -91,7 +123,7 @@ async function montar({
     auth as any,
     mail as any,
   );
-  return { servico, prisma, auth, mail, identidades };
+  return { servico, prisma, auth, mail, identidades, tokens };
 }
 
 describe('GoogleService.entrar', () => {
@@ -145,6 +177,21 @@ describe('GoogleService.entrar', () => {
     );
   });
 
+  it('e-mail de mais de um cadastro: não entra nem vincula', async () => {
+    tokenDoGoogle.mockResolvedValue(conta());
+    const { servico, identidades } = await montar({
+      usuarios: [
+        { id: 'u1', cpf: '123', email: 'fulano@gmail.com' },
+        { id: 'u2', cpf: '456', email: 'fulano@gmail.com' },
+      ],
+    });
+
+    await expect(servico.entrar('token')).rejects.toThrow(
+      'mais de um cadastro',
+    );
+    expect(identidades).toHaveLength(0);
+  });
+
   it('cadastro já ligado a outra conta Google: recusa sem trocar', async () => {
     tokenDoGoogle.mockResolvedValue(conta({ sub: 'google-novo' }));
     const { servico, identidades } = await montar({
@@ -168,20 +215,90 @@ describe('GoogleService.vincular (pelo perfil)', () => {
     expect(identidades).toHaveLength(0);
   });
 
-  it('vincula conta com e-mail diferente do cadastro (Outlook)', async () => {
+  /** o código sai no assunto do e-mail: "12345678 é o código..." */
+  const codigoDoEmail = (mail: { sendMail: jest.Mock }) =>
+    mail.sendMail.mock.calls.at(-1)[0].subject.slice(0, 8);
+
+  it('passo 1 só manda o código; o passo 2 vincula a conta escolhida', async () => {
     tokenDoGoogle.mockResolvedValue(
       conta({ email: 'fulano@outlook.com', googleEhAutoridade: false }),
     );
     const { servico, identidades, mail } = await montar();
 
-    const vinculo = await servico.vincular('u1', 'token', 'senha-certa');
+    const pedido = await servico.vincular('u1', 'token', 'senha-certa');
+    expect(pedido.email).toBe('fu***@gmail.com');
+    expect(identidades).toHaveLength(0);
+    expect(mail.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'fulano@gmail.com' }),
+    );
+
+    const vinculo = await servico.confirmarVinculo('u1', codigoDoEmail(mail));
 
     expect(vinculo).toEqual(
       expect.objectContaining({ email: 'fulano@outlook.com' }),
     );
     expect(vinculo).not.toHaveProperty('subject');
-    expect(identidades).toHaveLength(1);
-    expect(mail.sendMail).toHaveBeenCalledTimes(1);
+    expect(identidades).toEqual([
+      expect.objectContaining({ userId: 'u1', subject: 'google-1' }),
+    ]);
+  });
+
+  it('código de outro cadastro não serve', async () => {
+    tokenDoGoogle.mockResolvedValue(conta());
+    const { servico, mail, identidades } = await montar({
+      usuarios: [
+        { id: 'u1', cpf: '123', email: 'fulano@gmail.com' },
+        { id: 'u2', cpf: '456', email: 'beltrano@gmail.com' },
+      ],
+    });
+
+    await servico.vincular('u1', 'token', 'senha-certa');
+    await expect(
+      servico.confirmarVinculo('u2', codigoDoEmail(mail)),
+    ).rejects.toThrow('Código expirado ou inválido');
+    expect(identidades).toHaveLength(0);
+  });
+
+  it('cinco códigos errados destroem o pedido', async () => {
+    tokenDoGoogle.mockResolvedValue(conta());
+    const { servico, mail, tokens } = await montar();
+
+    await servico.vincular('u1', 'token', 'senha-certa');
+    const certo = codigoDoEmail(mail);
+    const errado = certo === '00000000' ? '11111111' : '00000000';
+
+    for (let i = 0; i < 5; i++) {
+      await expect(servico.confirmarVinculo('u1', errado)).rejects.toThrow(
+        'Código incorreto',
+      );
+    }
+    expect(tokens).toHaveLength(0);
+    await expect(servico.confirmarVinculo('u1', certo)).rejects.toThrow(
+      'Código expirado ou inválido',
+    );
+  });
+
+  it('código vencido não vincula', async () => {
+    tokenDoGoogle.mockResolvedValue(conta());
+    const { servico, mail, tokens, identidades } = await montar();
+
+    await servico.vincular('u1', 'token', 'senha-certa');
+    tokens[0].expiresAt = new Date(Date.now() - 1);
+
+    await expect(
+      servico.confirmarVinculo('u1', codigoDoEmail(mail)),
+    ).rejects.toThrow('Código expirado ou inválido');
+    expect(identidades).toHaveLength(0);
+  });
+
+  it('pedir outro código antes de um minuto: 429', async () => {
+    tokenDoGoogle.mockResolvedValue(conta());
+    const { servico } = await montar();
+
+    await servico.vincular('u1', 'token', 'senha-certa');
+    await expect(
+      servico.vincular('u1', 'token', 'senha-certa'),
+    ).rejects.toThrow('Aguarde um minuto');
   });
 
   it('conta Google de outro cadastro: recusa', async () => {

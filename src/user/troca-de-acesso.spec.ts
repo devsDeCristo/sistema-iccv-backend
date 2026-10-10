@@ -31,8 +31,11 @@ function montar(requester: object, vinculosDoAlvo: string[]) {
       findUnique: jest.fn(async ({ where }: any) =>
         where.id === 'alvo' ? alvo : { ...requester, fullName: 'Quem pediu' },
       ),
-      // o alvo está no escopo de quem pede (inscrito num evento da igreja dele)
-      findFirst: jest.fn().mockResolvedValue({ id: 'alvo' }),
+      // o alvo está no escopo de quem pede (inscrito num evento da igreja
+      // dele); e-mail novo não é de mais ninguém
+      findFirst: jest.fn(async ({ where }: any) =>
+        where.email ? null : { id: 'alvo' },
+      ),
     },
     userChurchRole: {
       findMany: jest

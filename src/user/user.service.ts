@@ -45,7 +45,6 @@ import { LOGO_DO_EMAIL } from 'src/mail/logo';
 import { escapeHtml } from 'src/quadrante/quadrante-pdf';
 import {
   EMAIL_EM_USO,
-  emailRepetido,
   mascararEmail,
   mudaAcesso,
 } from './acesso';
@@ -124,8 +123,6 @@ export class UserService {
         user: semSenha,
       };
     } catch (error) {
-      // dois cadastros com o mesmo e-mail ao mesmo tempo: o índice segura
-      if (emailRepetido(error)) throw new ConflictException(EMAIL_EM_USO);
       throw new InternalServerErrorException();
     }
   }
@@ -271,10 +268,17 @@ export class UserService {
     return users.map(({ password: _hash, ...user }) => user);
   }
 
-  /** Algum cadastro já usa este e-mail */
-  private async emailEmUso(email: string) {
-    return !!(await this.prisma.user.findUnique({
-      where: { email },
+  /**
+   * Algum outro cadastro já usa este e-mail. É a única trava contra repetido:
+   * o banco não tem índice único (há repetidos antigos).
+   *
+   * ponytail: checagem antes de gravar, sem trava — dois cadastros com o mesmo
+   * e-mail no mesmo instante passam. Vira índice único quando os repetidos
+   * antigos forem resolvidos.
+   */
+  private async emailEmUso(email: string, excetoId?: string) {
+    return !!(await this.prisma.user.findFirst({
+      where: { email, ...(excetoId ? { id: { not: excetoId } } : {}) },
       select: { id: true },
     }));
   }
@@ -695,6 +699,16 @@ export class UserService {
       ),
     };
 
+    // só na troca: quem já divide o e-mail com outro cadastro (repetido
+    // antigo) continua salvando o resto dos dados
+    if (
+      data.email !== undefined &&
+      data.email !== userExists.email &&
+      (await this.emailEmUso(data.email, id))
+    ) {
+      throw new ConflictException(EMAIL_EM_USO);
+    }
+
     try {
       await this.prisma.$transaction(async (tx) => {
         await tx.user.update({ data: campos, where: { id } });
@@ -730,7 +744,6 @@ export class UserService {
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      if (emailRepetido(error)) throw new ConflictException(EMAIL_EM_USO);
       console.log(error);
       throw new InternalServerErrorException();
     }

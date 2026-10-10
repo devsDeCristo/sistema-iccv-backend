@@ -87,10 +87,11 @@ model UserChurchRole {
 
 model User {
   id                 String             @id @default(uuid())
-  /// Único e sempre em minúsculas (`normalizarEmail`): o login pelo Google acha
-  /// a conta pelo e-mail, e dois cadastros com o mesmo endereço seriam uma
-  /// porta para a conta errada
-  email              String             @unique
+  /// Sempre em minúsculas (`normalizarEmail`). Não é `@unique` no banco
+  /// porque há repetidos antigos em produção; repetido novo é barrado no
+  /// código (`UserService.emailEmUso`), e o login com Google não entra quando
+  /// o e-mail é de mais de um cadastro
+  email              String
   fullName           String
   cpf                String             @unique
   birthday           DateTime
@@ -169,11 +170,12 @@ model User {
   termsAcceptances   TermsAcceptance[]
   termsPublished     TermsDocument[]    @relation("TermsPublisher")
 
+  @@index([email])
   @@map("users")
 }
 
-/// Token de uso único e vida curta para fluxos que acontecem **fora** da sessão
-/// autenticada — hoje só a redefinição de senha. A linha existe apenas enquanto
+/// Token de uso único e vida curta: a redefinição de senha (fora da sessão) e
+/// o código que confirma o vínculo de uma conta Google pelo perfil. A linha existe apenas enquanto
 /// o usuário está no meio do processo: ao concluir (ou estourar tentativas) ela
 /// é apagada, então a tabela vive praticamente vazia.
 ///
@@ -183,9 +185,13 @@ model User {
 model UserToken {
   id         String   @id @default(uuid())
   userId     String
-  /// 0 = redefinição de senha. Inteiro em vez de enum para um fluxo novo
-  /// (confirmação de e-mail, convite) entrar sem migração de tipo.
+  /// 0 = redefinição de senha, 1 = vínculo de conta Google. Inteiro em vez de
+  /// enum para um fluxo novo (confirmação de e-mail, convite) entrar sem
+  /// migração de tipo.
   type       Int
+  /// O que o fluxo precisa lembrar até o código voltar. No vínculo do Google,
+  /// a conta escolhida (`subject`, `email`): o código vale só para ela.
+  payload    Json?
   /// bcrypt do código de 8 dígitos. bcrypt e não SHA porque 10^8 combinações
   /// são varridas em segundos com hash rápido caso o banco vaze.
   codeHash   String

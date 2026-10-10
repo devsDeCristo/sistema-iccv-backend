@@ -11,7 +11,11 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { GoogleService } from './google.service';
-import { GoogleLoginDto, VincularGoogleDto } from './dto/google.dto';
+import {
+  ConfirmarVinculoDto,
+  GoogleLoginDto,
+  VincularGoogleDto,
+} from './dto/google.dto';
 import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { Logger } from '@nestjs/common';
@@ -76,7 +80,9 @@ export class AuthController {
     return this.googleService.listar(req.user.userId);
   }
 
-  @ApiOperation({ summary: 'Vincula uma conta Google ao próprio cadastro' })
+  @ApiOperation({
+    summary: 'Vincular Google, passo 1: senha + conta, manda código por e-mail',
+  })
   @UseGuards(JwtAuthGuard)
   @Post('identities/google')
   vincularGoogle(@Body() dto: VincularGoogleDto, @Req() req: any) {
@@ -85,6 +91,15 @@ export class AuthController {
       dto.credential,
       dto.currentPassword,
     );
+  }
+
+  @ApiOperation({
+    summary: 'Vincular Google, passo 2: o código do e-mail confirma',
+  })
+  @UseGuards(JwtAuthGuard)
+  @Post('identities/google/confirm')
+  confirmarVinculoGoogle(@Body() dto: ConfirmarVinculoDto, @Req() req: any) {
+    return this.googleService.confirmarVinculo(req.user.userId, dto.code);
   }
 
   @ApiOperation({ summary: 'Desvincula a conta Google do próprio cadastro' })

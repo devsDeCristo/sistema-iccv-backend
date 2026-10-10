@@ -20,18 +20,21 @@ correspondente no `ic-front`: `docs/login-e-cadastro.md`, `docs/perfil.md` e
   versão vigente dos Termos de Uso, com IP e aparelho de quem cadastrou. Ver
   `docs/termos.md`.
 - **CPF único:** CPF repetido responde `409 Conflict`.
-- **E-mail único:** guardado sempre em minúsculas e sem espaço nas pontas
-  (`normalizarEmail`, aplicado no `UserDTO`, que serve ao cadastro, à edição
-  pelo painel e ao `PUT /users/me`). E-mail já usado responde `409` com
-  `EMAIL_EM_USO`, no cadastro pela checagem prévia e na edição pelo índice
-  (`emailRepetido`). É único porque o login com Google acha a conta pelo
-  e-mail (ver `docs/autenticacao.md`).
-  A migração `20261010120000_google_login` passa os e-mails existentes para
-  minúsculas e, se ainda houver repetido, **para com erro listando quais**,
-  antes de criar o índice. Como o `start.sh` roda o `migrate deploy`, o
-  container não sobe e o Swarm volta para a versão anterior: resolva os
-  cadastros repetidos à mão e faça o deploy de novo. Para conferir antes:
-  `SELECT lower(trim(email)), count(*) FROM users GROUP BY 1 HAVING count(*) > 1;`
+- **E-mail sem repetido novo:** guardado sempre em minúsculas e sem espaço
+  nas pontas (`normalizarEmail`, aplicado no `UserDTO`, que serve ao cadastro,
+  à edição pelo painel e ao `PUT /users/me`). Cadastrar ou **trocar para** um
+  e-mail que já é de outro cadastro responde `409` com `EMAIL_EM_USO`
+  (`emailEmUso`).
+  - **Só no código, por enquanto:** há e-mails repetidos antigos em produção,
+    então o banco não tem índice único (só um índice comum, para a busca). A
+    migração `20261010120000_google_login` só passa os e-mails existentes para
+    minúsculas. Duas gravações no mesmo instante com o mesmo e-mail passam; o
+    índice único entra quando os repetidos antigos forem resolvidos. Para
+    listá-los: `SELECT email, count(*) FROM users GROUP BY 1 HAVING count(*) > 1;`
+  - **Quem já divide o e-mail** com outro cadastro continua salvando o resto
+    dos dados: a checagem só vale quando o e-mail muda.
+  - O login com Google não entra pelo e-mail quando ele é de mais de um
+    cadastro (ver `docs/autenticacao.md`).
 - **Retorno:** `access_token` (login automático) e o usuário sem o hash da
   senha.
 
@@ -69,7 +72,7 @@ rota para ler ou editar outra pessoa por aqui.
 
 | Campo | Tipo | Observação |
 | --- | --- | --- |
-| `fullName`, `email`, `cpf`, `birthday`, `cellphone` | obrigatórios | CPF e e-mail são únicos; e-mail em minúsculas |
+| `fullName`, `email`, `cpf`, `birthday`, `cellphone` | obrigatórios | CPF é único; e-mail em minúsculas e sem repetido novo (ver Cadastro) |
 | `city`, `state`, `neighborhood`, `profession`, `worker` | obrigatórios | — |
 | `street`, `number`, `zipCode` | opcionais | endereço; nasceram depois de cadastros já em produção |
 | `congregation` | opcional, texto livre | igreja que a pessoa frequenta — **não** é uma `Church` cadastrada no sistema |

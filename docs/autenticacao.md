@@ -48,7 +48,8 @@ pessoa: guards, recorte por igreja e sessão continuam iguais.
 | --- | --- | --- | --- |
 | `POST` | `/auth/google` | pública | entra com `{ credential }` |
 | `GET` | `/auth/identities` | `JwtAuthGuard` | contas vinculadas do próprio cadastro (`provider`, `email`, `createdAt`, `lastUsedAt`) |
-| `POST` | `/auth/identities/google` | `JwtAuthGuard` | vincula `{ credential, currentPassword }` |
+| `POST` | `/auth/identities/google` | `JwtAuthGuard` | vínculo, passo 1: `{ credential, currentPassword }`; manda o código e devolve o e-mail mascarado |
+| `POST` | `/auth/identities/google/confirm` | `JwtAuthGuard` | vínculo, passo 2: `{ code }` (8 dígitos); vincula |
 | `DELETE` | `/auth/identities/google` | `JwtAuthGuard` | desvincula |
 
 - **Conferência do token** (`conferirTokenDoGoogle`, `src/auth/google.ts`):
@@ -68,13 +69,30 @@ pessoa: guards, recorte por igreja e sessão continuam iguais.
   conta Google, `email_verified` diz só que o endereço foi confirmado um dia, e
   ele pode ter mudado de dono depois. Nesses casos a resposta é `404` ("vincule
   pelo perfil").
+- **E-mail de mais de um cadastro:** não entra nem vincula (`404`, "este
+  e-mail está em mais de um cadastro"). Não há como saber de quem é a conta
+  Google; cada pessoa vincula pelo perfil. O e-mail não tem índice único no
+  banco por causa de repetidos antigos (ver `docs/usuarios.md`).
 - **Cadastro já ligado a outra conta Google:** não troca sozinho, `404`. Trocar
   é pelo perfil: desvincular e vincular a nova.
-- **Vínculo pelo perfil:** pede a senha atual (`conferirSenhaAtual`, a mesma
-  trava de 5 erros da troca de e-mail) **antes** de olhar o token. Sem isso,
-  quem pegasse uma sessão aberta plantaria a própria conta Google como porta de
-  entrada permanente. A conta Google pode ter e-mail diferente do cadastro;
-  precisa só de `email_verified`.
+- **Vínculo pelo perfil, em dois passos.** São duas provas: a senha diz que é
+  o dono da conta, e o código diz que é o dono da caixa de entrada (o sistema
+  nunca confirmou os e-mails do cadastro).
+  1. `POST /auth/identities/google`: confere a senha atual
+     (`conferirSenhaAtual`, a mesma trava de 5 erros da troca de e-mail)
+     **antes** de olhar o token. Sem isso, quem pegasse uma sessão aberta
+     plantaria a própria conta Google como porta de entrada permanente. Depois
+     confere o token (`email_verified`; o e-mail pode ser diferente do
+     cadastro) e se a conta Google está livre. Grava um `UserToken` tipo 1
+     (`TOKEN_TYPE_GOOGLE_LINK`), com o hash bcrypt de um código de 8 dígitos e
+     a conta escolhida em `payload` (`subject`, `email`), e manda o código para
+     o e-mail do cadastro (template `google-account`, código também no
+     assunto). Nada é vinculado ainda.
+  2. `POST /auth/identities/google/confirm`: o código confere e a conta do
+     `payload` é vinculada; o código vale só para ela e só para o cadastro que
+     o pediu. Vence em 15 minutos; 5 erros destroem o pedido; outro pedido
+     dentro de 1 minuto responde `429`. Antes de gravar, confere de novo se a
+     conta Google continua livre.
 - **Desvincular** não pede senha: só fecha uma porta. O CPF e a senha
   continuam valendo.
 - **Aviso por e-mail:** todo vínculo e desvínculo manda o template

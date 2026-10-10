@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -18,10 +20,21 @@ import { escapeHtml } from 'src/quadrante/quadrante-pdf';
 import { AuthService, ContextoDeLogin } from './auth.service';
 import { ContaGoogle, conferirTokenDoGoogle } from './google';
 import { perfilEfetivo } from './tenant';
-import { conferirSenhaAtual } from './senha';
+import { BCRYPT_ROUNDS, conferirSenhaAtual } from './senha';
+import { mascararEmail } from 'src/user/acesso';
+import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 
 const SEM_CADASTRO =
   'Nenhum cadastro está vinculado a esta conta Google. Entre com CPF e senha e vincule o Google em Meu perfil › Segurança.';
+
+/** `UserToken.type` do código que confirma o vínculo pelo perfil */
+export const TOKEN_TYPE_GOOGLE_LINK = 1;
+const VALIDADE_DO_CODIGO_MS = 15 * 60_000;
+const REENVIO_MS = 60_000;
+const MAXIMO_DE_ERROS = 5;
+const CODIGO_INVALIDO =
+  'Código expirado ou inválido. Escolha a conta Google de novo para receber outro.';
 
 /** O que a tela de perfil mostra de cada conta vinculada */
 const CAMPOS_DA_CONTA = {
@@ -86,8 +99,8 @@ export class GoogleService {
   /**
    * Primeira entrada com esta conta Google: acha o cadastro pelo e-mail e
    * vincula na hora — só quando o Google responde pelo e-mail (ver
-   * `googleEhAutoridade`). Fora disso, quem quiser usar o Google vincula pelo
-   * perfil, já logado e com a senha.
+   * `googleEhAutoridade`) e o e-mail é de um cadastro só. Fora disso, quem
+   * quiser usar o Google vincula pelo perfil, já logado.
    */
   private async vincularPeloEmail(
     conta: ContaGoogle,
@@ -109,7 +122,8 @@ export class GoogleService {
       throw await recusar(SEM_CADASTRO);
     }
 
-    const user = await this.prisma.user.findUnique({
+    // dois bastam para saber que é ambíguo
+    const donos = await this.prisma.user.findMany({
       where: { email: conta.email },
       select: {
         id: true,
@@ -118,9 +132,21 @@ export class GoogleService {
         fullName: true,
         identities: { where: { provider: IdentityProvider.GOOGLE } },
       },
+      take: 2,
     });
 
-    if (!user) throw await recusar(SEM_CADASTRO);
+    if (!donos.length) throw await recusar(SEM_CADASTRO);
+
+    // e-mail de mais de um cadastro (repetido antigo, ou uma família que
+    // divide a caixa): não há como saber de quem é a conta Google. Não entra
+    // nem vincula; cada pessoa vincula pelo perfil
+    if (donos.length > 1) {
+      throw await recusar(
+        'Este e-mail está em mais de um cadastro. Entre com CPF e senha e vincule o Google em Meu perfil › Segurança.',
+      );
+    }
+
+    const [user] = donos;
 
     // o cadastro já tem outra conta Google: trocar é pelo perfil, com a senha
     if (user.identities.length) {
@@ -145,9 +171,13 @@ export class GoogleService {
   }
 
   /**
-   * Vincula pelo perfil. Pede a senha atual como a troca de e-mail: quem pega
-   * uma sessão aberta não pode, só com ela, plantar a própria conta Google
-   * como porta de entrada permanente.
+   * Vínculo pelo perfil, passo 1: confere a senha atual e a conta Google, e
+   * manda um código para o e-mail do cadastro. Nada é vinculado ainda.
+   *
+   * São duas provas: a senha diz que é o dono da conta (quem pega uma sessão
+   * aberta não planta a própria conta Google como porta permanente), e o
+   * código diz que é o dono da caixa de entrada — que o sistema nunca tinha
+   * confirmado. O código vale só para a conta Google escolhida aqui.
    */
   async vincular(userId: string, credential: string, senhaAtual?: string) {
     const user = await this.prisma.user.findUnique({
@@ -165,13 +195,114 @@ export class GoogleService {
       );
     }
 
+    await this.assertPodeVincular(userId, conta.sub);
+
+    const pendente = await this.prisma.userToken.findFirst({
+      where: { userId, type: TOKEN_TYPE_GOOGLE_LINK },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    // sem o intervalo, a tela vira um jeito de encher a caixa de alguém
+    if (pendente && Date.now() - pendente.createdAt.getTime() < REENVIO_MS) {
+      throw new HttpException(
+        'Acabamos de enviar um código. Aguarde um minuto para pedir outro.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const codigo = randomInt(0, 100_000_000).toString().padStart(8, '0');
+    const codeHash = await bcrypt.hash(codigo, BCRYPT_ROUNDS);
+
+    // interativa: a forma em array perde as escritas com o middleware de
+    // auditoria (ver `PasswordResetService.requestReset`)
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userToken.deleteMany({
+        where: { userId, type: TOKEN_TYPE_GOOGLE_LINK },
+      });
+      await tx.userToken.create({
+        data: {
+          userId,
+          type: TOKEN_TYPE_GOOGLE_LINK,
+          codeHash,
+          payload: { subject: conta.sub, email: conta.email },
+          expiresAt: new Date(Date.now() + VALIDADE_DO_CODIGO_MS),
+        },
+      });
+    });
+
+    await this.enviar(user, {
+      titulo: 'Código para vincular a conta Google',
+      contaGoogle: conta.email,
+      mensagem: `quer ser vinculada ao seu cadastro. Para confirmar, digite o código <strong style="font-size: 18px; letter-spacing: 2px">${codigo}</strong> em Meu perfil › Segurança. Ele vale 15 minutos.`,
+      assunto: `${codigo} é o código para vincular a conta Google`,
+    });
+
+    return {
+      message: 'Enviamos um código de 8 dígitos para o e-mail do cadastro.',
+      email: mascararEmail(user.email),
+    };
+  }
+
+  /**
+   * Vínculo pelo perfil, passo 2: o código do e-mail confere e a conta Google
+   * escolhida no passo 1 é vinculada. Cinco erros destroem o código.
+   */
+  async confirmarVinculo(userId: string, codigo: string) {
+    const token = await this.prisma.userToken.findFirst({
+      where: { userId, type: TOKEN_TYPE_GOOGLE_LINK },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const descartar = () =>
+      this.prisma.userToken.deleteMany({
+        where: { userId, type: TOKEN_TYPE_GOOGLE_LINK },
+      });
+
+    if (!token) throw new BadRequestException(CODIGO_INVALIDO);
+
+    if (token.expiresAt <= new Date() || token.attempts >= MAXIMO_DE_ERROS) {
+      await descartar();
+      throw new BadRequestException(CODIGO_INVALIDO);
+    }
+
+    if (!(await bcrypt.compare(codigo, token.codeHash))) {
+      const attempts = token.attempts + 1;
+      if (attempts >= MAXIMO_DE_ERROS) await descartar();
+      else
+        await this.prisma.userToken.update({
+          where: { id: token.id },
+          data: { attempts },
+        });
+      throw new BadRequestException('Código incorreto.');
+    }
+
+    const { subject, email } = token.payload as {
+      subject: string;
+      email: string;
+    };
+
+    // entre o passo 1 e este a conta Google pode ter sido vinculada a outro
+    await this.assertPodeVincular(userId, subject);
+
+    const vinculo = await this.criarVinculo(userId, { sub: subject, email });
+    await descartar();
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, fullName: true },
+    });
+    if (user) await this.avisar(user, email, 'vinculada');
+
+    const { provider, createdAt, lastUsedAt } = vinculo;
+    return { provider, email, createdAt, lastUsedAt };
+  }
+
+  /** A conta Google é livre e o cadastro ainda não tem Google */
+  private async assertPodeVincular(userId: string, subject: string) {
     const [daConta, doCadastro] = await Promise.all([
       this.prisma.userIdentity.findUnique({
         where: {
-          provider_subject: {
-            provider: IdentityProvider.GOOGLE,
-            subject: conta.sub,
-          },
+          provider_subject: { provider: IdentityProvider.GOOGLE, subject },
         },
         select: { userId: true },
       }),
@@ -195,12 +326,6 @@ export class GoogleService {
         'Seu cadastro já tem uma conta Google vinculada. Desvincule a atual antes de vincular outra.',
       );
     }
-
-    const vinculo = await this.criarVinculo(userId, conta);
-    await this.avisar(user, conta.email, 'vinculada');
-
-    const { provider, email, createdAt, lastUsedAt } = vinculo;
-    return { provider, email, createdAt, lastUsedAt };
   }
 
   /** Desvincular só tira uma porta: não pede senha */
@@ -229,7 +354,10 @@ export class GoogleService {
    * O índice único (`provider` + `subject`, `userId` + `provider`) é a trava
    * final: dois pedidos ao mesmo tempo não vinculam a mesma conta duas vezes.
    */
-  private async criarVinculo(userId: string, conta: ContaGoogle) {
+  private async criarVinculo(
+    userId: string,
+    conta: Pick<ContaGoogle, 'sub' | 'email'>,
+  ) {
     try {
       return await this.prisma.userIdentity.create({
         data: {
@@ -259,29 +387,50 @@ export class GoogleService {
     emailDoGoogle: string,
     acao: 'vinculada' | 'desvinculada',
   ) {
+    await this.enviar(pessoa, {
+      titulo: `Conta Google ${acao}`,
+      contaGoogle: emailDoGoogle,
+      mensagem:
+        acao === 'vinculada'
+          ? 'foi vinculada ao seu cadastro. A partir de agora ela também entra no sistema, pelo botão “Entrar com Google”.'
+          : 'foi desvinculada do seu cadastro e não entra mais no sistema. O acesso por CPF e senha continua igual.',
+      assunto:
+        acao === 'vinculada'
+          ? 'Conta Google vinculada ao seu cadastro'
+          : 'Conta Google desvinculada do seu cadastro',
+    });
+  }
+
+  /**
+   * Template `google-account`, para o e-mail do cadastro. Falha de e-mail não
+   * desfaz nada: fica no log. `mensagem` entra como HTML — só texto fixo daqui.
+   */
+  private async enviar(
+    pessoa: { email: string; fullName: string },
+    dados: {
+      titulo: string;
+      contaGoogle: string;
+      mensagem: string;
+      assunto: string;
+    },
+  ) {
     try {
       const html = this.mailService.loadTemplate('google-account', {
-        titulo: `Conta Google ${acao}`,
+        titulo: dados.titulo,
         userName: escapeHtml(pessoa.fullName),
-        contaGoogle: escapeHtml(emailDoGoogle),
-        mensagem:
-          acao === 'vinculada'
-            ? 'foi vinculada ao seu cadastro. A partir de agora ela também entra no sistema, pelo botão “Entrar com Google”.'
-            : 'foi desvinculada do seu cadastro e não entra mais no sistema. O acesso por CPF e senha continua igual.',
+        contaGoogle: escapeHtml(dados.contaGoogle),
+        mensagem: dados.mensagem,
       });
 
       await this.mailService.sendMail({
         to: pessoa.email,
-        subject:
-          acao === 'vinculada'
-            ? 'Conta Google vinculada ao seu cadastro'
-            : 'Conta Google desvinculada do seu cadastro',
+        subject: dados.assunto,
         html,
         attachments: LOGO_DO_EMAIL,
       });
     } catch (erro) {
       this.logger.error(
-        `Aviso de conta Google ${acao} não saiu: ${(erro as Error).message}`,
+        `E-mail "${dados.titulo}" não saiu: ${(erro as Error).message}`,
       );
     }
   }
