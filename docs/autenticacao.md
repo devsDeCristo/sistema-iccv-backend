@@ -10,6 +10,7 @@ e `docs/perfil.md` (troca de senha).
 - **Rota:** `POST /auth/login`, pública. Corpo: `document` (CPF) e `password`.
 - **Resposta:** `access_token` (JWT) e o usuário sem o hash da senha.
 - **Erros:** `404` documento não cadastrado, `401` senha errada.
+- **Pelo Google:** ver "Login com Google" abaixo.
 - **Token:** válido por 24h (`JwtModule`, `JWT_SECRET`). O payload traz `sub`
   (id), `username` (nome) e `role`, mas `role` é só uma pista: nenhuma
   autorização é decidida a partir dele — todo guard relê o banco.
@@ -35,6 +36,64 @@ segue normalmente: a auditoria não pode derrubar quem digitou a senha certa.
 
 Arquivos: `src/logs/dispositivo.ts`, `src/logs/logs.controller.ts`,
 `src/logs/logs.service.ts`.
+
+## Login com Google
+
+O botão "Entrar com Google" do front (Google Identity Services) entrega um
+**ID token**. A API confere o token e emite o **mesmo JWT** do login por CPF e
+senha, com o mesmo perfil efetivo (`perfilEfetivo`). O Google só diz quem é a
+pessoa: guards, recorte por igreja e sessão continuam iguais.
+
+| Método | Rota | Guard | O que faz |
+| --- | --- | --- | --- |
+| `POST` | `/auth/google` | pública | entra com `{ credential }` |
+| `GET` | `/auth/identities` | `JwtAuthGuard` | contas vinculadas do próprio cadastro (`provider`, `email`, `createdAt`, `lastUsedAt`) |
+| `POST` | `/auth/identities/google` | `JwtAuthGuard` | vincula `{ credential, currentPassword }` |
+| `DELETE` | `/auth/identities/google` | `JwtAuthGuard` | desvincula |
+
+- **Conferência do token** (`conferirTokenDoGoogle`, `src/auth/google.ts`):
+  `google-auth-library` confere a assinatura com as chaves públicas do Google,
+  o emissor, a validade e o `aud`, que precisa ser o nosso `GOOGLE_CLIENT_ID`.
+  Sem o `aud` certo, um token emitido para outro site entraria aqui. Token
+  recusado responde `400`; sem `GOOGLE_CLIENT_ID`, `503` (desligado).
+- **Quem identifica a pessoa é o `sub`** do Google, guardado em `UserIdentity`
+  (`subject`), e não o e-mail. A pessoa pode trocar o e-mail do cadastro (para
+  um Outlook, por exemplo) ou o da conta Google, e o vínculo continua valendo.
+  Índices únicos: `provider` + `subject` (uma conta Google, um cadastro) e
+  `userId` + `provider` (um Google por cadastro).
+- **Primeira entrada (vínculo pelo e-mail):** sem vínculo para o `sub`, a API
+  procura o cadastro pelo e-mail e vincula na hora, **só quando o Google
+  responde pelo e-mail**: `email_verified` verdadeiro **e** endereço
+  `@gmail.com` ou conta do Workspace (`hd`). Num e-mail de fora usado como
+  conta Google, `email_verified` diz só que o endereço foi confirmado um dia, e
+  ele pode ter mudado de dono depois. Nesses casos a resposta é `404` ("vincule
+  pelo perfil").
+- **Cadastro já ligado a outra conta Google:** não troca sozinho, `404`. Trocar
+  é pelo perfil: desvincular e vincular a nova.
+- **Vínculo pelo perfil:** pede a senha atual (`conferirSenhaAtual`, a mesma
+  trava de 5 erros da troca de e-mail) **antes** de olhar o token. Sem isso,
+  quem pegasse uma sessão aberta plantaria a própria conta Google como porta de
+  entrada permanente. A conta Google pode ter e-mail diferente do cadastro;
+  precisa só de `email_verified`.
+- **Desvincular** não pede senha: só fecha uma porta. O CPF e a senha
+  continuam valendo.
+- **Aviso por e-mail:** todo vínculo e desvínculo manda o template
+  `google-account` para o e-mail do cadastro. Falha de e-mail não desfaz nada
+  (fica no log).
+- **Sem freio de tentativas:** o bloqueio por senha errada é por CPF e não se
+  aplica aqui. Não há o que adivinhar: sem um token assinado pelo Google para o
+  nosso Client ID, a rota recusa.
+- **Tentativas:** gravadas em `LoginAttempt` com `method: GOOGLE` e, em
+  `document`, o e-mail da conta Google. Recusa por falta de cadastro vinculado
+  usa `reason: USER_NOT_FOUND`.
+- **Configuração:** criar um OAuth Client ID do tipo "Aplicativo da Web" no
+  Google Cloud Console, com as origens JavaScript autorizadas
+  (`https://eventos.iccidadeverde.com` e `http://localhost:5173`). O Client ID
+  é público: vai como secret `GOOGLE_CLIENT_ID` no backend e
+  `VITE_GOOGLE_CLIENT_ID` no front. Não há client secret nesse fluxo.
+
+Arquivos: `src/auth/google.ts`, `src/auth/google.service.ts`,
+`src/auth/dto/google.dto.ts`, `src/auth/google.spec.ts`.
 
 ## Validação de sessão
 

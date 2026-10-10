@@ -21,3 +21,24 @@ export function mascararEmail(email: string): string {
   if (!dominio) return '***';
   return `${nome.slice(0, 2)}***@${dominio}`;
 }
+
+/**
+ * Como todo e-mail é guardado: sem espaço nas pontas e em minúsculas. O índice
+ * único de `users.email` compara texto puro, e "Fulano@Gmail.com" e
+ * "fulano@gmail.com" são a mesma caixa de entrada.
+ */
+export function normalizarEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export const EMAIL_EM_USO =
+  'Este e-mail já está em uso em outro cadastro. Use outro e-mail ou fale com a secretaria.';
+
+/** A escrita esbarrou no índice único de `users.email` */
+export function emailRepetido(erro: unknown): boolean {
+  const { code, meta } = (erro ?? {}) as {
+    code?: string;
+    meta?: { target?: string[] | string };
+  };
+  return code === 'P2002' && [meta?.target].flat().includes('email');
+}

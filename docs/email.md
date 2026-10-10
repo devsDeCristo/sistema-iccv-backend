@@ -52,6 +52,7 @@ Arquivos: `src/mail/mail.service.ts`, `src/mail/templates/*.html`.
 | `password-reset-code.html` | pedido de redefinição de senha (código) | `userName`, `code`, `expiraEm` |
 | `password-changed.html` | aviso de senha alterada | `userName` |
 | `email-changed.html` | aviso ao e-mail **antigo** quando outra pessoa troca o e-mail da conta (`UserService.update`) | `userName`, `novoEmail` (mascarado), `quem` |
+| `google-account.html` | aviso de conta Google vinculada ou desvinculada, para o e-mail do cadastro (`GoogleService`) | `titulo`, `userName`, `contaGoogle`, `mensagem` |
 | `waiting-list-notice.html` | — | não está referenciado por nenhum serviço no código atual; o template existe mas o disparo não foi encontrado |
 
 ### Confirmação de inscrição

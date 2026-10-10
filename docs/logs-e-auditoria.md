@@ -129,7 +129,8 @@ o marcador `(atualizado)`. Consulta: `GET
 Gravadas em `LoginAttempt` (fora do middleware de auditoria — ver acima),
 com `document`, `userId` (nulo quando o documento não bate com ninguém),
 `success`, `reason` (só nas falhas, ex.: senha errada vs. documento
-inexistente), `ip` e `userAgent`. Senha nunca é gravada, nem em claro nem em
+inexistente), `method` (`PASSWORD` ou `GOOGLE`; no Google, `document` é o
+e-mail da conta Google), `ip` e `userAgent`. Senha nunca é gravada, nem em claro nem em
 hash. Consulta: `GET /logs/login-attempts`, mesmo filtro de período e
 paginação do log de atividades, com resumo de sucesso/falha.
 

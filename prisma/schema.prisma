@@ -87,7 +87,10 @@ model UserChurchRole {
 
 model User {
   id                 String             @id @default(uuid())
-  email              String
+  /// Único e sempre em minúsculas (`normalizarEmail`): o login pelo Google acha
+  /// a conta pelo e-mail, e dois cadastros com o mesmo endereço seriam uma
+  /// porta para a conta errada
+  email              String             @unique
   fullName           String
   cpf                String             @unique
   birthday           DateTime
@@ -161,6 +164,8 @@ model User {
   news               News[]
   tokens             UserToken[]
   loginAttempts      LoginAttempt[]
+  /// Contas de fora ligadas a este cadastro (hoje só o Google)
+  identities         UserIdentity[]
   termsAcceptances   TermsAcceptance[]
   termsPublished     TermsDocument[]    @relation("TermsPublisher")
 
@@ -221,6 +226,9 @@ model LoginAttempt {
   success   Boolean
   /// Só nas falhas: separa senha errada de documento inexistente
   reason    LoginFailureReason?
+  /// Por onde a pessoa tentou entrar. No Google, `document` guarda o e-mail
+  /// da conta Google, que é o que se tem antes de achar o cadastro
+  method    LoginMethod         @default(PASSWORD)
   ip        String?
   userAgent String?
   createdAt DateTime            @default(now())
@@ -231,6 +239,40 @@ model LoginAttempt {
   /// Atende o freio de senha errada, que conta as falhas por documento
   @@index([document, createdAt(sort: Desc)])
   @@map("login_attempts")
+}
+
+enum LoginMethod {
+  /// CPF e senha
+  PASSWORD
+  /// Botão "Entrar com Google"
+  GOOGLE
+}
+
+/// Conta de fora que entra no sistema no lugar de CPF e senha — hoje só o
+/// Google. Uma por provedor em cada cadastro.
+///
+/// Quem identifica a pessoa é `subject` (o `sub` do Google), e não o e-mail: o
+/// e-mail muda dos dois lados (a pessoa troca o do cadastro para o Outlook, ou
+/// o da conta Google), o `sub` não.
+model UserIdentity {
+  id         String           @id @default(uuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   IdentityProvider
+  subject    String
+  /// O e-mail da conta no provedor, só para a tela mostrar qual está ligada.
+  /// Atualizado a cada entrada
+  email      String
+  createdAt  DateTime         @default(now())
+  lastUsedAt DateTime?
+
+  @@unique([provider, subject])
+  @@unique([userId, provider])
+  @@map("user_identities")
+}
+
+enum IdentityProvider {
+  GOOGLE
 }
 
 /// Por que a entrada foi recusada. Separar as duas importa: senha errada em

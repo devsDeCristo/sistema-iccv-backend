@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ChurchStatus, LoginFailureReason } from '@prisma/client';
+import { ChurchStatus, LoginFailureReason, LoginMethod } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UserService } from 'src/user/user.service';
@@ -205,12 +205,15 @@ export class AuthService {
    * observar troca um incômodo por uma interrupção.
    *
    * A senha não passa por aqui em nenhuma hipótese, nem em claro nem em hash.
+   *
+   * Pública porque o login com Google (`GoogleService`) grava na mesma tabela.
    */
-  private async registrarTentativa(dados: {
+  async registrarTentativa(dados: {
     document: string;
     userId?: string;
     success: boolean;
     reason?: LoginFailureReason;
+    method?: LoginMethod;
     contexto?: ContextoDeLogin;
   }) {
     try {
@@ -220,6 +223,7 @@ export class AuthService {
           userId: dados.userId ?? null,
           success: dados.success,
           reason: dados.reason ?? null,
+          method: dados.method ?? LoginMethod.PASSWORD,
           ip: dados.contexto?.ip ?? null,
           // o cabeçalho é longo e vem de fora: cortado para não virar um campo
           // de texto sem teto no banco

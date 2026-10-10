@@ -43,7 +43,12 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { MailService } from 'src/mail/mail.service';
 import { LOGO_DO_EMAIL } from 'src/mail/logo';
 import { escapeHtml } from 'src/quadrante/quadrante-pdf';
-import { mascararEmail, mudaAcesso } from './acesso';
+import {
+  EMAIL_EM_USO,
+  emailRepetido,
+  mascararEmail,
+  mudaAcesso,
+} from './acesso';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -68,6 +73,10 @@ export class UserService {
 
     if (userCpfExists) {
       throw new ConflictException('Já existe um usuario com este cpf!');
+    }
+
+    if (data.email && (await this.emailEmUso(data.email))) {
+      throw new ConflictException(EMAIL_EM_USO);
     }
 
     try {
@@ -115,6 +124,8 @@ export class UserService {
         user: semSenha,
       };
     } catch (error) {
+      // dois cadastros com o mesmo e-mail ao mesmo tempo: o índice segura
+      if (emailRepetido(error)) throw new ConflictException(EMAIL_EM_USO);
       throw new InternalServerErrorException();
     }
   }
@@ -258,6 +269,14 @@ export class UserService {
     // o hash da senha não sai na lista: o painel vê todos os cadastros, e com
     // os hashes em mãos daria para tentar adivinhar as senhas fora do sistema
     return users.map(({ password: _hash, ...user }) => user);
+  }
+
+  /** Algum cadastro já usa este e-mail */
+  private async emailEmUso(email: string) {
+    return !!(await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    }));
   }
 
   async findByDocument(document: string) {
@@ -711,6 +730,7 @@ export class UserService {
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;
+      if (emailRepetido(error)) throw new ConflictException(EMAIL_EM_USO);
       console.log(error);
       throw new InternalServerErrorException();
     }

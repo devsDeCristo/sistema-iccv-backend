@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -14,6 +14,7 @@ import {
 } from 'class-validator';
 import { ASSIGNABLE_ROLES } from 'src/auth/roles';
 import { SENHA_MAXIMA, SENHA_MINIMA } from 'src/auth/senha';
+import { normalizarEmail } from '../acesso';
 
 /** Um vínculo de painel: o perfil que a pessoa tem em uma igreja. */
 export class ChurchRoleDto {
@@ -47,6 +48,9 @@ export class UserDTO {
     example: 'uluizfelipe@gmail.com',
     description: 'E-mail',
   })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizarEmail(value) : value,
+  )
   @IsEmail()
   @IsOptional()
   email: string;

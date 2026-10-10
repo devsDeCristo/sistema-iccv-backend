@@ -7,9 +7,12 @@ import {
   Get,
   Req,
   NotFoundException,
+  Delete,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { ApiBody, ApiTags } from '@nestjs/swagger';
+import { GoogleService } from './google.service';
+import { GoogleLoginDto, VincularGoogleDto } from './dto/google.dto';
+import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { Logger } from '@nestjs/common';
 
@@ -17,7 +20,10 @@ import { Logger } from '@nestjs/common';
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly googleService: GoogleService,
+  ) {}
   @Post('login')
   @ApiBody({
     schema: {
@@ -54,6 +60,40 @@ export class AuthController {
 
     return this.authService.login(user);
   }
+  @ApiOperation({ summary: 'Entra com a conta Google (ID token)' })
+  @Post('google')
+  async loginComGoogle(@Body() dto: GoogleLoginDto, @Req() req: any) {
+    return this.googleService.entrar(dto.credential, {
+      ip: req.ip,
+      userAgent: req.headers?.['user-agent'],
+    });
+  }
+
+  @ApiOperation({ summary: 'Contas vinculadas ao próprio cadastro' })
+  @UseGuards(JwtAuthGuard)
+  @Get('identities')
+  listarContas(@Req() req: any) {
+    return this.googleService.listar(req.user.userId);
+  }
+
+  @ApiOperation({ summary: 'Vincula uma conta Google ao próprio cadastro' })
+  @UseGuards(JwtAuthGuard)
+  @Post('identities/google')
+  vincularGoogle(@Body() dto: VincularGoogleDto, @Req() req: any) {
+    return this.googleService.vincular(
+      req.user.userId,
+      dto.credential,
+      dto.currentPassword,
+    );
+  }
+
+  @ApiOperation({ summary: 'Desvincula a conta Google do próprio cadastro' })
+  @UseGuards(JwtAuthGuard)
+  @Delete('identities/google')
+  desvincularGoogle(@Req() req: any) {
+    return this.googleService.desvincular(req.user.userId);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('validate')
   validateToken(@Req() req: any) {
