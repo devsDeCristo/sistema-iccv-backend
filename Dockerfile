@@ -56,6 +56,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5000
 
+# Menos memória presa por fragmentação. O sharp (que reduz as fotos dos PDFs)
+# decodifica imagens grandes em várias threads, e o alocador da glibc abre uma
+# arena por thread e não devolve o que sobra: o processo crescia e não
+# encolhia. Com 2 arenas, medido reduzindo as 316 fotos do quadrante: o Node
+# retém 362 MiB, contra 540 MiB no padrão (e 387 MiB com jemalloc), no mesmo
+# tempo. É a saída que a documentação do sharp indica para Linux com glibc.
+ENV MALLOC_ARENA_MAX=2
+
 # chromium-headless-shell: o Chromium feito só para automação, usado pelo
 # puppeteer-core para gerar os PDFs (quadrante, crachás) a partir de HTML. É o
 # mesmo motor de desenho do `chromium` (mesma versão no Debian), sem o código de

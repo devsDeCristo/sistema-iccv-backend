@@ -33,6 +33,16 @@ Arquivo: `src/main.ts`.
 
 Arquivo: `src/common/interceptors/logging.interceptor.ts`.
 
+## Memória do Node (`MALLOC_ARENA_MAX=2`)
+
+A imagem roda com `MALLOC_ARENA_MAX=2` (Dockerfile). O `sharp`, que reduz as
+fotos dos PDFs, decodifica imagens grandes em várias threads; o alocador da
+glibc abre uma arena por thread e não devolve ao sistema o que sobra, então o
+processo crescia e não encolhia. Medido com o código real reduzindo as 316
+fotos do quadrante (originais de 4000×3000): o Node retém **362 MiB**, contra
+540 MiB no padrão e 387 MiB com jemalloc, no mesmo tempo. É a saída que a
+documentação do sharp indica para Linux com glibc, e não precisa de pacote.
+
 ## Monitor do processo
 
 A cada minuto o processo mede o atraso do event loop e a memória. Serve para

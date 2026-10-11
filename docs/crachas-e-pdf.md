@@ -110,9 +110,10 @@ Arquivos: `src/pdf/fila.ts`, `src/pdf/pdf.controller.ts`, `src/pdf/pdf.module.ts
   componentes, sincronização nem tarefas de fundo. Resultado: −12% de memória
   no quadrante, mesmo PDF e mesmo tempo. Tudo suportado pelo Chrome; funciona
   também com o Chrome local (`channel: 'chrome'`).
-  - **Ficou de fora o `--single-process`:** economizava −33%, mas o Chrome não
-    suporta o modo — uma página travada derrubaria o navegador inteiro. Se o
-    pico ainda incomodar, é a próxima alavanca.
+  - **Ficou de fora o `--single-process`:** no `chromium` economizava −33%; com
+    o `chromium-headless-shell` o ganho cai para −11% (348 → 311 MiB), e o modo
+    não é suportado — uma página travada derrubaria o navegador inteiro. Não
+    compensa.
   - **Também não compensam:** imprimir as equipes em lotes (−25%, mas o
     "Página X de Y" do rodapé recomeçaria em cada lote e a geração ficava mais
     lenta) e mexer nas fotos ou na capa (o conteúdo pesa pouco).
