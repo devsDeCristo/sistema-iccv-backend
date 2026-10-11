@@ -221,6 +221,9 @@ Arquivos: `src/user/user.service.ts` (`atualizarPermissoesEmMassa`),
 - Recorte por igreja: cada admin só vê pessoas da(s) sua(s) igreja(s); super
   admin vê todas ou usa `churchId` como "lente" (olhar como se fosse admin
   daquela igreja).
+- Cada inscrição vem com o evento resumido: `id`, `name`, `status` e
+  `endDate` — o painel usa o término para mostrar na coluna Eventos só os que
+  ainda não terminaram.
 - `GET /users/insights` traz totais (usuários, admins, recorrência em eventos
   do ano anterior) no mesmo recorte.
 

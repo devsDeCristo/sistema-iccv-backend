@@ -261,6 +261,8 @@ export class UserService {
                 id: true,
                 name: true,
                 status: true,
+                // a coluna Eventos mostra só os que ainda não terminaram
+                endDate: true,
               },
             },
           },

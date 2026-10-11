@@ -43,6 +43,19 @@ fotos do quadrante (originais de 4000×3000): o Node retém **362 MiB**, contra
 540 MiB no padrão e 387 MiB com jemalloc, no mesmo tempo. É a saída que a
 documentação do sharp indica para Linux com glibc, e não precisa de pacote.
 
+## Medir a memória do container (no servidor)
+
+Atual, mínimo e máximo ao vivo, mais o pico desde que o container subiu
+(`Ctrl+C` para sair). Mínimo e máximo valem desde que o comando começou: o
+kernel só guarda o pico (`memory.peak`), então o mínimo sai de amostrar a cada
+segundo. Os números são os do cgroup, com cache de arquivo, na mesma conta do
+`memory.peak` e do limite.
+
+```sh
+C=$(docker ps -q -f name=sistema-eventos-iccv_api | head -1)
+docker exec -t $C sh -c 'm=; x=0; while :; do a=$(( $(cat /sys/fs/cgroup/memory.current) / 1048576 )); p=$(( $(cat /sys/fs/cgroup/memory.peak) / 1048576 )); { [ -z "$m" ] || [ $a -lt $m ]; } && m=$a; [ $a -gt $x ] && x=$a; printf "\ratual: %4d MiB | mín: %4d | máx: %4d | pico desde o start: %4d MiB " $a $m $x $p; sleep 1; done'
+```
+
 ## Monitor do processo
 
 A cada minuto o processo mede o atraso do event loop e a memória. Serve para
@@ -60,7 +73,7 @@ esperou na fila com o Node ocupado, ou um preflight lento.
 - **Como ler um travamento:**
   - `pior` alto com `ocupado` alto: CPU na thread principal (processar mensagens do WhatsApp, juntar PDF, JSON grande).
   - heap usado perto do limite, subindo ao longo das horas: pressão de memória, com pausas do coletor de lixo. Isso some ao reiniciar.
-  - `container` perto do limite com o `rss` baixo: quem ocupa é o Chrome. Perto do limite, o kernel toma memória à força e tudo no container fica lento, até o Node ser morto. A API roda com `memory: 512M` na stack, dividida com o Chrome.
+  - `container` perto do limite com o `rss` baixo: quem ocupa é o Chrome. Perto do limite, o kernel toma memória à força e tudo no container fica lento, até o Node ser morto. A API roda com `memory: 1G` na stack, dividida com o Chrome.
   - Cruze o horário com o resto do log: WhatsApp reconectando, PDF sendo gerado, cron de conciliação.
 - **Custo:** um histograma nativo do Node, um timer por minuto, que não segura o processo aberto (`unref`), e a leitura de três arquivos pequenos do cgroup por minuto.
 
