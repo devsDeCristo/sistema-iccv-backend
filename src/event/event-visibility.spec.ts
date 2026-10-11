@@ -1,4 +1,4 @@
-import { EventStatus } from '@prisma/client';
+import { ChurchStatus, EventStatus } from '@prisma/client';
 import { Role } from 'src/auth/roles';
 import {
   filtroDeEventoEmTeste,
@@ -8,7 +8,11 @@ import {
 const IGREJA_A = 'igreja-a';
 const IGREJA_B = 'igreja-b';
 
-const SEM_ENSAIO = { status: { not: EventStatus.TEST } };
+/** nem evento em teste, nem evento de igreja em teste (implantação) */
+const SEM_ENSAIO = {
+  status: { not: EventStatus.TEST },
+  church: { status: { not: ChurchStatus.TEST } },
+};
 
 /** admin numa igreja e financeiro na outra */
 const doisChapeus = {

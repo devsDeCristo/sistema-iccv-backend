@@ -18,6 +18,8 @@ Arquivos: `src/event/event.controller.ts`, `src/event/event.service.ts`,
 | `INACTIVE` | Desligado: some da área do usuário para todo mundo. A loja de produtos do evento também fecha — comprar devolve `400` ("A loja deste evento está fechada"), mesmo com `data.publicStore` ligado. |
 | `TEST` | Ensaio de configuração: só quem administra a igreja do evento (ou super admin) enxerga. Para os demais o evento simplesmente não existe (`404`). |
 
+**Igreja em teste** (`ChurchStatus.TEST`, implantação) vale como ensaio para todos os eventos dela, inclusive os `ACTIVE`: só quem administra aquela igreja (ou super admin) vê na lista e abre o evento; para os demais ele some do catálogo e o detalhe responde `404`. A regra mora em `src/event/event-visibility.ts` (`filtroDeEventoEmTeste` na lista, `assertEventIsVisible` no detalhe). Antes só o filtro de igrejas da home escondia a igreja em teste, e os eventos dela seguiam aparecendo em "Todas".
+
 O campo antigo `Event.isActive` continua no banco mas está `@ignore` no
 Prisma: nada lê ou escreve nele hoje, quem manda é `status`.
 

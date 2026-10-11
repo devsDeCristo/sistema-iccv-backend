@@ -51,7 +51,10 @@ Arquivos: `src/church/church.controller.ts`, `src/church/church.service.ts`,
   - **Sessão aberta:** perde o acesso na próxima chamada. Os guards e o
     `/auth/admin/validate` releem o banco, sem confiar no token.
   - **`TEST` (implantação) continua dando painel:** é quando a igreja está
-    sendo montada.
+    sendo montada. Para o público ela ainda não existe: não aparece na
+    inscrição (`GET /public/churches` traz só as ativas), nem no filtro da
+    home, e os eventos dela ficam fora do catálogo — só quem a administra os
+    vê (ver `docs/eventos.md`).
 - Editar sem mandar `status` no corpo não reativa nem desativa nada — quem só
   renomeia não corre o risco de reverter uma desativação de outra pessoa.
 

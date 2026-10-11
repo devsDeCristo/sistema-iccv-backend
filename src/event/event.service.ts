@@ -13,6 +13,7 @@ import * as sharp from 'sharp';
 
 import {
   CheckoutStatus,
+  ChurchStatus,
   Event,
   EventStatus,
   MinorApprovalStatus,
@@ -2050,15 +2051,25 @@ export class EventService {
   private async assertEventIsVisible(eventId: string, requesterId?: string) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      // a igreja vem junto: o ensaio é da igreja, não do perfil efetivo
-      select: { status: true, churchId: true },
+      // a igreja vem junto: o ensaio é da igreja, não do perfil efetivo — e
+      // igreja em teste esconde os eventos dela como se fossem ensaio
+      select: {
+        status: true,
+        churchId: true,
+        church: { select: { status: true } },
+      },
     });
 
     if (!event) {
       throw new NotFoundException('Event does not exist');
     }
 
-    if (event.status !== EventStatus.TEST) return;
+    if (
+      event.status !== EventStatus.TEST &&
+      event.church?.status !== ChurchStatus.TEST
+    ) {
+      return;
+    }
 
     /**
      * Perfil lido do banco, e não do JWT: o token dura 24h, então um admin

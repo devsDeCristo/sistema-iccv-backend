@@ -1,4 +1,4 @@
-import { EventStatus } from '@prisma/client';
+import { ChurchStatus, EventStatus } from '@prisma/client';
 import { Role } from 'src/auth/roles';
 import {
   TenantRequester,
@@ -18,7 +18,18 @@ import {
  *
  * Vale igual no painel e no catálogo: no painel a lista já vem recortada pelas
  * igrejas da pessoa, e aqui os ensaios das que ela não administra saem fora.
+ *
+ * Igreja em teste (implantação, `ChurchStatus.TEST`) é ensaio do mesmo jeito:
+ * ainda não recebe público, então nenhum evento dela aparece para quem não a
+ * administra — nem os ativos. Antes só o filtro de igrejas da home a escondia,
+ * e os eventos dela seguiam no catálogo em "Todas".
  */
+/** Nem o evento nem a igreja dele estão em teste: o que o público vê */
+const FORA_DE_ENSAIO = {
+  status: { not: EventStatus.TEST },
+  church: { status: { not: ChurchStatus.TEST } },
+};
+
 export function filtroDeEventoEmTeste(requester?: TenantRequester | null) {
   // o super admin atravessa todas as igrejas, ensaios inclusive
   if (isSuperAdmin(requester)) return {};
@@ -27,14 +38,11 @@ export function filtroDeEventoEmTeste(requester?: TenantRequester | null) {
 
   // inscrito e financeiro puro não administram nada: nenhum ensaio para eles
   if (igrejasQueAdministra.length === 0) {
-    return { status: { not: EventStatus.TEST } };
+    return FORA_DE_ENSAIO;
   }
 
   return {
-    OR: [
-      { status: { not: EventStatus.TEST } },
-      { churchId: { in: igrejasQueAdministra } },
-    ],
+    OR: [FORA_DE_ENSAIO, { churchId: { in: igrejasQueAdministra } }],
   };
 }
 
