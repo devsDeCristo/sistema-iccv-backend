@@ -56,14 +56,18 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# chromium: usado pelo puppeteer-core (módulo de quadrante) para gerar PDF a
-# partir de HTML. Instalado via apt (não pelo puppeteer) para não baixar um
-# segundo Chromium na imagem — o pacote do Debian já traz as libs necessárias.
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# chromium-headless-shell: o Chromium feito só para automação, usado pelo
+# puppeteer-core para gerar os PDFs (quadrante, crachás) a partir de HTML. É o
+# mesmo motor de desenho do `chromium` (mesma versão no Debian), sem o código de
+# navegador de verdade: medido com o quadrante de 316 pessoas, 47% menos memória
+# e mais rápido, com o PDF igual. Instalado via apt (não pelo puppeteer) para
+# não baixar outro Chromium na imagem. O `src/pdf/navegador.ts` liga o modo
+# `headless: 'shell'` quando o executável é este.
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/lib/chromium/chromium-headless-shell
 
 # openssl é exigido pelo query engine do Prisma.
 RUN apt-get update -qq \
-    && apt-get install --no-install-recommends -y openssl chromium \
+    && apt-get install --no-install-recommends -y openssl chromium-headless-shell \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 
 COPY --from=deps  /app/node_modules ./node_modules

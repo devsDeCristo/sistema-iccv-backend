@@ -16,12 +16,6 @@ let paginasAbertas = 0;
 let ocioso: NodeJS.Timeout | undefined;
 
 /**
- * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
- * ele usa esse binário — é o caso do Docker, que instala o Chromium em
- * `/usr/bin/chromium`. Sem a variável, procura o Google Chrome instalado
- * no lugar padrão do sistema, que é o caso de quem roda na própria máquina.
- */
-/**
  * Chrome enxuto: só o que imprimir HTML em PDF precisa.
  *
  * A maior parte da memória do PDF é o custo fixo do Chrome — os processos
@@ -54,13 +48,22 @@ const ARGS_ENXUTOS = [
   '--disable-features=site-per-process,Translate,BackForwardCache,MediaRouter,OptimizationHints',
 ];
 
+/**
+ * O `puppeteer-core` não traz navegador. Com `PUPPETEER_EXECUTABLE_PATH`
+ * ele usa esse binário — é o caso do Docker, que instala o
+ * `chromium-headless-shell` (ver o Dockerfile). Sem a variável, procura o
+ * Google Chrome instalado no lugar padrão do sistema, que é o caso de quem roda
+ * na própria máquina.
+ */
 function lancar() {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
 
   return puppeteer
     .launch({
       ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
-      headless: true,
+      // O chromium-headless-shell (o da imagem Docker) pede o modo `shell`;
+      // o Chrome comum, da máquina de quem desenvolve, não tem esse modo
+      headless: executablePath?.includes('headless-shell') ? 'shell' : true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',

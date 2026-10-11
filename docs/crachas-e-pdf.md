@@ -85,7 +85,18 @@ Arquivos: `src/pdf/fila.ts`, `src/pdf/pdf.controller.ts`, `src/pdf/pdf.module.ts
 
 ## Docker
 
-- **Chromium via `apt`, não pelo Puppeteer:** o pacote Debian já traz as bibliotecas necessárias, evitando baixar um segundo Chromium na imagem. `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` aponta o `puppeteer-core` para esse binário.
+- **`chromium-headless-shell` via `apt`, não pelo Puppeteer:** o Chromium
+  feito só para automação, com o mesmo motor de desenho do `chromium` (mesma
+  versão no Debian), sem o código de navegador de verdade.
+  `PUPPETEER_EXECUTABLE_PATH=/usr/lib/chromium/chromium-headless-shell`, e o
+  `navegador.ts` liga `headless: 'shell'` quando o executável é este (o Chrome
+  comum, de quem desenvolve na própria máquina, não tem esse modo e segue com
+  `headless: true`). Medido com o código real e a imagem de produção, no
+  quadrante de 316 pessoas: o Chrome soma **331 MiB, contra 668 MiB** do
+  `chromium` (−50%), e gera em 3,5s contra 5,1s, com o PDF igual (capa e
+  equipes comparadas página a página). O crachá — screenshot da arte e imagens
+  interceptadas — sai idêntico também. As fontes do sistema são as mesmas
+  (DejaVu); só sai o utilitário `fc-list`, que o Chrome não usa.
 - **`--disable-dev-shm-usage`:** o `/dev/shm` do container tem só 64 MB por padrão; uma página grande de crachás estourava esse limite e derrubava o Chrome. A flag faz o Chrome usar `/tmp` em vez de `/dev/shm`.
 - **`--no-sandbox` / `--disable-setuid-sandbox`:** necessários para rodar o Chrome como processo do container.
 - **Chrome enxuto (`ARGS_ENXUTOS`, `src/pdf/navegador.ts`):** a maior parte da
