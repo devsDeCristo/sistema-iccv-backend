@@ -21,14 +21,36 @@ interface Credenciais {
   clientSecret: string;
 }
 
+/** Uma transação do extrato, já com a conta de onde veio */
+export interface TransacaoDoBanco {
+  id: string;
+  /** ISO, como a Pluggy manda */
+  date: string;
+  description: string;
+  /** Sempre positivo; o sentido vem de `type` */
+  amount: number;
+  type: 'CREDIT' | 'DEBIT';
+  /** Categoria da própria Pluggy, em inglês ("Bank fees", "Utilities"…) */
+  category: string | null;
+  /** PIX, TED, DOC, BOLETO… quando o banco informa */
+  paymentMethod: string | null;
+  payerName: string | null;
+  /** Só dígitos */
+  payerDocument: string | null;
+  /** "Sicredi · Conta corrente" */
+  conta: string;
+}
+
+/** A Pluggy entrega até 500 por página */
+const POR_PAGINA = 500;
+
 /** Amarra o envelope à igreja: copiado para a linha de outra, não abre */
 const selo = (churchId: string) => `pluggy:${churchId}`;
 
 /**
- * A credencial da Pluggy de cada igreja, para o módulo financeiro.
- *
- * Só guarda e testa. A leitura de contas e extratos entra quando o escopo do
- * financeiro estiver fechado, e parte daqui (`abrir` + `apiKey`).
+ * A credencial da Pluggy de cada igreja, para o módulo financeiro: guarda,
+ * testa e lê o extrato das contas bancárias (`transacoes`), que o financeiro
+ * importa como lançamentos.
  */
 @Injectable()
 export class PluggyService {
@@ -163,7 +185,98 @@ export class PluggyService {
     return { ok: itens.length > 0 && itens.every((i) => i.ok), itens };
   }
 
-  /** A chave de acesso da API. Vale 2h na Pluggy; ainda sem cache, porque só o teste a usa. */
+  /**
+   * O extrato das contas bancárias de todos os bancos da igreja, de `de` a
+   * `ate` (dias, "2026-10-01"). Só transações lançadas: as pendentes ainda
+   * podem mudar de valor ou sumir, e entram na próxima importação.
+   *
+   * Conta de cartão de crédito fica de fora: a fatura sai da conta corrente
+   * como um débito, e importar as compras do cartão contaria a despesa duas
+   * vezes.
+   */
+  async transacoes(
+    churchId: string,
+    de: string,
+    ate: string,
+  ): Promise<TransacaoDoBanco[]> {
+    const { credenciais, integracao } = await this.abrir(churchId);
+    if (!integracao.enabled) {
+      throw new BadRequestException('A integração com a Pluggy está desligada');
+    }
+
+    let apiKey: string;
+    try {
+      apiKey = await this.apiKey(credenciais);
+    } catch {
+      throw new BadRequestException(
+        'A Pluggy recusou o Client ID e o Client Secret. Confira em Configurações › Integrações.',
+      );
+    }
+    const http = criarHttp(BASE, { headers: { 'X-API-KEY': apiKey } });
+
+    const todas: TransacaoDoBanco[] = [];
+    for (const itemId of integracao.itemIds) {
+      const [{ data: item }, { data: contas }] = await Promise.all([
+        http.get(`/items/${itemId}`),
+        http.get('/accounts', { params: { itemId } }),
+      ]);
+      const banco: string = item.connector?.name ?? 'Banco';
+
+      for (const conta of contas.results ?? []) {
+        if (conta.type !== 'BANK') continue;
+        const nomeDaConta = `${banco} · ${
+          conta.subtype === 'SAVINGS_ACCOUNT' ? 'Poupança' : 'Conta corrente'
+        }`;
+
+        for (let pagina = 1; ; pagina++) {
+          const { data } = await http.get('/transactions', {
+            params: {
+              accountId: conta.id,
+              from: de,
+              to: ate,
+              pageSize: POR_PAGINA,
+              page: pagina,
+            },
+          });
+
+          for (const t of data.results ?? []) {
+            if (t.status === 'PENDING') continue;
+            const pagador = t.paymentData?.payer;
+            todas.push({
+              id: t.id,
+              date: t.date,
+              description: t.description ?? t.descriptionRaw ?? 'Sem descrição',
+              amount: Math.abs(Number(t.amount)),
+              type: t.type === 'DEBIT' ? 'DEBIT' : 'CREDIT',
+              category: t.category ?? null,
+              paymentMethod: t.paymentData?.paymentMethod ?? null,
+              payerName: pagador?.name ?? null,
+              payerDocument:
+                String(pagador?.documentNumber?.value ?? '').replace(
+                  /\D/g,
+                  '',
+                ) || null,
+              conta: nomeDaConta,
+            });
+          }
+
+          if (pagina >= (data.totalPages ?? 1)) break;
+        }
+      }
+    }
+
+    return todas;
+  }
+
+  /** Marca a hora da última leitura do extrato, que o card da integração mostra */
+  async marcarLeitura(churchId: string) {
+    await this.prisma.pluggyIntegration.update({
+      where: { churchId },
+      data: { lastSyncAt: new Date() },
+    });
+  }
+
+  /** A chave de acesso da API. Vale 2h na Pluggy; pedida a cada uso, que é raro (teste e importação). */
   async apiKey(credenciais: Credenciais): Promise<string> {
     const { data } = await criarHttp(BASE).post('/auth', credenciais);
     return data.apiKey;

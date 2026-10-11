@@ -24,6 +24,8 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 | Pagamentos | `src/payment`, `src/gateways` | [pagamentos.md](pagamentos.md) |
 | PagBank | `src/gateways/pagbank` | [pagbank.md](pagbank.md) |
 | Mercado Pago | `src/gateways/mercadopago` | [mercadopago.md](mercadopago.md) |
+| **Financeiro** | | |
+| Dizimistas, livro-caixa e Pluggy | `src/financeiro`, `src/pluggy` | [financeiro.md](financeiro.md) |
 | **Comunicação e operação** | | |
 | Notícias e WhatsApp | `src/news`, `src/whatsapp` | [noticias-e-whatsapp.md](noticias-e-whatsapp.md) |
 | E-mail | `src/mail` | [email.md](email.md) |
