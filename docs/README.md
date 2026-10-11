@@ -10,6 +10,7 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 | Autenticação e permissões | `src/auth`, `src/decorators` | [autenticacao.md](autenticacao.md) |
 | Usuários | `src/user` | [usuarios.md](usuarios.md) |
 | Igrejas | `src/church` | [igrejas.md](igrejas.md) |
+| Membros e famílias | `src/membros` | [membros.md](membros.md) |
 | Termos de Uso | `src/terms` | [termos.md](termos.md) |
 | **Eventos** | | |
 | Eventos | `src/event` | [eventos.md](eventos.md) |

@@ -13,6 +13,7 @@ correspondente no `ic-front`: `docs/login-e-cadastro.md`, `docs/perfil.md` e
   `Role.USER` (5) e sem vínculo de igreja, mesmo que o corpo mande `role` ou
   `churchRoles` — esses campos são descartados antes de gravar. Promoção de
   perfil só acontece pelo painel (`PUT /users/:id`, por admin).
+- **Igreja escolhida na inscrição:** `requestedChurchId` (uma igreja ativa) vira um **pedido de membro**, que a igreja aceita em Membros; ou `otherChurchName`, o nome livre de "Outra". Não torna ninguém membro, e a edição do cadastro (painel ou perfil) descarta os dois campos. Ver `docs/membros.md`.
 - **Senha no cadastro:** se a pessoa escolheu uma senha, ela vai com hash
   bcrypt; se não veio, o cadastro fica com a senha padrão fixa do sistema
   (usada nos cadastros feitos pelo painel, até a pessoa redefinir).

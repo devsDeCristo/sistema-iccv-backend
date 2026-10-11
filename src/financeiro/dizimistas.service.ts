@@ -1,21 +1,7 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { FinancialCategory, FinancialEntryType } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { diaEmBrasilia } from './categorias';
-import { CreateTitherDto, UpdateTitherDto } from './dto/financeiro.dto';
-
-const USUARIO = {
-  id: true,
-  fullName: true,
-  cpf: true,
-  cellphone: true,
-  email: true,
-  profilePhotoUrl: true,
-} as const;
 
 /** "2026-10-03" → meia-noite UTC, que é como o `@db.Date` guarda o dia */
 export const paraDia = (dia: string) => new Date(`${dia}T00:00:00.000Z`);
@@ -23,39 +9,52 @@ export const paraDia = (dia: string) => new Date(`${dia}T00:00:00.000Z`);
 export const doDia = (data: Date | null) =>
   data ? data.toISOString().slice(0, 10) : null;
 
-/** CPF pela metade, para a busca de quem adicionar: o nome já identifica */
-const cpfMascarado = (cpf: string) =>
-  cpf.length === 11 ? `***.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-**` : '***';
+/** Soma de `Decimal` convertida: arredonda o resíduo de ponto flutuante */
+export const arredondar = (valor: number) => Math.round(valor * 100) / 100;
 
 /**
- * Dizimistas da igreja. Toda leitura e escrita é pela igreja da rota (o
- * `ChurchTenantGuard` já conferiu que a pessoa alcança ela) **e** pelo id do
- * registro junto: um id de dizimista de outra igreja responde 404, não altera.
+ * Dizimistas da igreja: **todos os membros** dela — todo membro é um dizimista
+ * em potencial, e não há cadastro à parte. O que o financeiro ajusta é o
+ * valor do dízimo de cada um (`User.titheAmount`), que separa dízimo de oferta
+ * na importação do banco.
+ *
+ * Toda leitura e escrita é pela igreja da rota (o `ChurchTenantGuard` já
+ * conferiu que a pessoa alcança ela) e pelo membro junto: quem não é membro
+ * desta igreja responde 404.
  */
 @Injectable()
 export class DizimistasService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * A lista com os números do ano: total dizimado, em quais meses e o último
-   * dízimo. Os números saem dos lançamentos de dízimo ligados à pessoa —
-   * manuais ou importados do banco.
+   * Os membros com os números do ano: total dizimado, em quais meses e o
+   * último dízimo. Os números saem dos lançamentos de dízimo desta igreja
+   * ligados à pessoa — manuais ou importados do banco.
    */
   async listar(churchId: string, ano: number) {
-    const dizimistas = await this.prisma.tither.findMany({
-      where: { churchId },
-      include: { user: { select: USUARIO } },
-      orderBy: { user: { fullName: 'asc' } },
+    const membros = await this.prisma.user.findMany({
+      where: { memberChurchId: churchId },
+      select: {
+        id: true,
+        fullName: true,
+        cpf: true,
+        cellphone: true,
+        email: true,
+        profilePhotoUrl: true,
+        memberSince: true,
+        titheAmount: true,
+        family: { select: { id: true, name: true } },
+      },
+      orderBy: { fullName: 'asc' },
     });
 
-    const userIds = dizimistas.map((d) => d.userId);
-    const dizimos = userIds.length
+    const dizimos = membros.length
       ? await this.prisma.financialEntry.findMany({
           where: {
             churchId,
             type: FinancialEntryType.INCOME,
             category: FinancialCategory.TITHE,
-            userId: { in: userIds },
+            userId: { in: membros.map((m) => m.id) },
           },
           select: { userId: true, amount: true, date: true },
         })
@@ -72,11 +71,13 @@ export class DizimistasService {
     let totalNoAno = 0;
     let totalNoMes = 0;
     const dizimaramNoMes = new Set<string>();
+    const dizimaramNoAno = new Set<string>();
 
     for (const d of dizimos) {
       const dia = doDia(d.date) as string;
       const valor = Number(d.amount);
-      const pessoa = porPessoa.get(d.userId as string) ?? {
+      const userId = d.userId as string;
+      const pessoa = porPessoa.get(userId) ?? {
         total: 0,
         meses: new Set<number>(),
         ultimo: null,
@@ -86,32 +87,29 @@ export class DizimistasService {
         pessoa.total += valor;
         pessoa.meses.add(Number(dia.slice(5, 7)));
         totalNoAno += valor;
+        dizimaramNoAno.add(userId);
       }
       if (dia.startsWith(mesAtual)) {
         totalNoMes += valor;
-        dizimaramNoMes.add(d.userId as string);
+        dizimaramNoMes.add(userId);
       }
-      porPessoa.set(d.userId as string, pessoa);
+      porPessoa.set(userId, pessoa);
     }
 
     return {
       ano,
       resumo: {
-        ativos: dizimistas.filter((d) => d.active).length,
+        membros: membros.length,
         dizimaramNoMes: dizimaramNoMes.size,
+        dizimaramNoAno: dizimaramNoAno.size,
         totalNoMes: arredondar(totalNoMes),
         totalNoAno: arredondar(totalNoAno),
       },
-      dizimistas: dizimistas.map((d) => {
-        const pessoa = porPessoa.get(d.userId);
+      dizimistas: membros.map((m) => {
+        const pessoa = porPessoa.get(m.id);
         return {
-          id: d.id,
-          active: d.active,
-          since: doDia(d.since),
-          notes: d.notes,
-          expectedAmount:
-            d.expectedAmount === null ? null : Number(d.expectedAmount),
-          user: d.user,
+          ...m,
+          titheAmount: m.titheAmount === null ? null : Number(m.titheAmount),
           totalNoAno: arredondar(pessoa?.total ?? 0),
           mesesNoAno: [...(pessoa?.meses ?? [])].sort((a, b) => a - b),
           ultimoDizimo: pessoa?.ultimo ?? null,
@@ -120,109 +118,16 @@ export class DizimistasService {
     };
   }
 
-  /**
-   * Quem pode virar dizimista: qualquer usuário do sistema, pelo nome (3+
-   * letras) ou pelo CPF completo. A pessoa pode nunca ter ido a um evento
-   * desta igreja e ainda assim dizimar nela. Volta pouco — nome, foto e o CPF
-   * pela metade —, e no máximo 20.
-   */
-  async buscarUsuarios(churchId: string, busca: string) {
-    const texto = busca.trim();
-    const digitos = texto.replace(/\D/g, '');
-    const porCpf = digitos.length === 11;
-    if (!porCpf && texto.length < 3) return [];
-
-    const usuarios = await this.prisma.user.findMany({
-      where: porCpf
-        ? { cpf: digitos }
-        : { fullName: { contains: texto, mode: 'insensitive' } },
-      select: { id: true, fullName: true, cpf: true, profilePhotoUrl: true },
-      orderBy: { fullName: 'asc' },
-      take: 20,
-    });
-
-    const ja = await this.prisma.tither.findMany({
-      where: { churchId, userId: { in: usuarios.map((u) => u.id) } },
-      select: { userId: true },
-    });
-    const jaSet = new Set(ja.map((t) => t.userId));
-
-    return usuarios.map((u) => ({
-      id: u.id,
-      fullName: u.fullName,
-      cpf: cpfMascarado(u.cpf),
-      profilePhotoUrl: u.profilePhotoUrl,
-      jaDizimista: jaSet.has(u.id),
-    }));
-  }
-
-  async criar(churchId: string, dto: CreateTitherDto, actorId?: string) {
-    const usuario = await this.prisma.user.findUnique({
-      where: { id: dto.userId },
+  /** O valor do dízimo do membro. `null` tira: todo Pix dele vira dízimo. */
+  async definirValor(churchId: string, userId: string, valor: number | null) {
+    const membro = await this.prisma.user.findFirst({
+      where: { id: userId, memberChurchId: churchId },
       select: { id: true },
     });
-    if (!usuario) throw new NotFoundException('Usuário não encontrado');
-
-    try {
-      return await this.prisma.tither.create({
-        data: {
-          churchId,
-          userId: dto.userId,
-          since: dto.since ? paraDia(dto.since) : null,
-          notes: dto.notes?.trim() || null,
-          expectedAmount: dto.expectedAmount ?? null,
-          createdById: actorId ?? null,
-          updatedById: actorId ?? null,
-        },
-      });
-    } catch (erro) {
-      if ((erro as { code?: string })?.code === 'P2002') {
-        throw new ConflictException('Esta pessoa já é dizimista desta igreja');
-      }
-      throw erro;
-    }
-  }
-
-  async atualizar(
-    churchId: string,
-    id: string,
-    dto: UpdateTitherDto,
-    actorId?: string,
-  ) {
-    await this.exigir(churchId, id);
-    return this.prisma.tither.update({
-      where: { id },
-      data: {
-        ...(dto.active !== undefined ? { active: dto.active } : {}),
-        ...(dto.since !== undefined
-          ? { since: dto.since ? paraDia(dto.since) : null }
-          : {}),
-        ...(dto.notes !== undefined
-          ? { notes: dto.notes?.trim() || null }
-          : {}),
-        ...(dto.expectedAmount !== undefined
-          ? { expectedAmount: dto.expectedAmount }
-          : {}),
-        updatedById: actorId ?? null,
-      },
+    if (!membro) throw new NotFoundException('Membro não encontrado');
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { titheAmount: valor },
     });
-  }
-
-  /** Tira da lista. Os dízimos lançados continuam no livro-caixa. */
-  async remover(churchId: string, id: string) {
-    await this.exigir(churchId, id);
-    await this.prisma.tither.delete({ where: { id } });
-  }
-
-  private async exigir(churchId: string, id: string) {
-    const dizimista = await this.prisma.tither.findFirst({
-      where: { id, churchId },
-      select: { id: true },
-    });
-    if (!dizimista) throw new NotFoundException('Dizimista não encontrado');
-    return dizimista;
   }
 }
-
-/** Soma de `Decimal` convertida: arredonda o resíduo de ponto flutuante */
-export const arredondar = (valor: number) => Math.round(valor * 100) / 100;

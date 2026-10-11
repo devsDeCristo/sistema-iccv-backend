@@ -26,66 +26,18 @@ import {
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MENSAGEM_DIA = 'Data no formato AAAA-MM-DD';
 
-export class CreateTitherDto {
-  @ApiProperty({ description: 'O usuário que passa a ser dizimista' })
-  @IsUUID()
-  userId: string;
-
-  @ApiPropertyOptional({ example: '2024-03-01' })
-  @IsOptional()
-  @Matches(DIA, { message: MENSAGEM_DIA })
-  since?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  notes?: string;
-
-  /** O dízimo combinado. Ver `Tither.expectedAmount` */
-  @ApiPropertyOptional({ nullable: true, example: 150 })
-  @ValidateIf(
-    (o) => o.expectedAmount !== undefined && o.expectedAmount !== null,
-  )
+/** O valor do dízimo do membro. Ver `User.titheAmount` */
+export class ValorDoDizimoDto {
+  /** `null` tira o valor: todo Pix do membro volta a ser dízimo */
+  @ApiProperty({ nullable: true, example: 150 })
+  @ValidateIf((o) => o.titheAmount !== null)
   @IsNumber(
     { maxDecimalPlaces: 2 },
     { message: 'Valor com no máximo dois decimais' },
   )
   @Min(0.01, { message: 'O valor do dízimo precisa ser maior que zero' })
   @Max(9_999_999_999.99)
-  expectedAmount?: number | null;
-}
-
-export class UpdateTitherDto {
-  /** `null` apaga o valor: todo crédito da pessoa volta a ser dízimo */
-  @ApiPropertyOptional({ nullable: true, example: 150 })
-  @ValidateIf(
-    (o) => o.expectedAmount !== undefined && o.expectedAmount !== null,
-  )
-  @IsNumber(
-    { maxDecimalPlaces: 2 },
-    { message: 'Valor com no máximo dois decimais' },
-  )
-  @Min(0.01, { message: 'O valor do dízimo precisa ser maior que zero' })
-  @Max(9_999_999_999.99)
-  expectedAmount?: number | null;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  active?: boolean;
-
-  /** `null` apaga a data */
-  @ApiPropertyOptional({ nullable: true })
-  @ValidateIf((o) => o.since !== undefined && o.since !== null)
-  @Matches(DIA, { message: MENSAGEM_DIA })
-  since?: string | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  @ValidateIf((o) => o.notes !== undefined && o.notes !== null)
-  @IsString()
-  @MaxLength(500)
-  notes?: string | null;
+  titheAmount: number | null;
 }
 
 export class ListTithersQuery {
@@ -96,13 +48,6 @@ export class ListTithersQuery {
   @Min(2000)
   @Max(2100)
   ano?: number;
-}
-
-export class SearchUsersQuery {
-  @ApiProperty({ description: 'Nome (3+ letras) ou CPF completo' })
-  @IsString()
-  @MaxLength(100)
-  busca: string;
 }
 
 export class CreateEntryDto {
@@ -138,7 +83,7 @@ export class CreateEntryDto {
   @IsEnum(FinancialMethod)
   method?: FinancialMethod | null;
 
-  /** O dizimista (ou quem contribuiu). Precisa ser dizimista desta igreja. */
+  /** O dizimista (ou quem contribuiu). Precisa ser membro desta igreja. */
   @ApiPropertyOptional({ nullable: true })
   @ValidateIf((o) => o.userId !== undefined && o.userId !== null)
   @IsUUID()

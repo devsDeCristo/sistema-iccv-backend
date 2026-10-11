@@ -11,22 +11,26 @@ datasource db {
 /// pessoas ligadas a eles e as próprias notícias — o recorte é aplicado em
 /// `src/auth/tenant.ts`. Só o super admin atravessa todas.
 model Church {
-  id               String                  @id @default(uuid())
-  name             String
-  users            UserChurchRole[]
-  events           Event[]
-  news             News[]
+  id                 String                  @id @default(uuid())
+  name               String
+  users              UserChurchRole[]
+  events             Event[]
+  news               News[]
   /// Por onde esta igreja cobra. Ver `PaymentProviderConfig`: cada uma tem a
   /// própria conta no gateway, e o dinheiro do evento dela cai lá.
-  gateways         PaymentProviderConfig[]
+  gateways           PaymentProviderConfig[]
   /// A sessão de WhatsApp desta igreja. Cada uma pareia o próprio número —
   /// ver `WhatsappAuth`.
-  whatsapp         WhatsappAuth[]
+  whatsapp           WhatsappAuth[]
   /// O acesso aos bancos desta igreja pela Pluggy. Ver `PluggyIntegration`.
-  pluggy           PluggyIntegration?
-  /// Módulo financeiro: quem dizima nesta igreja e o livro-caixa dela.
-  tithers          Tither[]
-  financialEntries FinancialEntry[]
+  pluggy             PluggyIntegration?
+  /// Módulo financeiro: o livro-caixa da igreja. Os dizimistas são os
+  /// membros (`members`) — todo membro é um dizimista em potencial.
+  financialEntries   FinancialEntry[]
+  /// Membros: quem é desta igreja, quem pediu para entrar e as famílias
+  members            User[]                  @relation("MemberOf")
+  membershipRequests User[]                  @relation("MembershipRequest")
+  families           Family[]
 
   /// O módulo de cobrança online está ligado para esta igreja?
   ///
@@ -174,11 +178,35 @@ model User {
   identities         UserIdentity[]
   termsAcceptances   TermsAcceptance[]
   termsPublished     TermsDocument[]    @relation("TermsPublisher")
-  /// Igrejas em que esta pessoa é dizimista, e os lançamentos ligados a ela
-  tithers            Tither[]
+  /// Os lançamentos ligados a esta pessoa (dízimos, ofertas)
   financialEntries   FinancialEntry[]
+  /// O valor do dízimo combinado com a pessoa, na igreja de que é membro. Na
+  /// importação do extrato, um crédito do CPF dela com exatamente este valor
+  /// é dízimo; com outro valor, oferta (ligada a ela do mesmo jeito). Nulo:
+  /// todo crédito dela é dízimo. Sai junto quando ela deixa de ser membro.
+  titheAmount        Decimal?           @db.Decimal(12, 2)
+
+  /// De qual igreja a pessoa é membro. Uma só: é campo, e não lista, para o
+  /// banco garantir que ninguém seja membro de duas. Quem coloca e tira é o
+  /// admin ou o financeiro da igreja (módulo Membros); a pessoa não se coloca.
+  memberChurchId    String?
+  memberChurch      Church?   @relation("MemberOf", fields: [memberChurchId], references: [id], onDelete: SetNull)
+  memberSince       DateTime?
+  /// A igreja que ela escolheu na inscrição: um pedido, que o admin aceita
+  /// (vira membro) ou recusa. Sem isso, marcar o nome de uma igreja bastava
+  /// para entrar na lista de membros — e no financeiro — dela.
+  requestedChurchId String?
+  requestedChurch   Church?   @relation("MembershipRequest", fields: [requestedChurchId], references: [id], onDelete: SetNull)
+  /// "Outra" na inscrição: o nome da igreja, como a pessoa escreveu. Só
+  /// informativo; a busca de Membros mostra, para o admin decidir.
+  otherChurchName   String?
+  /// A família dentro da igreja de que é membro. Sai junto quando deixa de ser membro.
+  familyId          String?
+  family            Family?   @relation(fields: [familyId], references: [id], onDelete: SetNull)
 
   @@index([email])
+  @@index([memberChurchId])
+  @@index([requestedChurchId])
   @@map("users")
 }
 
@@ -1278,41 +1306,6 @@ model TermsDocument {
   @@map("terms_documents")
 }
 
-/// Quem dizima nesta igreja. É sempre um usuário do sistema: a pessoa já tem
-/// cadastro (nome, CPF, contato), e o financeiro só a marca como dizimista.
-///
-/// O CPF do cadastro é o que liga o Pix do extrato (Pluggy) ao dizimista na
-/// importação — ver `FinanceiroImportacaoService`.
-model Tither {
-  id       String @id @default(uuid())
-  churchId String
-  userId   String
-
-  /// Desligado, a pessoa sai da lista de ativos sem perder o histórico de
-  /// dízimos (que fica nos lançamentos).
-  active Boolean   @default(true)
-  /// Dizimista desde. Data só, sem hora.
-  since  DateTime? @db.Date
-  notes  String?
-
-  /// O valor do dízimo combinado com a pessoa. Na importação do extrato, um
-  /// crédito do CPF dela com exatamente este valor é dízimo; com outro valor,
-  /// oferta (ligada a ela do mesmo jeito). Nulo: todo crédito dela é dízimo.
-  expectedAmount Decimal? @db.Decimal(12, 2)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  createdById String?
-  updatedById String?
-
-  church Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  /// Dizimista uma vez por igreja
-  @@unique([churchId, userId])
-  @@map("tithers")
-}
-
 /// Uma linha do livro-caixa da igreja: uma entrada ou uma saída.
 ///
 /// `amount` é `Decimal`, e não `Float` como os pagamentos de evento: aqui o
@@ -1398,4 +1391,24 @@ enum FinancialCategory {
   EVENT_EXPENSE
   BANK_FEES
   OTHER_EXPENSE
+}
+
+/// Uma família dentro de uma igreja: os membros que a tela de Membros mostra
+/// juntos. Cada pessoa está em uma família no máximo (`User.familyId`), e só
+/// membros da mesma igreja entram nela. Família que fica sem ninguém é apagada.
+model Family {
+  id       String @id @default(uuid())
+  churchId String
+  name     String
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  updatedById String?
+
+  church  Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  members User[]
+
+  @@index([churchId])
+  @@map("families")
 }

@@ -8,6 +8,7 @@ import {
   IsInt,
   IsString,
   IsOptional,
+  IsUUID,
   MaxLength,
   MinLength,
   ValidateNested,
@@ -304,6 +305,28 @@ export class UserDTO {
   @IsString()
   @IsOptional()
   churchId?: string;
+
+  /**
+   * A igreja escolhida na inscrição. Vira um **pedido** de membro, que o admin
+   * aceita ou recusa em Membros. Só vale no cadastro: na edição é descartado.
+   */
+  @ApiProperty({
+    description: 'Igreja escolhida na inscrição (pedido de membro)',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'Igreja inválida' })
+  requestedChurchId?: string;
+
+  /** "Outra" na inscrição: o nome da igreja. Só no cadastro. */
+  @ApiProperty({
+    description: 'Nome da igreja quando não está no sistema ("Outra")',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  otherChurchName?: string;
 
   @ApiProperty({
     description:

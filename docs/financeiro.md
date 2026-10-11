@@ -7,32 +7,27 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 ## Quem acessa
 
 - `@Roles(...ADMIN_AREA_ROLES)` + `ChurchTenantGuard`, como a Pluggy: dev, super admin, e admin ou financeiro **da igreja da rota**. O financeiro de uma igreja não lê o caixa da outra trocando o `:churchId`.
-- Além do guard, todo acesso a um registro é por `{ id, churchId }` juntos: o id de um dizimista ou lançamento de outra igreja responde 404 e não altera nada.
-- Ligar um lançamento a um dizimista exige que a pessoa seja dizimista **desta** igreja (400 caso contrário).
+- Além do guard, todo acesso a um registro é pela igreja da rota junto: um lançamento de outra igreja, ou uma pessoa que não é membro desta, responde 404 e não altera nada.
+- Ligar um lançamento a um dizimista exige que a pessoa seja **membro** desta igreja (400 caso contrário).
 
 ## Rotas (`/churches/:churchId/financeiro`)
 
 | Rota | O que faz |
 | --- | --- |
-| `GET dizimistas?ano=` | Lista com os números do ano (padrão: o atual) |
-| `GET usuarios?busca=` | Busca quem adicionar como dizimista |
-| `POST dizimistas` | `{ userId, since?, notes?, expectedAmount? }`. 409 se já é dizimista |
-| `PATCH dizimistas/:id` | `{ active?, since?, notes?, expectedAmount? }` (`null` apaga data, observação ou valor) |
-| `DELETE dizimistas/:id` | Tira da lista; os dízimos lançados continuam |
+| `GET dizimistas?ano=` | Todos os membros da igreja, com os números do ano (padrão: o atual) |
+| `PATCH dizimistas/:userId` | `{ titheAmount }`: o valor do dízimo do membro (`null` tira) |
 | `GET lancamentos?de&ate&type&category&source&busca` | Lançamentos do período, com resumo |
 | `POST lancamentos` | Lançamento manual |
 | `PATCH lancamentos/:id` | Edita (no importado, só categoria, descrição e dizimista) |
 | `DELETE lancamentos/:id` | Apaga o manual; o importado não |
 | `POST lancamentos/importar` | Importa o extrato da Pluggy |
 
-## Dizimistas (`Tither`, tabela `tithers`)
+## Dizimistas são os membros
 
-- O dizimista é **sempre um usuário do sistema** (`userId`), marcado como dizimista de uma igreja: uma vez por igreja (`@@unique([churchId, userId])`). Campos próprios: `active`, `since` (dia, sem hora), `notes` e `expectedAmount`.
-- **Valor do dízimo** (`expectedAmount`, `Decimal(12,2)`, opcional): o dízimo combinado com a pessoa. É o que a importação usa, junto com o CPF, para separar dízimo de oferta (ver abaixo). `null` no `PATCH` apaga o valor.
-- **Busca de quem adicionar:** qualquer usuário do sistema, pelo nome (3+ letras, sem diferenciar maiúsculas) ou pelo CPF completo — a pessoa pode dizimar numa igreja em cujo evento nunca se inscreveu. Volta no máximo 20, só com nome, foto, CPF pela metade (`***.456.789-**`) e se já é dizimista.
-- **Números do ano** (`listar`): saem dos lançamentos `INCOME` de categoria `TITHE` ligados à pessoa, manuais ou importados. Por dizimista: total no ano, meses do ano com dízimo (1 a 12) e o último dízimo (de qualquer ano). No resumo: ativos, quantos dizimaram no mês corrente, total do mês e do ano.
-- **Desativar** (`active: false`) tira da contagem de ativos e faz o Pix da pessoa deixar de virar dízimo na importação; o histórico fica. **Remover** apaga a linha do dizimista; os lançamentos continuam, ligados ao usuário.
-- Apagar a conta do usuário apaga o vínculo de dizimista (`Cascade`), mas não o dinheiro: o lançamento fica com `userId` nulo (`SetNull`).
+- **Não há cadastro de dizimista:** todo membro da igreja (`User.memberChurchId`, ver `docs/membros.md`) é um dizimista em potencial. A lista de dizimistas é a lista de membros; quem entra e sai é o admin, em Membros. O financeiro não adiciona nem tira ninguém.
+- **Valor do dízimo** (`User.titheAmount`, `Decimal(12,2)`, opcional): o dízimo combinado com o membro, na igreja de que ele é membro (uma só). É o que a importação usa, junto com o CPF, para separar dízimo de oferta (ver abaixo). `PATCH dizimistas/:userId` define; `null` tira. Só vale para membro desta igreja (404 caso contrário). Deixar de ser membro zera o valor.
+- **Números do ano** (`listar`): saem dos lançamentos `INCOME` de categoria `TITHE` desta igreja ligados à pessoa, manuais ou importados. Por membro: total no ano, meses do ano com dízimo (1 a 12) e o último dízimo (de qualquer ano). No resumo: membros, quantos dizimaram no mês e no ano, total do mês e do ano.
+- Apagar a conta do usuário não apaga o dinheiro: o lançamento fica com `userId` nulo (`SetNull`).
 
 ## Lançamentos (`FinancialEntry`, tabela `financial_entries`)
 
@@ -51,8 +46,8 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 - **O que entra:** as transações **lançadas** (`status` diferente de `PENDING`) das contas do tipo `BANK` (corrente e poupança) de cada Item ID. Conta de cartão de crédito fica de fora: a fatura já sai da conta corrente como débito, e importar as compras contaria a despesa duas vezes.
 - **Sem duplicar:** `externalId` (id da transação na Pluggy) é único por igreja, e a gravação usa `createMany` com `skipDuplicates`. Rodar de novo sobre o mesmo período não duplica nada; a resposta diz quantas foram lidas, importadas e quantas já existiam.
 - **Como vira lançamento** (`lancamentoDaTransacao`, em `categorias.ts`, com teste):
-  - Crédito cujo CPF do pagador (`paymentData.payer.documentNumber`) é de um dizimista **ativo** da igreja → ligado a ele, e o **valor** decide a categoria:
-    - igual ao valor do dízimo dele (`expectedAmount`, comparado ao centavo) → `TITHE`;
+  - Crédito cujo CPF do pagador (`paymentData.payer.documentNumber`) é de um **membro** da igreja → ligado a ele, e o **valor** decide a categoria:
+    - igual ao valor do dízimo dele (`titheAmount`, comparado ao centavo) → `TITHE`;
     - outro valor → `OFFERING` (oferta), ainda ligada a ele;
     - dizimista sem valor cadastrado → `TITHE` (o Pix do dízimo é o caso comum).
     
@@ -66,8 +61,8 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 
 ## Auditoria
 
-`Tither` e `FinancialEntry` passam pelo log de auditoria como as outras tabelas, com os rótulos "Dizimista" e "Lançamento financeiro" (`MODEL_LABELS`), e são tabelas principais (`MAIN_MODELS`). A importação grava um `createMany` só.
+`FinancialEntry` passa pelo log de auditoria como as outras tabelas, com o rótulo "Lançamento financeiro" (`MODEL_LABELS`), e é tabela principal (`MAIN_MODELS`); o valor do dízimo aparece nas alterações de "Cadastro". O rótulo "Dizimista" (`Tither`) ficou só para as linhas antigas do log. A importação grava um `createMany` só.
 
 ## Migration
 
-`20261011150000_financeiro`: só cria as duas tabelas, os enums e os índices; não mexe em nada existente. `20261011160000_valor_do_dizimo`: só adiciona a coluna `expectedAmount` (nula) em `tithers`. Testada aplicando todas as migrations num Postgres vazio e rodando os serviços contra ele (somas em `Decimal`, importação repetida sem duplicar, recorte por igreja).
+`20261011150000_financeiro`: só cria as duas tabelas, os enums e os índices; não mexe em nada existente. `20261011160000_valor_do_dizimo`: só adiciona a coluna `expectedAmount` (nula) em `tithers`. `20261011180000_dizimista_e_membro`: a lista de dizimistas vira os membros — cria `users.titheAmount`, **copia** para ele o `expectedAmount` de quem era dizimista na mesma igreja de que é membro, e só então apaga `tithers` (testado: o valor do dizimista da própria igreja seguiu; o de outra igreja, não). Testada aplicando todas as migrations num Postgres vazio e rodando os serviços contra ele (somas em `Decimal`, importação repetida sem duplicar, recorte por igreja).

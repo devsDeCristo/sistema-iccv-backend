@@ -266,21 +266,17 @@ export class LancamentosService {
       );
     }
 
-    // só os ativos casam pelo CPF: quem deixou de dizimar não ganha dízimo novo
-    const dizimistas = await this.prisma.tither.findMany({
-      where: { churchId, active: true },
-      select: {
-        userId: true,
-        expectedAmount: true,
-        user: { select: { cpf: true } },
-      },
+    // os dizimistas são os membros: o CPF do Pix casa com qualquer um deles
+    const membros = await this.prisma.user.findMany({
+      where: { memberChurchId: churchId },
+      select: { id: true, cpf: true, titheAmount: true },
     });
     const porCpf = new Map(
-      dizimistas.map((d) => [
-        d.user.cpf.replace(/\D/g, ''),
+      membros.map((m) => [
+        m.cpf.replace(/\D/g, ''),
         {
-          userId: d.userId,
-          valor: d.expectedAmount === null ? null : Number(d.expectedAmount),
+          userId: m.id,
+          valor: m.titheAmount === null ? null : Number(m.titheAmount),
         },
       ]),
     );
@@ -322,15 +318,15 @@ export class LancamentosService {
     }
   }
 
-  /** O dizimista do lançamento precisa ser dizimista desta igreja */
+  /** O dizimista do lançamento precisa ser membro desta igreja */
   private async conferirDizimista(churchId: string, userId?: string | null) {
     if (!userId) return;
-    const dizimista = await this.prisma.tither.findFirst({
-      where: { churchId, userId },
+    const membro = await this.prisma.user.findFirst({
+      where: { id: userId, memberChurchId: churchId },
       select: { id: true },
     });
-    if (!dizimista) {
-      throw new BadRequestException('Esta pessoa não é dizimista desta igreja');
+    if (!membro) {
+      throw new BadRequestException('Esta pessoa não é membro desta igreja');
     }
   }
 

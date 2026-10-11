@@ -22,12 +22,10 @@ import { DizimistasService } from './dizimistas.service';
 import { LancamentosService } from './lancamentos.service';
 import {
   CreateEntryDto,
-  CreateTitherDto,
   ListEntriesQuery,
   ListTithersQuery,
-  SearchUsersQuery,
+  ValorDoDizimoDto,
   UpdateEntryDto,
-  UpdateTitherDto,
 } from './dto/financeiro.dto';
 
 /**
@@ -51,7 +49,9 @@ export class FinanceiroController {
 
   // ---- dizimistas ----------------------------------------------------------
 
-  @ApiOperation({ summary: 'Dizimistas da igreja, com os números do ano' })
+  @ApiOperation({
+    summary: 'Dizimistas: todos os membros da igreja, com os números do ano',
+  })
   @Get('dizimistas')
   listarDizimistas(
     @Param('churchId') churchId: string,
@@ -61,49 +61,18 @@ export class FinanceiroController {
   }
 
   @ApiOperation({
-    summary: 'Busca usuários para adicionar como dizimista',
-    description: 'Nome (3+ letras) ou CPF completo. CPF volta mascarado.',
+    summary: 'Define o valor do dízimo do membro',
+    description:
+      'Separa dízimo de oferta na importação do banco. `null` tira o valor.',
   })
-  @Get('usuarios')
-  buscarUsuarios(
-    @Param('churchId') churchId: string,
-    @Query() q: SearchUsersQuery,
-  ) {
-    return this.dizimistas.buscarUsuarios(churchId, q.busca);
-  }
-
-  @ApiOperation({ summary: 'Marca um usuário como dizimista da igreja' })
-  @Post('dizimistas')
-  criarDizimista(
-    @Param('churchId') churchId: string,
-    @Body() dto: CreateTitherDto,
-    @Req() req: any,
-  ) {
-    return this.dizimistas.criar(churchId, dto, req.user?.userId);
-  }
-
-  @ApiOperation({ summary: 'Ativa/desativa ou edita o dizimista' })
-  @Patch('dizimistas/:id')
-  atualizarDizimista(
-    @Param('churchId') churchId: string,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateTitherDto,
-    @Req() req: any,
-  ) {
-    return this.dizimistas.atualizar(churchId, id, dto, req.user?.userId);
-  }
-
-  @ApiOperation({
-    summary: 'Tira da lista de dizimistas',
-    description: 'Os dízimos já lançados continuam no livro-caixa.',
-  })
-  @Delete('dizimistas/:id')
+  @Patch('dizimistas/:userId')
   @HttpCode(204)
-  async removerDizimista(
+  async definirValorDoDizimo(
     @Param('churchId') churchId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: ValorDoDizimoDto,
   ) {
-    await this.dizimistas.remover(churchId, id);
+    await this.dizimistas.definirValor(churchId, userId, dto.titheAmount);
   }
 
   // ---- lançamentos ---------------------------------------------------------

@@ -8,6 +8,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ChurchStatus } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { UserDTO } from './dto/user.dto';
 import {
@@ -83,6 +84,9 @@ export class UserService {
       throw new ConflictException(EMAIL_EM_USO);
     }
 
+    // fora do try: igreja inválida é 400, e não o 500 genérico lá de baixo
+    const igrejaPedida = await this.igrejaDaInscricao(data.requestedChurchId);
+
     try {
       data.birthday = new Date(data.birthday);
       // const eventId = data.eventId;
@@ -95,6 +99,8 @@ export class UserService {
         churchRoles: _vinculos,
         acceptedTerms,
         sensitiveDataConsent,
+        requestedChurchId: _pedida,
+        otherChurchName,
         ...corpo
       } = data;
       const [sensiveis, cadastro] = separarSensiveis(corpo);
@@ -111,6 +117,12 @@ export class UserService {
           password: cadastro.password
             ? await hashDaSenha(cadastro.password)
             : SENHA_PADRAO,
+          // a igreja escolhida é um pedido, não um vínculo: o admin aceita
+          // em Membros. "Outra" fica só como o nome que a pessoa escreveu.
+          requestedChurchId: igrejaPedida,
+          otherChurchName: igrejaPedida
+            ? null
+            : otherChurchName?.trim() || null,
         },
       });
 
@@ -130,6 +142,22 @@ export class UserService {
     } catch (error) {
       throw new InternalServerErrorException();
     }
+  }
+
+  /**
+   * A igreja escolhida na inscrição, conferida: precisa existir e estar
+   * ativa (são as que a tela oferece). Vazia, a pessoa não escolheu.
+   */
+  private async igrejaDaInscricao(churchId?: string) {
+    if (!churchId) return null;
+    const igreja = await this.prisma.church.findFirst({
+      where: { id: churchId, status: ChurchStatus.ACTIVE },
+      select: { id: true },
+    });
+    if (!igreja) {
+      throw new BadRequestException('Escolha uma igreja da lista');
+    }
+    return igreja.id;
   }
 
   /**
@@ -575,6 +603,11 @@ export class UserService {
     if (!userExists) {
       throw new NotFoundException('User does not exists!');
     }
+
+    // a igreja de membro não se troca pelo cadastro: só na inscrição, e
+    // depois só o admin ou o financeiro da igreja, em Membros
+    delete data.requestedChurchId;
+    delete data.otherChurchName;
 
     /** vínculos a gravar; `undefined` significa "não mexi neles" */
     let vinculosParaSalvar: VinculoDeIgreja[] | undefined;
