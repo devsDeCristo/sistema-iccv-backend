@@ -27,8 +27,8 @@ export class DizimistasService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Os membros com os números do ano: total dizimado, em quais meses e o
-   * último dízimo. Os números saem dos lançamentos de dízimo desta igreja
+   * Os membros com os números do ano: total dizimado, quanto em cada mês (a
+   * visão por mês da tela), em quais meses e o último dízimo. Os números saem dos lançamentos de dízimo desta igreja
    * ligados à pessoa — manuais ou importados do banco.
    */
   async listar(churchId: string, ano: number) {
@@ -66,8 +66,16 @@ export class DizimistasService {
 
     const porPessoa = new Map<
       string,
-      { total: number; meses: Set<number>; ultimo: string | null }
+      {
+        total: number;
+        meses: Set<number>;
+        /** o dízimo de cada mês do ano, janeiro a dezembro */
+        porMes: number[];
+        ultimo: string | null;
+      }
     >();
+    /** o total da igreja em cada mês do ano */
+    const daIgrejaPorMes = Array<number>(12).fill(0);
     let totalNoAno = 0;
     let totalNoMes = 0;
     const dizimaramNoMes = new Set<string>();
@@ -80,12 +88,16 @@ export class DizimistasService {
       const pessoa = porPessoa.get(userId) ?? {
         total: 0,
         meses: new Set<number>(),
+        porMes: Array<number>(12).fill(0),
         ultimo: null,
       };
       if (!pessoa.ultimo || dia > pessoa.ultimo) pessoa.ultimo = dia;
       if (dia.startsWith(doAno)) {
+        const mes = Number(dia.slice(5, 7));
         pessoa.total += valor;
-        pessoa.meses.add(Number(dia.slice(5, 7)));
+        pessoa.meses.add(mes);
+        pessoa.porMes[mes - 1] += valor;
+        daIgrejaPorMes[mes - 1] += valor;
         totalNoAno += valor;
         dizimaramNoAno.add(userId);
       }
@@ -104,6 +116,7 @@ export class DizimistasService {
         dizimaramNoAno: dizimaramNoAno.size,
         totalNoMes: arredondar(totalNoMes),
         totalNoAno: arredondar(totalNoAno),
+        porMes: daIgrejaPorMes.map(arredondar),
       },
       dizimistas: membros.map((m) => {
         const pessoa = porPessoa.get(m.id);
@@ -112,6 +125,7 @@ export class DizimistasService {
           titheAmount: m.titheAmount === null ? null : Number(m.titheAmount),
           totalNoAno: arredondar(pessoa?.total ?? 0),
           mesesNoAno: [...(pessoa?.meses ?? [])].sort((a, b) => a - b),
+          porMes: (pessoa?.porMes ?? Array<number>(12).fill(0)).map(arredondar),
           ultimoDizimo: pessoa?.ultimo ?? null,
         };
       }),

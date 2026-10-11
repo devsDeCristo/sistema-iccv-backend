@@ -26,7 +26,7 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 
 - **Não há cadastro de dizimista:** todo membro da igreja (`User.memberChurchId`, ver `docs/membros.md`) é um dizimista em potencial. A lista de dizimistas é a lista de membros; quem entra e sai é o admin, em Membros. O financeiro não adiciona nem tira ninguém.
 - **Valor do dízimo** (`User.titheAmount`, `Decimal(12,2)`, opcional): o dízimo combinado com o membro, na igreja de que ele é membro (uma só). É o que a importação usa, junto com o CPF, para separar dízimo de oferta (ver abaixo). `PATCH dizimistas/:userId` define; `null` tira. Só vale para membro desta igreja (404 caso contrário). Deixar de ser membro zera o valor.
-- **Números do ano** (`listar`): saem dos lançamentos `INCOME` de categoria `TITHE` desta igreja ligados à pessoa, manuais ou importados. Por membro: total no ano, meses do ano com dízimo (1 a 12) e o último dízimo (de qualquer ano). No resumo: membros, quantos dizimaram no mês e no ano, total do mês e do ano.
+- **Números do ano** (`listar`): saem dos lançamentos `INCOME` de categoria `TITHE` desta igreja ligados à pessoa, manuais ou importados. Por membro: total no ano, quanto em cada mês (`porMes`, janeiro a dezembro — a visão por mês da tela), meses do ano com dízimo (1 a 12) e o último dízimo (de qualquer ano). No resumo: membros, quantos dizimaram no mês e no ano, total do mês e do ano, e o total da igreja em cada mês (`porMes`).
 - Apagar a conta do usuário não apaga o dinheiro: o lançamento fica com `userId` nulo (`SetNull`).
 
 ## Lançamentos (`FinancialEntry`, tabela `financial_entries`)
