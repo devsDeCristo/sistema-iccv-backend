@@ -28,6 +28,8 @@ const REDACTED_FIELDS: Record<string, string[]> = {
    * a configuração correspondente e confirmar um segredo adivinhado.
    */
   PaymentProviderConfig: ['credentials', 'webhookSecretHash'],
+  /** Mesmo motivo: o envelope com o clientSecret da Pluggy da igreja */
+  PluggyIntegration: ['credentials'],
   /**
    * Não é segredo, é volume: a foto do produto é base64 de centenas de KB, e
    * cada salvar do evento copiaria ela duas vezes para `logs`. O marcador

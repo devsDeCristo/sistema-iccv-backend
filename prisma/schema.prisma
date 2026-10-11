@@ -22,6 +22,8 @@ model Church {
   /// A sessão de WhatsApp desta igreja. Cada uma pareia o próprio número —
   /// ver `WhatsappAuth`.
   whatsapp WhatsappAuth[]
+  /// O acesso aos bancos desta igreja pela Pluggy. Ver `PluggyIntegration`.
+  pluggy   PluggyIntegration?
 
   /// O módulo de cobrança online está ligado para esta igreja?
   ///
@@ -573,6 +575,49 @@ model PaymentProviderConfig {
   @@unique([churchId, provider])
   @@index([churchId])
   @@map("payment_provider_configs")
+}
+
+/// Acesso de uma igreja aos dados dos bancos dela pela Pluggy (MeuPluggy), para
+/// o módulo financeiro.
+///
+/// A Pluggy fala com o banco via Open Finance, então aqui não há certificado
+/// nem credencial de banco: só a da aplicação no dashboard da Pluggy, que vale
+/// para todos os bancos conectados no MeuPluggy da igreja.
+///
+/// `credentials` é envelope do `SecretCryptoService` ({ clientId, clientSecret }),
+/// selado com `pluggy:<churchId>` — o mesmo cofre de `PaymentProviderConfig`.
+model PluggyIntegration {
+  id       String @id @default(uuid())
+  /// Uma por igreja: a igreja é um titular só (o CNPJ), e o MeuPluggy junta os
+  /// bancos de um titular numa aplicação.
+  churchId String @unique
+
+  credentials     String
+  /// Qual chave do `.env` selou o envelope. Ver `PaymentProviderConfig.keyVersion`.
+  keyVersion      Int    @default(1)
+  /// Client ID mascarado para a tela. O secret nunca volta.
+  credentialsHint Json?
+
+  /// Uma conexão por banco no MeuPluggy (Sicredi, Cora, PagBank). Não é
+  /// segredo: sem o clientSecret não abre nada. É por aqui que o webhook, que
+  /// só traz o `itemId`, encontra a igreja.
+  itemIds String[] @default([])
+
+  enabled Boolean @default(true)
+
+  /// Aviso quando um banco pede reconexão ou confirmação no MeuPluggy
+  /// (`item/error`, `item/waiting_user_*`). Nulo: tudo certo.
+  statusMessage String?
+  lastSyncAt    DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  updatedById String?
+
+  church Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  @@map("pluggy_integrations")
 }
 
 model Waitlist {

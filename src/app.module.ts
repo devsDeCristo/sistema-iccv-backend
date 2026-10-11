@@ -15,6 +15,7 @@ import { GatewaysModule } from './gateways/gateways.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { PaymentModule } from './payment/payment.module';
 import { PaymentProviderModule } from './payment-providers/payment-provider.module';
+import { PluggyModule } from './pluggy/pluggy.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
 import { CheckinModule } from './checkin/checkin.module';
@@ -44,6 +45,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     GatewaysModule,
     PaymentModule,
     PaymentProviderModule,
+    PluggyModule,
     WebhooksModule,
     CronModule,
     CheckinModule,
