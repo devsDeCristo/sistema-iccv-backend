@@ -5,5 +5,7 @@ import { MembrosService } from './membros.service';
 @Module({
   controllers: [MembrosController],
   providers: [MembrosService],
+  // a planilha de dízimos do financeiro também coloca gente como membro
+  exports: [MembrosService],
 })
 export class MembrosModule {}

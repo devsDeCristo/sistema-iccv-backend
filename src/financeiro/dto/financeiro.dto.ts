@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsIn,
@@ -15,6 +18,7 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import {
   FinancialCategory,
@@ -152,4 +156,59 @@ export class ConciliarDto {
   @ApiProperty({ description: 'O lançamento manual que é o mesmo dinheiro' })
   @IsUUID()
   manualId: string;
+}
+
+// ---- planilha de dízimos ----------------------------------------------------
+
+/** Os nomes da planilha, para descobrir quem é cada um */
+export class PreviaDaPlanilhaDto {
+  @ApiProperty({ type: [String], example: ['Maria Aparecida Souza'] })
+  @IsArray()
+  @ArrayMaxSize(2000)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  nomes: string[];
+}
+
+export class LinhaDaPlanilhaDto {
+  /** O nome como está na planilha (vai em "pagador") */
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  nome: string;
+
+  /** Quem é; ausente: sem vínculo (não é usuário), o dízimo fica só com o nome */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
+
+  /** Janeiro a dezembro, em reais; zero não vira lançamento */
+  @ApiProperty({
+    type: [Number],
+    example: [150, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  })
+  @IsArray()
+  @ArrayMinSize(12)
+  @ArrayMaxSize(12)
+  @IsNumber({ maxDecimalPlaces: 2 }, { each: true })
+  @Min(0, { each: true })
+  @Max(9_999_999_999.99, { each: true })
+  valores: number[];
+}
+
+export class ImportarPlanilhaDto {
+  @ApiProperty({ example: 2026 })
+  @IsInt()
+  @Min(2000)
+  @Max(2100)
+  ano: number;
+
+  @ApiProperty({ type: [LinhaDaPlanilhaDto] })
+  @IsArray()
+  @ArrayMaxSize(2000)
+  @ValidateNested({ each: true })
+  @Type(() => LinhaDaPlanilhaDto)
+  linhas: LinhaDaPlanilhaDto[];
 }

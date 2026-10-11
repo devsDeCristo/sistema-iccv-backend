@@ -7,6 +7,7 @@ Código: `src/membros` (controller, service, DTOs), campos em `User` e o modelo 
 ## Modelo
 
 - **Uma igreja por pessoa:** `User.memberChurchId` (com `memberSince`). É campo, e não lista, para o próprio banco garantir que ninguém seja membro de duas igrejas. A gravação de membro é condicional (`updateMany ... where memberChurchId: null`): duas igrejas colocando a mesma pessoa ao mesmo tempo não sobrescrevem uma à outra; a segunda recebe 409.
+- **Planilha de dízimos:** importar a planilha no financeiro (só o admin) também coloca como membro quem ainda não é de nenhuma igreja — ver `docs/financeiro.md`.
 - **Pedido da inscrição:** `User.requestedChurchId`. Escolher uma igreja na inscrição **não** torna a pessoa membro: vira um pedido, que o admin da igreja aceita (vira membro) ou recusa. Sem isso, marcar o nome de uma igreja bastava para entrar na lista de membros — e no financeiro — dela.
 - **"Outra" igreja:** `User.otherChurchName`, o nome que a pessoa escreveu. Só informativo: aparece na busca de Membros para o admin decidir. Some quando a pessoa vira membro de alguma igreja.
 - **Família:** `Family { id, churchId, name }` e `User.familyId`. Cada pessoa em uma família no máximo, e só membros da mesma igreja entram nela. Família que fica sem ninguém é apagada. Deixar de ser membro tira da família.

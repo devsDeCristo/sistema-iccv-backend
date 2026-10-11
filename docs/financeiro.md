@@ -2,7 +2,7 @@
 
 Módulo financeiro de cada igreja: quem dizima nela (**dizimistas**) e o livro-caixa (**lançamentos**), com entradas e saídas lançadas à mão e importadas do extrato dos bancos pela Pluggy.
 
-Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`, `ConciliacaoService`, `categorias.ts`, `conciliacao.ts`) e `src/pluggy/pluggy.service.ts` (leitura do extrato).
+Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`, `ConciliacaoService`, `PlanilhaService`, `categorias.ts`, `conciliacao.ts`, `planilha.ts`) e `src/pluggy/pluggy.service.ts` (leitura do extrato).
 
 ## Quem acessa
 
@@ -16,6 +16,8 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 | --- | --- |
 | `GET dizimistas?ano=` | Todos os membros da igreja, com os números do ano (padrão: o atual) |
 | `PATCH dizimistas/:userId` | `{ titheAmount }`: o valor do dízimo do membro (`null` tira) |
+| `POST dizimistas/planilha/previa` | **Só admin.** `{ nomes }`: quem é cada nome da planilha de dízimos. Não grava |
+| `POST dizimistas/planilha` | **Só admin.** `{ ano, linhas: [{ nome, userId?, valores[12] }] }`: importa a planilha |
 | `GET lancamentos?de&ate&type&category&source&busca&conciliacao` | Lançamentos do período, com resumo; `conciliacao=conciliado\|pendente` filtra pelo status |
 | `POST lancamentos` | Lançamento manual |
 | `PATCH lancamentos/:id` | Edita (no importado, só categoria, descrição e dizimista) |
@@ -62,6 +64,16 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
   - Data: o dia da transação **em Brasília** (uma transação às 01:30 UTC do dia 4 é do dia 3).
 - Credencial recusada ou integração desligada → 400 com a mensagem; falha de rede ou da Pluggy → 502 ("tente de novo em alguns minutos"). Depois de importar, `lastSyncAt` é atualizado (o card da integração mostra "Última leitura há…").
 - Por enquanto a importação é **por botão**: não há webhook da Pluggy nem rotina agendada.
+
+## Planilha de dízimos
+
+Para trazer o histórico de quem já dizimava antes do sistema: uma planilha com uma linha por pessoa e o total de cada mês (jan a dez). A tela lê o arquivo (xlsx, no navegador) e manda só nomes e números.
+
+- **Só o admin** da igreja (`@Roles(...ADMIN_ROLES)` nas duas rotas, por cima do `ADMIN_AREA_ROLES` do controller): a importação coloca gente como membro, e isso é do admin, como em Membros.
+- **Quem é cada nome** (`previa`, `planilha.ts`, com teste): busca no sistema todo quem tem **2 ou mais palavras do nome em comum** — palavra inteira ("ana" não acha "Mariana"), **sem acento dos dois lados** ("Miquéias" acha "Miqueias", "Fatima" acha "Fátima"), sem conectivos ("de", "da", "dos"…) nem iniciais soltas. É SQL (`translate` tira o acento, `\m…\M` é o limite de palavra do Postgres): o `contains` do Prisma não ignora acento. Os com mais palavras em comum vêm primeiro (até 8). "Fulano / Cônjuge" busca pelo primeiro nome. Nome de uma palavra só ("DJALMA") não busca. Escolhe sozinho: o **mesmo nome** (as mesmas palavras), preferindo o membro desta igreja entre homônimos (`exato`); sem o mesmo nome, o único candidato em que um nome cabe inteiro no outro, aceitando **um erro de digitação por palavra** de 4+ letras (uma letra trocada, a mais ou a menos: "Eduarda Dâmares Lima Diogenes" casa com "Eduarda Dâmaris Lima Diógenes"; "Miqueias Sousa" cabe em "Miquéias Abnadabe Ferreira Sousa"); sem nenhum assim, o favorito claro (mesmo primeiro nome, 3+ palavras em comum e mais que todos os outros). Esses dois vêm marcados para conferir. Mais de um empatado, ou nenhum, a pessoa escolhe. A busca no banco ainda pede 2 palavras iguais sem acento; a tolerância a erro vale para escolher entre os achados. Membro de outra igreja nunca é escolhido. Os candidatos voltam como na busca de Membros (CPF pela metade, de qual igreja já são membros).
+- **Importar** (`importar`): cada mês com valor vira um lançamento `INCOME`/`TITHE`, `MANUAL`, no **dia 1º do mês**, ligado ao dizimista, com o nome da planilha em `payerName` e descrição "Dízimo MM/AAAA — Nome da planilha (planilha)". Quem não é membro de nenhuma igreja **vira membro desta** (o mesmo `tornarMembro` atômico de Membros); membro de outra igreja fica de fora (`ignorados`, com o motivo). Sem `userId`, a linha é **sem vínculo** (quem não é usuário do sistema, ou a linha "Anônimo"): o dízimo entra sem dizimista, só com o nome da planilha na descrição e no pagador. A mesma pessoa em duas linhas soma no mês.
+- **Não duplica:** `externalId` = `planilha:<userId>:<ano>-<mês>` (ou `planilha:anonimo:<nome>:...`), com `skipDuplicates`. Importar a mesma planilha de novo não cria nada; o mês já importado fica como está, mesmo com o valor mudado na planilha (corrige-se no lançamento). Resposta: `{ lancamentos, jaExistiam, novosMembros, ignorados }`.
+- Não sabe de dízimo do mesmo mês lançado de outro jeito (à mão ou pelo banco): importar a planilha de um mês que já foi lançado conta duas vezes. Os lançamentos da planilha são manuais e aparecem na Conciliação como "só manual" (o total do mês não casa com os Pix um a um).
 
 ## Conciliação
 

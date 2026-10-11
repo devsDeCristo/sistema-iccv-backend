@@ -18,7 +18,7 @@ const PESSOA = {
 } as const;
 
 /** CPF pela metade, para a busca: o nome já identifica */
-const cpfMascarado = (cpf: string) =>
+export const cpfMascarado = (cpf: string) =>
   cpf.length === 11 ? `***.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-**` : '***';
 
 /**
@@ -258,7 +258,8 @@ export class MembrosService {
    * duas igrejas colocando a mesma pessoa ao mesmo tempo não sobrescrevem uma
    * à outra — a segunda recebe o conflito.
    */
-  private async tornarMembro(churchId: string, userId: string) {
+  /** Atômico: só entra quem não é membro de nenhuma igreja (409 se já é) */
+  async tornarMembro(churchId: string, userId: string) {
     const { count } = await this.prisma.user.updateMany({
       where: { id: userId, memberChurchId: null },
       // o pedido, se havia, está atendido; "Outra" deixa de valer

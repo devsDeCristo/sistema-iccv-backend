@@ -17,10 +17,11 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { ChurchTenantGuard } from 'src/decorators/church-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_AREA_ROLES } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, ADMIN_ROLES } from 'src/auth/roles';
 import { DizimistasService } from './dizimistas.service';
 import { LancamentosService } from './lancamentos.service';
 import { ConciliacaoService } from './conciliacao.service';
+import { PlanilhaService } from './planilha.service';
 import {
   CreateEntryDto,
   ListEntriesQuery,
@@ -28,6 +29,8 @@ import {
   ValorDoDizimoDto,
   PeriodoQuery,
   ConciliarDto,
+  ImportarPlanilhaDto,
+  PreviaDaPlanilhaDto,
   UpdateEntryDto,
 } from './dto/financeiro.dto';
 
@@ -49,6 +52,7 @@ export class FinanceiroController {
     private readonly dizimistas: DizimistasService,
     private readonly lancamentos: LancamentosService,
     private readonly conciliacao: ConciliacaoService,
+    private readonly planilha: PlanilhaService,
   ) {}
 
   // ---- dizimistas ----------------------------------------------------------
@@ -77,6 +81,45 @@ export class FinanceiroController {
     @Body() dto: ValorDoDizimoDto,
   ) {
     await this.dizimistas.definirValor(churchId, userId, dto.titheAmount);
+  }
+
+  // ---- planilha de dízimos ------------------------------------------------
+  // só o admin: a importação coloca gente como membro (como em Membros)
+
+  @ApiOperation({
+    summary: 'Planilha de dízimos: quem é cada nome',
+    description:
+      'Candidatos de cada nome e quem o sistema escolheria. Não grava nada.',
+  })
+  @Post('dizimistas/planilha/previa')
+  @Roles(...ADMIN_ROLES)
+  @HttpCode(200)
+  previaDaPlanilha(
+    @Param('churchId') churchId: string,
+    @Body() dto: PreviaDaPlanilhaDto,
+  ) {
+    return this.planilha.previa(churchId, dto.nomes);
+  }
+
+  @ApiOperation({
+    summary: 'Importa a planilha de dízimos',
+    description:
+      'Cada mês com valor vira um dízimo ligado ao dizimista, que vira membro se ainda não era. Não duplica.',
+  })
+  @Post('dizimistas/planilha')
+  @Roles(...ADMIN_ROLES)
+  @HttpCode(200)
+  importarPlanilha(
+    @Param('churchId') churchId: string,
+    @Body() dto: ImportarPlanilhaDto,
+    @Req() req: any,
+  ) {
+    return this.planilha.importar(
+      churchId,
+      dto.ano,
+      dto.linhas,
+      req.user?.userId,
+    );
   }
 
   // ---- conciliação ---------------------------------------------------------
