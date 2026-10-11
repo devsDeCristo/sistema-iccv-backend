@@ -21,6 +21,39 @@ let ocioso: NodeJS.Timeout | undefined;
  * `/usr/bin/chromium`. Sem a variável, procura o Google Chrome instalado
  * no lugar padrão do sistema, que é o caso de quem roda na própria máquina.
  */
+/**
+ * Chrome enxuto: só o que imprimir HTML em PDF precisa.
+ *
+ * A maior parte da memória do PDF é o custo fixo do Chrome — os processos
+ * dele —, e não o conteúdo: medido com a imagem de produção, só a capa do
+ * quadrante (uma página) já custava 80% do quadrante inteiro de 316 pessoas, e
+ * tirar as 316 fotos economizava 3%. Estas opções cortam os processos e
+ * serviços que um navegador de verdade tem e o PDF não usa: GPU e rede rodam
+ * dentro do processo principal (em vez de processos próprios), uma página
+ * renderiza por vez, sem extensões, atualizações, sincronização nem tarefas de
+ * fundo. Medido: −12% no quadrante de 316 pessoas, mesmo PDF, mesmo tempo.
+ *
+ * Tudo suportado pelo Chrome. O modo de processo único (`--single-process`)
+ * economizava mais (−33%), mas não é suportado: uma página travada derrubaria o
+ * navegador inteiro — ficou de fora.
+ */
+const ARGS_ENXUTOS = [
+  '--disable-gpu',
+  '--in-process-gpu',
+  '--disable-software-rasterizer',
+  '--enable-features=NetworkServiceInProcess2',
+  '--no-zygote',
+  '--renderer-process-limit=1',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-component-update',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--no-first-run',
+  '--mute-audio',
+  '--disable-features=site-per-process,Translate,BackForwardCache,MediaRouter,OptimizationHints',
+];
+
 function lancar() {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
 
@@ -34,6 +67,7 @@ function lancar() {
         // o /dev/shm do Docker tem 64 MB; página grande estourava ali e
         // derrubava o Chrome. Com a opção, ele usa o /tmp
         '--disable-dev-shm-usage',
+        ...ARGS_ENXUTOS,
       ],
     })
     .catch((error: Error) => {

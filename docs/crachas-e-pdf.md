@@ -88,6 +88,23 @@ Arquivos: `src/pdf/fila.ts`, `src/pdf/pdf.controller.ts`, `src/pdf/pdf.module.ts
 - **Chromium via `apt`, não pelo Puppeteer:** o pacote Debian já traz as bibliotecas necessárias, evitando baixar um segundo Chromium na imagem. `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` aponta o `puppeteer-core` para esse binário.
 - **`--disable-dev-shm-usage`:** o `/dev/shm` do container tem só 64 MB por padrão; uma página grande de crachás estourava esse limite e derrubava o Chrome. A flag faz o Chrome usar `/tmp` em vez de `/dev/shm`.
 - **`--no-sandbox` / `--disable-setuid-sandbox`:** necessários para rodar o Chrome como processo do container.
+- **Chrome enxuto (`ARGS_ENXUTOS`, `src/pdf/navegador.ts`):** a maior parte da
+  memória do PDF é o custo fixo do Chrome (os processos dele), não o conteúdo.
+  Medido com a imagem de produção, num quadrante sintético de 316 pessoas e 14
+  equipes: só a capa (uma página) já custava ~80% do quadrante inteiro, e tirar
+  as 316 fotos economizava 3%. As opções cortam o que um navegador tem e o PDF
+  não usa: GPU e rede dentro do processo principal (`--in-process-gpu`,
+  `NetworkServiceInProcess2`), uma página renderizando por vez
+  (`--renderer-process-limit=1`), sem zygote, extensões, atualização de
+  componentes, sincronização nem tarefas de fundo. Resultado: −12% de memória
+  no quadrante, mesmo PDF e mesmo tempo. Tudo suportado pelo Chrome; funciona
+  também com o Chrome local (`channel: 'chrome'`).
+  - **Ficou de fora o `--single-process`:** economizava −33%, mas o Chrome não
+    suporta o modo — uma página travada derrubaria o navegador inteiro. Se o
+    pico ainda incomodar, é a próxima alavanca.
+  - **Também não compensam:** imprimir as equipes em lotes (−25%, mas o
+    "Página X de Y" do rodapé recomeçaria em cada lote e a geração ficava mais
+    lenta) e mexer nas fotos ou na capa (o conteúdo pesa pouco).
 
 ## Tela correspondente
 
