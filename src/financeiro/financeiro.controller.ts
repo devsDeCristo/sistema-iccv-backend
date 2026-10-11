@@ -20,11 +20,14 @@ import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import { DizimistasService } from './dizimistas.service';
 import { LancamentosService } from './lancamentos.service';
+import { ConciliacaoService } from './conciliacao.service';
 import {
   CreateEntryDto,
   ListEntriesQuery,
   ListTithersQuery,
   ValorDoDizimoDto,
+  PeriodoQuery,
+  ConciliarDto,
   UpdateEntryDto,
 } from './dto/financeiro.dto';
 
@@ -45,6 +48,7 @@ export class FinanceiroController {
   constructor(
     private readonly dizimistas: DizimistasService,
     private readonly lancamentos: LancamentosService,
+    private readonly conciliacao: ConciliacaoService,
   ) {}
 
   // ---- dizimistas ----------------------------------------------------------
@@ -73,6 +77,65 @@ export class FinanceiroController {
     @Body() dto: ValorDoDizimoDto,
   ) {
     await this.dizimistas.definirValor(churchId, userId, dto.titheAmount);
+  }
+
+  // ---- conciliação ---------------------------------------------------------
+
+  @ApiOperation({
+    summary: 'Banco × manual do período: pares, sugestões e o que sobrou',
+  })
+  @Get('conciliacao')
+  listarConciliacao(
+    @Param('churchId') churchId: string,
+    @Query() q: PeriodoQuery,
+  ) {
+    return this.conciliacao.listar(churchId, q.de, q.ate);
+  }
+
+  @ApiOperation({
+    summary: 'Concilia um lançamento do banco com um manual',
+    description:
+      'O par conta uma vez nos totais; o do banco herda a categoria e o dizimista do manual.',
+  })
+  @Post('conciliacao')
+  @HttpCode(204)
+  async conciliar(
+    @Param('churchId') churchId: string,
+    @Body() dto: ConciliarDto,
+    @Req() req: any,
+  ) {
+    await this.conciliacao.conciliar(
+      churchId,
+      dto.bancoId,
+      dto.manualId,
+      req.user?.userId,
+    );
+  }
+
+  @ApiOperation({ summary: 'Concilia todos os pares sugeridos do período' })
+  @Post('conciliacao/sugeridos')
+  @HttpCode(200)
+  conciliarSugeridos(
+    @Param('churchId') churchId: string,
+    @Query() q: PeriodoQuery,
+    @Req() req: any,
+  ) {
+    return this.conciliacao.conciliarSugeridos(
+      churchId,
+      q.de,
+      q.ate,
+      req.user?.userId,
+    );
+  }
+
+  @ApiOperation({ summary: 'Desfaz a conciliação do lançamento manual' })
+  @Delete('conciliacao/:manualId')
+  @HttpCode(204)
+  async desfazerConciliacao(
+    @Param('churchId') churchId: string,
+    @Param('manualId', ParseUUIDPipe) manualId: string,
+  ) {
+    await this.conciliacao.desfazer(churchId, manualId);
   }
 
   // ---- lançamentos ---------------------------------------------------------

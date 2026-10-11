@@ -27,6 +27,27 @@ import {
   UpdateEntryDto,
 } from './dto/financeiro.dto';
 
+/** O que a tela precisa de cada lançamento, inclusive o vínculo da conciliação */
+export const PARA_TELA = {
+  user: { select: { id: true, fullName: true } },
+  reconciledBy: { select: { id: true } },
+} satisfies Prisma.FinancialEntryInclude;
+
+/**
+ * O lançamento manual já conciliado sai dos totais: o par conta uma vez, pelo
+ * do banco (ver `ConciliacaoService`).
+ */
+export const CONTA_NOS_TOTAIS = { reconciledWithId: null };
+
+/** Filtro do status de conciliação: dos dois lados do vínculo */
+const CONCILIADO: Prisma.FinancialEntryWhereInput = {
+  OR: [{ reconciledWithId: { not: null } }, { reconciledBy: { isNot: null } }],
+};
+const PENDENTE: Prisma.FinancialEntryWhereInput = {
+  reconciledWithId: null,
+  reconciledBy: { is: null },
+};
+
 /** Teto da lista de um período: um ano de igreja grande cabe com folga */
 const LIMITE = 5000;
 
@@ -85,6 +106,8 @@ export class LancamentosService {
           ...(q.type ? { type: q.type } : {}),
           ...(q.category ? { category: q.category } : {}),
           ...(q.source ? { source: q.source } : {}),
+          ...(q.conciliacao === 'conciliado' ? CONCILIADO : {}),
+          ...(q.conciliacao === 'pendente' ? PENDENTE : {}),
           ...(busca
             ? {
                 OR: [
@@ -99,17 +122,21 @@ export class LancamentosService {
               }
             : {}),
         },
-        include: { user: { select: { id: true, fullName: true } } },
+        include: PARA_TELA,
         orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
         take: LIMITE,
       }),
       this.prisma.financialEntry.groupBy({
         by: ['type'],
-        where: doPeriodo,
+        where: { ...doPeriodo, ...CONTA_NOS_TOTAIS },
         _sum: { amount: true },
       }),
       this.prisma.financialEntry.aggregate({
-        where: { ...doPeriodo, category: FinancialCategory.TITHE },
+        where: {
+          ...doPeriodo,
+          ...CONTA_NOS_TOTAIS,
+          category: FinancialCategory.TITHE,
+        },
         _sum: { amount: true },
       }),
     ]);
@@ -152,7 +179,7 @@ export class LancamentosService {
         createdById: actorId ?? null,
         updatedById: actorId ?? null,
       },
-      include: { user: { select: { id: true, fullName: true } } },
+      include: PARA_TELA,
     });
     return paraTela(criado);
   }
@@ -206,7 +233,7 @@ export class LancamentosService {
         ...(dto.userId !== undefined ? { userId: dto.userId } : {}),
         updatedById: actorId ?? null,
       },
-      include: { user: { select: { id: true, fullName: true } } },
+      include: PARA_TELA,
     });
     return paraTela(salvo);
   }
@@ -340,8 +367,11 @@ export class LancamentosService {
 }
 
 /** Valor como número e data como "2026-10-03", que é o que a tela usa */
-function paraTela(
-  l: FinancialEntry & { user: { id: string; fullName: string } | null },
+export function paraTela(
+  l: FinancialEntry & {
+    user: { id: string; fullName: string } | null;
+    reconciledBy: { id: string } | null;
+  },
 ) {
   return {
     id: l.id,
@@ -355,6 +385,13 @@ function paraTela(
     bankAccount: l.bankAccount,
     payerName: l.payerName,
     user: l.user,
+    /**
+     * Conciliado dos dois lados: o manual aponta para o banco, e o banco é
+     * apontado pelo manual. O par conta uma vez nos totais.
+     */
+    conciliado: !!(l.reconciledWithId || l.reconciledBy),
+    /** o par: o id do lado de lá, para a tela de conciliação */
+    conciliadoCom: l.reconciledWithId ?? l.reconciledBy?.id ?? null,
     createdAt: l.createdAt,
   };
 }

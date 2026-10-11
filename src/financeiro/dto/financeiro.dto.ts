@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -123,4 +124,32 @@ export class ListEntriesQuery {
   @IsString()
   @MaxLength(100)
   busca?: string;
+
+  @ApiPropertyOptional({ enum: ['conciliado', 'pendente'] })
+  @IsOptional()
+  @IsIn(['conciliado', 'pendente'])
+  conciliacao?: 'conciliado' | 'pendente';
+}
+
+/** O período da conciliação. Sem ele, do dia 1º do mês até hoje. */
+export class PeriodoQuery {
+  @ApiPropertyOptional({ example: '2026-10-01' })
+  @IsOptional()
+  @Matches(DIA, { message: MENSAGEM_DIA })
+  de?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-31' })
+  @IsOptional()
+  @Matches(DIA, { message: MENSAGEM_DIA })
+  ate?: string;
+}
+
+export class ConciliarDto {
+  @ApiProperty({ description: 'O lançamento importado do banco' })
+  @IsUUID()
+  bancoId: string;
+
+  @ApiProperty({ description: 'O lançamento manual que é o mesmo dinheiro' })
+  @IsUUID()
+  manualId: string;
 }

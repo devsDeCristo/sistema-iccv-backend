@@ -55,6 +55,8 @@ export class DizimistasService {
             type: FinancialEntryType.INCOME,
             category: FinancialCategory.TITHE,
             userId: { in: membros.map((m) => m.id) },
+            // o manual conciliado já conta pelo do banco, que herdou o dizimista
+            reconciledWithId: null,
           },
           select: { userId: true, amount: true, date: true },
         })

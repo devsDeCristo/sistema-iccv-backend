@@ -2,7 +2,7 @@
 
 Módulo financeiro de cada igreja: quem dizima nela (**dizimistas**) e o livro-caixa (**lançamentos**), com entradas e saídas lançadas à mão e importadas do extrato dos bancos pela Pluggy.
 
-Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`, `categorias.ts`) e `src/pluggy/pluggy.service.ts` (leitura do extrato).
+Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`, `ConciliacaoService`, `categorias.ts`, `conciliacao.ts`) e `src/pluggy/pluggy.service.ts` (leitura do extrato).
 
 ## Quem acessa
 
@@ -16,11 +16,15 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 | --- | --- |
 | `GET dizimistas?ano=` | Todos os membros da igreja, com os números do ano (padrão: o atual) |
 | `PATCH dizimistas/:userId` | `{ titheAmount }`: o valor do dízimo do membro (`null` tira) |
-| `GET lancamentos?de&ate&type&category&source&busca` | Lançamentos do período, com resumo |
+| `GET lancamentos?de&ate&type&category&source&busca&conciliacao` | Lançamentos do período, com resumo; `conciliacao=conciliado\|pendente` filtra pelo status |
 | `POST lancamentos` | Lançamento manual |
 | `PATCH lancamentos/:id` | Edita (no importado, só categoria, descrição e dizimista) |
 | `DELETE lancamentos/:id` | Apaga o manual; o importado não |
 | `POST lancamentos/importar` | Importa o extrato da Pluggy |
+| `GET conciliacao?de&ate` | As linhas do diff banco × manual do período, com resumo |
+| `POST conciliacao` | `{ bancoId, manualId }`: concilia um par |
+| `POST conciliacao/sugeridos?de&ate` | Concilia todos os pares sugeridos do período; devolve `{ conciliados }` |
+| `DELETE conciliacao/:manualId` | Desfaz o par |
 
 ## Dizimistas são os membros
 
@@ -59,10 +63,23 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 - Credencial recusada ou integração desligada → 400 com a mensagem; falha de rede ou da Pluggy → 502 ("tente de novo em alguns minutos"). Depois de importar, `lastSyncAt` é atualizado (o card da integração mostra "Última leitura há…").
 - Por enquanto a importação é **por botão**: não há webhook da Pluggy nem rotina agendada.
 
+## Conciliação
+
+O mesmo dinheiro costuma estar duas vezes no livro-caixa: o Pix que veio do extrato (`PLUGGY`) e o lançamento que alguém fez à mão (`MANUAL`). Conciliar liga os dois.
+
+- **Modelo:** o manual aponta para o do banco — `reconciledWithId` (único: uma transação do banco concilia com um manual só; `SetNull` se o do banco sumir), `reconciledAt`, `reconciledById`. O status `conciliado` de um lançamento (na lista e no filtro) vale para as duas pontas.
+- **Conta uma vez:** o manual conciliado sai dos totais — o resumo de Lançamentos e os números de Dizimistas ignoram `reconciledWithId` preenchido; vale o do banco. Na tabela os dois continuam aparecendo.
+- **Conciliar** (`conciliar`): os dois da igreja da rota (404), banco do lado `PLUGGY` e manual do lado `MANUAL` (400), mesmo tipo (400), nenhum dos dois já conciliado (409; a corrida entre duas pessoas também dá 409 pelo índice único). Valor e data **podem** diferir: valem os do extrato. O do banco **herda a categoria e o dizimista** do manual — é a classificação que a pessoa deu, e o dízimo passa a contar pelo do banco.
+- **Desfazer:** o manual volta a contar; a categoria que o banco herdou fica.
+- **Sugestão** (`sugerirPares`, em `conciliacao.ts`, com teste): entre os pendentes, mesmo tipo, mesmo valor ao centavo e datas a até 3 dias. Cada lançamento entra em um par só; com mais de um candidato vence a data mais próxima e, no empate, o mesmo dizimista. Não grava nada: "conciliar sugestões" grava os pares da lista.
+- **Linhas** (`listar`): `conciliado`, `sugerido`, `so_banco`, `so_manual`, nessa ordem de prioridade (sugerido primeiro, conciliado por último) e da data mais recente. Um par conciliado aparece se qualquer ponta cai no período. Resumo: quantos de cada e o saldo (entradas − saídas) do que está só de um lado.
+
 ## Auditoria
 
 `FinancialEntry` passa pelo log de auditoria como as outras tabelas, com o rótulo "Lançamento financeiro" (`MODEL_LABELS`), e é tabela principal (`MAIN_MODELS`); o valor do dízimo aparece nas alterações de "Cadastro". O rótulo "Dizimista" (`Tither`) ficou só para as linhas antigas do log. A importação grava um `createMany` só.
 
 ## Migration
+
+`20261011190000_conciliacao`: só adiciona as três colunas de conciliação em `financial_entries` (nulas), o índice único e a chave estrangeira; nada existente muda.
 
 `20261011150000_financeiro`: só cria as duas tabelas, os enums e os índices; não mexe em nada existente. `20261011160000_valor_do_dizimo`: só adiciona a coluna `expectedAmount` (nula) em `tithers`. `20261011180000_dizimista_e_membro`: a lista de dizimistas vira os membros — cria `users.titheAmount`, **copia** para ele o `expectedAmount` de quem era dizimista na mesma igreja de que é membro, e só então apaga `tithers` (testado: o valor do dizimista da própria igreja seguiu; o de outra igreja, não). Testada aplicando todas as migrations num Postgres vazio e rodando os serviços contra ele (somas em `Decimal`, importação repetida sem duplicar, recorte por igreja).

@@ -1337,6 +1337,19 @@ model FinancialEntry {
   /// que não casou com nenhum dizimista.
   payerName   String?
 
+  /// Conciliação: no lançamento **manual**, a transação do banco (Pluggy)
+  /// que é o mesmo dinheiro. Um para um (`@unique`): cada transação concilia
+  /// com um lançamento só. Conciliado, o par conta uma vez — vale o do banco,
+  /// que herda a categoria e o dizimista do manual; o manual sai dos totais.
+  /// O status "conciliado" das duas pontas sai daqui, e não de um campo à
+  /// parte que pudesse discordar do vínculo.
+  reconciledWithId String?         @unique
+  reconciledWith   FinancialEntry? @relation("Conciliacao", fields: [reconciledWithId], references: [id], onDelete: SetNull)
+  /// Do lado do banco: o lançamento manual conciliado com ele
+  reconciledBy     FinancialEntry? @relation("Conciliacao")
+  reconciledAt     DateTime?
+  reconciledById   String?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdById String?
