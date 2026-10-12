@@ -6,8 +6,6 @@ export const ROTULO_DO_MODULO: Record<ChurchModule, string> = {
   EVENTS: 'Eventos',
   NEWS: 'Notícias',
   TREASURY: 'Tesouraria',
-  WHATSAPP: 'WhatsApp',
-  INTEGRATIONS: 'Integrações',
   ONLINE_PAYMENTS: 'Cobrança online',
 };
 

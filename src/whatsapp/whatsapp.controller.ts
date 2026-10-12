@@ -40,7 +40,7 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
 @UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_ROLES)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
-@Modulo(ChurchModule.WHATSAPP)
+@Modulo(ChurchModule.NEWS)
 @Controller('churches/:churchId/whatsapp')
 export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}

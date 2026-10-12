@@ -12,7 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PaymentProvider } from '@prisma/client';
+import { PaymentProvider, ChurchModule } from '@prisma/client';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { ChurchTenantGuard } from 'src/decorators/church-tenant.guard';
@@ -21,6 +21,8 @@ import { ADMIN_ROLES } from 'src/auth/roles';
 import { PaymentProviderService } from './payment-provider.service';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
 import { ProviderSlugPipe } from './provider-slug.pipe';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 /**
  * Configuração de cobrança da igreja.
@@ -37,8 +39,10 @@ import { ProviderSlugPipe } from './provider-slug.pipe';
  */
 @ApiTags('payment-providers')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_ROLES)
+// os gateways são do módulo Eventos: fora do plano, a configuração recusa
+@Modulo(ChurchModule.EVENTS)
 @Controller()
 export class PaymentProviderController {
   constructor(private readonly service: PaymentProviderService) {}

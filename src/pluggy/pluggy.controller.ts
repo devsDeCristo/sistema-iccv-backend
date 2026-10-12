@@ -35,7 +35,7 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
 @UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_AREA_ROLES)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
-@Modulo(ChurchModule.INTEGRATIONS)
+@Modulo(ChurchModule.TREASURY)
 @Controller('churches/:churchId/pluggy')
 export class PluggyController {
   constructor(private readonly service: PluggyService) {}

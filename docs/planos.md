@@ -15,15 +15,13 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 
 ### Módulos (`ChurchModule`)
 
-**Membros não é módulo:** toda igreja tem, com ou sem plano (e o financeiro depende dele — os dizimistas são os membros).
+**Membros não é módulo:** toda igreja tem, com ou sem plano (e o financeiro depende dele — os dizimistas são os membros). **As configurações seguem o módulo a que servem:** Pagamentos é de Eventos, Disparadores (WhatsApp) de Notícias, Integrações (Pluggy) de Tesouraria — WhatsApp e Integrações já foram módulos próprios e saíram (migration `20261012130000`).
 
 | Módulo | O que fecha |
 | --- | --- |
-| `EVENTS` | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, quadrante, check-in e os pagamentos do evento no painel |
-| `NEWS` | Notícias e disparos |
-| `TREASURY` | Tesouraria (`/churches/:churchId/financeiro`) |
-| `WHATSAPP` | O WhatsApp da igreja (`/churches/:churchId/whatsapp`) |
-| `INTEGRATIONS` | Pluggy (`/churches/:churchId/pluggy`) |
+| `EVENTS` | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; e a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos) |
+| `NEWS` | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores) |
+| `TREASURY` | Tesouraria (`/churches/:churchId/financeiro`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações) |
 | `ONLINE_PAYMENTS` | Cobrança online nos eventos (o antigo `Church.modulePayment`) |
 
 ## Rotas (`/plans`)
@@ -60,6 +58,10 @@ Substituiu `Church.modulePayment` (a coluna saiu na migração; a rota `PATCH /c
 ## Migration
 
 `20261012120000_planos`: cria o enum `ChurchModule`, a tabela `plans` e `churches.planId` (nula), e **apaga `churches.modulePayment`**. Depois de aplicar, nenhuma igreja tem módulo nenhum — nem cobrança online — até o super admin criar os planos e escolher um para cada igreja. Testada aplicando todas as migrations num Postgres vazio (planos, plano em uso não apaga, `SEM_COBRANCA_ONLINE`, recusa da igreja sem plano).
+
+## Migration `20261012130000_modulos_das_configuracoes`
+
+Tira `WHATSAPP` e `INTEGRATIONS` do enum (recria o tipo, como o Prisma gera). Antes, apaga os dois valores dos planos que os tinham — sem virar Notícias ou Tesouraria sozinhos, o que daria à igreja um módulo que ninguém escolheu. Nova em vez de editar a `20261012120000`, que já estava commitada: editar migration aplicada quebra o `prisma migrate`. Testada sobre planos com os valores antigos e no banco vazio, com a sequência inteira.
 
 ## Auditoria
 
