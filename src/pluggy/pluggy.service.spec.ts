@@ -1,5 +1,5 @@
 import { SecretCryptoService } from 'src/crypto/secret-crypto.service';
-import { PluggyService } from './pluggy.service';
+import { PluggyService, contaDoBanco } from './pluggy.service';
 
 /**
  * O que importa aqui é a promessa do cofre: a credencial entra cifrada, não
@@ -31,6 +31,8 @@ describe('PluggyService.salvar', () => {
             ...update,
           }),
       },
+      // a recontagem das contas pela divisão dos bancos
+      financialEntry: { updateMany: async () => ({ count: 0 }) },
     };
 
     service = new PluggyService(prisma as any, crypto);
@@ -85,5 +87,30 @@ describe('PluggyService.salvar', () => {
     expect(() =>
       crypto.decifrar(linha.credentials, 'pluggy:igreja-2'),
     ).toThrow();
+  });
+});
+
+describe('contaDoBanco', () => {
+  const divisao = {
+    splitByTreasury: true,
+    itemAccounts: {
+      'item-a': 'EVENTS',
+      'item-b': 'CONGREGATIONS',
+      'item-c': 'X',
+    },
+  };
+
+  it('com a divisão, cada banco vai para a sua tesouraria', () => {
+    expect(contaDoBanco(divisao, 'item-a')).toBe('EVENTS');
+    expect(contaDoBanco(divisao, 'item-b')).toBe('CONGREGATIONS');
+  });
+
+  it('banco fora da divisão, valor estranho ou sem divisão: Administrativa', () => {
+    expect(contaDoBanco(divisao, 'item-z')).toBe('ADMINISTRATIVE');
+    expect(contaDoBanco(divisao, 'item-c')).toBe('ADMINISTRATIVE');
+    expect(contaDoBanco({ ...divisao, splitByTreasury: false }, 'item-a')).toBe(
+      'ADMINISTRATIVE',
+    );
+    expect(contaDoBanco(divisao, null)).toBe('ADMINISTRATIVE');
   });
 });

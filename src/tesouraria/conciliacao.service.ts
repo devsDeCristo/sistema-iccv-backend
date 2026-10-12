@@ -9,7 +9,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { diaEmBrasilia } from './categorias';
 import { sugerirPares } from './conciliacao';
 import { arredondar, paraDia } from './dizimistas.service';
-import { PARA_TELA, paraTela } from './lancamentos.service';
+import { DA_ADMINISTRATIVA, PARA_TELA, paraTela } from './lancamentos.service';
 
 type Lancamento = ReturnType<typeof paraTela>;
 
@@ -63,6 +63,10 @@ export class ConciliacaoService {
     const doPeriodo = await this.prisma.financialEntry.findMany({
       where: {
         churchId,
+        // só a conta da Administrativa; e o que já foi distribuído para um
+        // evento ou congregação (sem a divisão dos bancos) é de lá
+        ...DA_ADMINISTRATIVA,
+        allocations: { none: {} },
         date: { gte: paraDia(periodo.de), lte: paraDia(periodo.ate) },
       },
       include: PARA_TELA,

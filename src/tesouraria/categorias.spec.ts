@@ -16,6 +16,7 @@ const transacao = (extra: Partial<TransacaoDoBanco>): TransacaoDoBanco => ({
   payerName: 'Maria',
   payerDocument: '12345678901',
   conta: 'Sicredi · Conta corrente',
+  itemId: 'item-sicredi',
   ...extra,
 });
 

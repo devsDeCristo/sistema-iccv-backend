@@ -5,7 +5,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { PluggyIntegration } from '@prisma/client';
+import { PluggyIntegration, TreasuryAccount } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SecretCryptoService } from 'src/crypto/secret-crypto.service';
 import { criarHttp } from 'src/gateways/core/gateway-http';
@@ -39,6 +39,26 @@ export interface TransacaoDoBanco {
   payerDocument: string | null;
   /** "Sicredi · Conta corrente" */
   conta: string;
+  /** O banco (Item) de onde veio: é ele que diz a conta da tesouraria */
+  itemId: string;
+}
+
+/**
+ * A conta de cada banco pela divisão da Pluggy. Sem a divisão ("sem
+ * restrição"), tudo é da Administrativa; com ela, o banco que não foi
+ * escolhido também.
+ */
+export function contaDoBanco(
+  integracao: Pick<PluggyIntegration, 'splitByTreasury' | 'itemAccounts'>,
+  itemId: string | null | undefined,
+): TreasuryAccount {
+  if (!integracao.splitByTreasury || !itemId) {
+    return TreasuryAccount.ADMINISTRATIVE;
+  }
+  const conta = (integracao.itemAccounts as Record<string, string>)?.[itemId];
+  return Object.values(TreasuryAccount).includes(conta as TreasuryAccount)
+    ? (conta as TreasuryAccount)
+    : TreasuryAccount.ADMINISTRATIVE;
 }
 
 /** A Pluggy entrega até 500 por página */
@@ -102,11 +122,25 @@ export class PluggyService {
       );
     }
 
+    const itemIds = [...new Set(dto.itemIds)];
+    // a divisão só guarda banco que está na lista; omitida, mantém a gravada
+    const splitByTreasury =
+      dto.splitByTreasury ?? existente?.splitByTreasury ?? false;
+    const itemAccounts = Object.fromEntries(
+      Object.entries(
+        dto.itemAccounts ??
+          (existente?.itemAccounts as Record<string, TreasuryAccount>) ??
+          {},
+      ).filter(([itemId]) => itemIds.includes(itemId)),
+    );
+
     const dados = {
       credentials: this.crypto.cifrar(credenciais, selo(churchId)),
       keyVersion: this.crypto.versaoDaChaveAtiva,
       credentialsHint: { clientId: this.crypto.mascarar(credenciais.clientId) },
-      itemIds: [...new Set(dto.itemIds)],
+      itemIds,
+      splitByTreasury,
+      itemAccounts,
       enabled: dto.enabled ?? existente?.enabled ?? true,
       updatedById: actorId ?? null,
     };
@@ -117,7 +151,38 @@ export class PluggyService {
       update: dados,
     });
 
+    await this.recontarContas(churchId, salvo);
+
     return this.paraTela(salvo);
+  }
+
+  /**
+   * Mudou a divisão: os movimentos já importados passam para a conta do banco
+   * de onde vieram. O que já foi distribuído para um evento ou congregação
+   * fica onde está (a alocação é do movimento, não da conta). O importado
+   * antes de existir a divisão não sabe o banco e fica na Administrativa.
+   */
+  private async recontarContas(
+    churchId: string,
+    integracao: Pick<
+      PluggyIntegration,
+      'itemIds' | 'splitByTreasury' | 'itemAccounts'
+    >,
+  ) {
+    for (const conta of Object.values(TreasuryAccount)) {
+      const bancos = integracao.itemIds.filter(
+        (itemId) => contaDoBanco(integracao, itemId) === conta,
+      );
+      if (!bancos.length) continue;
+      await this.prisma.financialEntry.updateMany({
+        where: {
+          churchId,
+          bankItemId: { in: bancos },
+          account: { not: conta },
+        },
+        data: { account: conta },
+      });
+    }
   }
 
   async remover(churchId: string) {
@@ -257,6 +322,7 @@ export class PluggyService {
                   '',
                 ) || null,
               conta: nomeDaConta,
+              itemId,
             });
           }
 
@@ -325,6 +391,8 @@ export class PluggyService {
       enabled: integracao.enabled,
       credentialsHint: integracao.credentialsHint,
       itemIds: integracao.itemIds,
+      splitByTreasury: integracao.splitByTreasury,
+      itemAccounts: integracao.itemAccounts,
       statusMessage: integracao.statusMessage,
       lastSyncAt: integracao.lastSyncAt,
       updatedAt: integracao.updatedAt,

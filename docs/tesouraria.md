@@ -56,6 +56,8 @@ O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela bus
 | `PUT conciliacao/:manualId/nao-consta`                          | Marca o manual como "não consta no banco"                                                 |
 | `DELETE conciliacao/:manualId/nao-consta`                       | Devolve o manual para a conciliação                                                       |
 
+As tesourarias de evento e de congregação têm rotas próprias (`TesourariasController`), na seção abaixo.
+
 ## Dizimistas são os membros
 
 - **Não há cadastro de dizimista:** todo membro da igreja (`User.memberChurchId`, ver `docs/membros.md`) é um dizimista em potencial. A lista de dizimistas é a lista de membros; quem entra e sai é o admin, em Membros. A tesouraria não adiciona nem tira ninguém.
@@ -94,6 +96,7 @@ O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela bus
   - Data: o dia da transação **em Brasília** (uma transação às 01:30 UTC do dia 4 é do dia 3).
 - Credencial recusada ou integração desligada → 400 com a mensagem; falha de rede ou da Pluggy → 502 ("tente de novo em alguns minutos"). Depois de importar, `lastSyncAt` é atualizado (o card da integração mostra "Última leitura há…").
 - Por enquanto a importação é **por botão**: não há webhook da Pluggy nem rotina agendada.
+- **A conta de cada movimento** (`account`) vem da **divisão dos bancos** da Pluggy (`splitByTreasury` + `itemAccounts`, `contaDoBanco`): sem divisão, tudo é da Administrativa; com ela, cada banco (Item) é da Administrativa, de Eventos ou de Congregações, e o movimento guarda o banco de onde veio (`bankItemId`). Movimento das contas de Eventos e de Congregações **não** vira dízimo nem fica ligado a membro (`OTHER_INCOME`/`OTHER_EXPENSE`): a categoria dele é a da alocação. Salvar a divisão reconta a conta dos movimentos já importados pelo banco de onde vieram (os de antes do `bankItemId` ficam na Administrativa).
 
 ## Planilha de dízimos
 
@@ -117,11 +120,40 @@ Para trazer o histórico de quem já dizimava antes do sistema: uma planilha com
 - **Não consta no banco** (`marcarNaoConsta`): `PUT conciliacao/:manualId/nao-consta` marca, `DELETE` desmarca. Só lançamento `MANUAL` (400) e não conciliado (409). Grava `notInBankAt` e `notInBankById`. O marcado sai da fila e das sugestões, e do filtro "pendente" de Lançamentos; **continua nos totais**, como todo manual sem par. Conciliar um marcado apaga a marca (o banco mostrou que constava). Na tela, `naoConstaNoBanco` em cada lançamento.
 - **Linhas** (`listar`): `sugerido`, `so_banco`, `so_manual`, `nao_consta` e `conciliado`, nessa ordem de prioridade e da data mais recente. Um par conciliado aparece se qualquer ponta cai no período. Resumo: quantos de cada (`naoConsta` inclusive) e o saldo (entradas − saídas) do que está só de um lado.
 
+## Tesourarias de evento e de congregação
+
+`TesourariasService` / `TesourariasController`, em `/churches/:churchId/tesouraria/tesourarias`. O dinheiro é todo da igreja; a tesouraria é o centro de custo, e o extrato da conta dela é **distribuído** (alocado) entre as tesourarias.
+
+- **A conta:** com os bancos divididos e algum banco de Eventos (ou de Congregações), as tesourarias desse tipo distribuem dessa conta (`temBancoProprio`). Sem isso, distribuem da **conta única**, a da Administrativa: o que vai para um evento ou congregação **sai dos totais da Administrativa** (o resumo de Lançamentos desconta as alocações) e da conciliação de lá (movimento com alocação não aparece como pendente). O que a Administrativa já conciliou com um manual não é oferecido. O "a distribuir" olha 365 dias para trás.
+- **Modelo:** `Treasury` (tipo `EVENT` ou `CONGREGATION`; o evento do sistema — um por tesouraria —, ou nome e data do evento fora do sistema, ou nome e local da congregação, que nasce com ela; fechamento: quando, por quem), `TreasuryAllocation` (movimento, tesouraria, valor, categoria; uma por movimento e tesouraria — trazer de novo soma), `TreasuryEntry` (o lançamento manual do evento) e `TreasuryPaymentLink` (o pagamento do evento diante do extrato: conciliado com um movimento ou "não consta no banco").
+- **Lançamentos do sistema (só no evento):** os **pagamentos pagos** (`PAID`) do evento da tesouraria — inscrição ("Ingressos") ou só produtos ("Produtos"), com o nome de quem pagou e a forma — e os manuais da tesouraria. A data do pagamento é a da última mudança dele (`updatedAt`): o pagamento não guarda quando foi pago. Na tela, o id é `pagamento:<id>` ou `manual:<id>`.
+- **Conciliar:** um movimento com um ou vários lançamentos do sistema; a soma (entradas menos saídas) tem de **bater ao centavo** com o banco (o que falta do movimento, ou a alocação que já existe) — a tarifa, lança-se como saída e marca-se junto. O movimento ainda livre vem para a tesouraria com a categoria do primeiro lançamento. **Desfazer** apaga a alocação e solta os lançamentos. **Sugestão:** o mesmo `sugerirPares` da Administrativa (mesmo tipo e valor ao centavo, até 3 dias), entre o movimento inteiro ainda livre e o lançamento a conciliar — estado `sugerido` da linha. A conciliação automática pelo código do gateway não existe: o extrato da Pluggy não traz o código da venda.
+- **Distribuir:** `POST …/alocacoes` com `partes: [{ movimentoId, valor? }]` — sem valor, o que falta do movimento; com valor, só uma parte (rateio), e o resto continua a distribuir. Nunca passa do que falta (400). Devolver apaga a alocação. A categoria é texto, das listas de Eventos e de Congregações (`CATEGORIAS`, em `tesourarias.ts`), conferida contra o tipo do movimento.
+- **Quem:** a equipe da igreja (admin e tesouraria; dev e super admin) vê todas, cria, fecha, reabre e vê os não alocados. O **tesoureiro(a) completo** de um evento (`@AceitaTesoureiroDoEvento` + recorte no service) vê e mexe só na tesouraria desse evento — lista, conciliação, lançamentos, distribuir, conciliar — e não fecha (403). Fechada, nada mais muda (400) até reabrir. Módulo do plano: Tesouraria.
+
+| Rota (`/churches/:churchId/tesouraria`) | O que faz |
+| --- | --- |
+| `GET tesourarias?tipo=EVENT\|CONGREGATION` | As tesourarias, com entradas, saídas, resultado e fechamento |
+| `POST tesourarias` | `{ kind, eventId? \| name, date?, location? }` |
+| `GET tesourarias/nao-alocados?tipo=` | O que a conta ainda não distribuiu, com os bancos e se a conta é própria |
+| `GET tesourarias/:id` | A tesouraria, a conta, os bancos, `podeFechar` |
+| `POST` / `DELETE tesourarias/:id/fechamento` | Fecha / reabre |
+| `GET tesourarias/:id/conciliacao` | As linhas do diff (sugerido, só no banco, só no evento, não consta, conciliado) e `aConciliar` |
+| `GET tesourarias/:id/lancamentos` | Os do sistema e o que veio do banco sem par |
+| `POST tesourarias/:id/lancamentos` | Lançamento manual do evento (a congregação não tem) |
+| `POST tesourarias/:id/alocacoes` | Distribuir (inteiro ou rateio) |
+| `PATCH` / `DELETE tesourarias/:id/alocacoes/:alocacaoId` | Categoria / devolver |
+| `POST tesourarias/:id/conciliacao` | `{ movimentoId, lancamentoIds }` |
+| `DELETE tesourarias/:id/conciliacao/:movimentoId` | Desfaz |
+| `POST tesourarias/:id/nao-consta` | `{ lancamentoIds, naoConsta }` |
+
 ## Auditoria
 
 `FinancialEntry` passa pelo log de auditoria como as outras tabelas, com o rótulo "Lançamento da tesouraria" (`MODEL_LABELS`), e é tabela principal (`MAIN_MODELS`); o valor do dízimo aparece nas alterações de "Cadastro". O rótulo "Dizimista" (`Tither`) ficou só para as linhas antigas do log. A importação grava um `createMany` só.
 
 ## Migration
+
+`20261012170000_tesourarias`: os enums `TreasuryAccount` e `TreasuryKind`; `splitByTreasury` e `itemAccounts` na Pluggy (sem divisão por padrão); `account` (padrão `ADMINISTRATIVE`) e `bankItemId` em `financial_entries`; e as tabelas `treasuries`, `treasury_allocations`, `treasury_entries` e `treasury_payment_links`. Nada existente muda de valor: o que já foi importado nasce da Administrativa. Testada aplicando todas as migrations num Postgres vazio e rodando o fluxo inteiro contra ele (criar, distribuir e ratear, conciliar e desfazer, sugestão, não consta, fechar, tesoureiro completo, a Administrativa sem o distribuído, a conta de Eventos com a divisão).
 
 `20261011190000_conciliacao`: só adiciona as três colunas de conciliação em `financial_entries` (nulas), o índice único e a chave estrangeira; nada existente muda.
 

@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { FinancialCategory, FinancialEntryType } from '@prisma/client';
+import {
+  FinancialCategory,
+  FinancialEntryType,
+  TreasuryAccount,
+} from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { diaEmBrasilia } from './categorias';
 
@@ -57,6 +61,8 @@ export class DizimistasService {
             userId: { in: membros.map((m) => m.id) },
             // o manual conciliado já conta pelo do banco, que herdou o dizimista
             reconciledWithId: null,
+            // dízimo é da Administrativa (os outros bancos não têm dizimista)
+            account: TreasuryAccount.ADMINISTRATIVE,
           },
           select: { userId: true, amount: true, date: true },
         })

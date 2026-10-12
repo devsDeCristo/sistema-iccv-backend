@@ -31,6 +31,9 @@ model Church {
   members            User[]                  @relation("MemberOf")
   membershipRequests User[]                  @relation("MembershipRequest")
   families           Family[]
+  /// Tesourarias de evento e de congregação (a Administrativa é a própria
+  /// igreja). Ver `Treasury`.
+  treasuries         Treasury[]
 
   /// O plano da igreja: quais módulos ela usa (ver `Plan`). Sem plano, ela não
   /// tem módulo nenhum — só o painel básico (Início, Usuários e Membros, que toda
@@ -380,6 +383,8 @@ model Event {
   news       News[]
   products   EventProduct[]
   treasurers EventTreasurer[]
+  /// A tesouraria do evento, quando criada (Tesouraria › Eventos)
+  treasury   Treasury?
 
   @@index([churchId])
   @@map("events")
@@ -518,6 +523,10 @@ model Payment {
   /// Quem registrou a entrega. Id solto, como em `minorApprovalReviewedById`:
   /// o registro não pode sumir se o administrador for removido depois.
   productsDeliveredById String?
+
+  /// O pagamento diante do extrato, na tesouraria do evento. Ver
+  /// `TreasuryPaymentLink`.
+  treasuryLink TreasuryPaymentLink?
 
   @@unique([userId, eventId, roleRegistrationId])
   @@index([eventId])
@@ -664,6 +673,14 @@ model PluggyIntegration {
   /// segredo: sem o clientSecret não abre nada. É por aqui que o webhook, que
   /// só traz o `itemId`, encontra a igreja.
   itemIds String[] @default([])
+
+  /// Bancos divididos por tesouraria? Desligado ("sem restrição"), todo o
+  /// extrato é da Administrativa, e as tesourarias de evento e de congregação
+  /// distribuem dele.
+  splitByTreasury Boolean @default(false)
+  /// Com a divisão: de qual tesouraria é cada banco (`itemId` →
+  /// `TreasuryAccount`). Banco que não está aqui é da Administrativa.
+  itemAccounts    Json    @default("{}")
 
   enabled Boolean @default(true)
 
@@ -1385,6 +1402,19 @@ model FinancialEntry {
   notInBankAt   DateTime?
   notInBankById String?
 
+  /// De qual conta é o movimento do banco: a do banco (Item) de onde veio,
+  /// pela divisão da Pluggy. Manual é sempre da Administrativa.
+  account    TreasuryAccount @default(ADMINISTRATIVE)
+  /// O banco (Item da Pluggy) de onde veio; é por ele que a divisão reconta
+  /// a conta dos movimentos já importados
+  bankItemId String?
+
+  /// Quanto deste movimento foi para cada tesouraria de evento ou congregação
+  allocations      TreasuryAllocation[]
+  /// Os lançamentos e pagamentos da tesouraria do evento conciliados com ele
+  treasuryEntries  TreasuryEntry[]
+  treasuryPayments TreasuryPaymentLink[]
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdById String?
@@ -1395,6 +1425,7 @@ model FinancialEntry {
 
   @@unique([churchId, externalId])
   @@index([churchId, date])
+  @@index([churchId, account, date])
   @@index([userId])
   @@map("financial_entries")
 }
@@ -1496,4 +1527,135 @@ model Plan {
   updatedAt   DateTime       @updatedAt
 
   @@map("plans")
+}
+
+/// A conta de uma tesouraria: para qual delas um banco (e o extrato dele)
+/// serve. Ver `PluggyIntegration.itemAccounts`.
+enum TreasuryAccount {
+  ADMINISTRATIVE
+  EVENTS
+  CONGREGATIONS
+}
+
+enum TreasuryKind {
+  EVENT
+  CONGREGATION
+}
+
+/// A tesouraria de um evento ou de uma congregação. O dinheiro é todo da
+/// igreja (o CNPJ é dela): a tesouraria é o centro de custo, e o extrato da
+/// conta de Eventos (ou de Congregações) é distribuído entre elas
+/// (`TreasuryAllocation`).
+///
+/// ponytail: a congregação nasce com a tesouraria (nome e local aqui). Quando
+/// houver o cadastro de congregações, vira uma tabela própria e a tesouraria
+/// passa a apontar para ela, como a de evento aponta para o evento.
+model Treasury {
+  id       String       @id @default(uuid())
+  churchId String
+  kind     TreasuryKind
+
+  /// O evento do sistema. Nulo na de evento fora do sistema (um jantar, uma
+  /// rifa) e na de congregação. Um evento tem uma tesouraria só.
+  eventId  String?   @unique
+  /// O nome: do evento fora do sistema ou da congregação. No evento do
+  /// sistema, o nome vem do evento.
+  name     String?
+  /// O dia do evento fora do sistema
+  date     DateTime? @db.Date
+  /// Bairro, distrito ou cidade da congregação
+  location String?
+
+  /// Fechada: nada mais entra, sai ou muda. Não é o fim do evento — o
+  /// fechamento vem depois, com o dinheiro todo assentado.
+  closedAt     DateTime?
+  closedById   String?
+  closedByName String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  church      Church                @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  event       Event?                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  allocations TreasuryAllocation[]
+  entries     TreasuryEntry[]
+  payments    TreasuryPaymentLink[]
+
+  @@index([churchId, kind])
+  @@map("treasuries")
+}
+
+/// Quanto de um movimento do banco foi para uma tesouraria. Um movimento pode
+/// ir para mais de uma (rateio: a gráfica que imprimiu os banners de dois
+/// eventos); o que falta alocar é o valor dele menos as alocações.
+model TreasuryAllocation {
+  id         String  @id @default(uuid())
+  treasuryId String
+  entryId    String
+  amount     Decimal @db.Decimal(12, 2)
+  /// Nula até alguém classificar ("Sem categoria"). Texto, porque as
+  /// categorias são da conta (Eventos ou Congregações), não as da
+  /// Administrativa.
+  category   String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  treasury Treasury       @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+  entry    FinancialEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([treasuryId, entryId])
+  @@index([entryId])
+  @@map("treasury_allocations")
+}
+
+/// Lançamento manual da tesouraria de um evento: o dinheiro que não passa
+/// pelos pagamentos (uma venda no intervalo, um gasto pago em espécie).
+/// Entra a conciliar.
+model TreasuryEntry {
+  id          String             @id @default(uuid())
+  treasuryId  String
+  type        FinancialEntryType
+  category    String
+  description String
+  amount      Decimal            @db.Decimal(12, 2)
+  date        DateTime           @db.Date
+  method      FinancialMethod?
+
+  /// O movimento do banco que é este dinheiro (conciliado)
+  movementId  String?
+  /// Confirmado que nunca vai aparecer no extrato
+  notInBankAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  treasury Treasury        @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+  movement FinancialEntry? @relation(fields: [movementId], references: [id], onDelete: SetNull)
+
+  @@index([treasuryId])
+  @@map("treasury_entries")
+}
+
+/// Um pagamento do evento diante do extrato, na tesouraria do evento:
+/// conciliado com um movimento, ou "não consta no banco". Sem linha aqui, o
+/// pagamento está a conciliar.
+model TreasuryPaymentLink {
+  paymentId   String    @id
+  treasuryId  String
+  movementId  String?
+  notInBankAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment  Payment         @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  treasury Treasury        @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+  movement FinancialEntry? @relation(fields: [movementId], references: [id], onDelete: SetNull)
+
+  @@index([treasuryId])
+  @@map("treasury_payment_links")
 }

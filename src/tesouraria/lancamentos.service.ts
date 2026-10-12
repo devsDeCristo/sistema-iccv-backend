@@ -11,10 +11,11 @@ import {
   FinancialEntry,
   FinancialEntrySource,
   FinancialEntryType,
+  TreasuryAccount,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { PluggyService } from 'src/pluggy/pluggy.service';
+import { PluggyService, contaDoBanco } from 'src/pluggy/pluggy.service';
 import {
   categoriaCabeNoTipo,
   diaEmBrasilia,
@@ -38,6 +39,12 @@ export const PARA_TELA = {
  * do banco (ver `ConciliacaoService`).
  */
 export const CONTA_NOS_TOTAIS = { reconciledWithId: null };
+
+/**
+ * A Administrativa é a conta dela: os movimentos dos bancos de Eventos e de
+ * Congregações (com a divisão da Pluggy) são das tesourarias de lá.
+ */
+export const DA_ADMINISTRATIVA = { account: TreasuryAccount.ADMINISTRATIVE };
 
 /** Filtro do status de conciliação: dos dois lados do vínculo */
 const CONCILIADO: Prisma.FinancialEntryWhereInput = {
@@ -97,11 +104,12 @@ export class LancamentosService {
 
     const doPeriodo: Prisma.FinancialEntryWhereInput = {
       churchId,
+      ...DA_ADMINISTRATIVA,
       date: { gte: paraDia(de), lte: paraDia(ate) },
     };
     const busca = q.busca?.trim();
 
-    const [lancamentos, porTipo, dizimos] = await Promise.all([
+    const [lancamentos, porTipo, dizimos, distribuidos] = await Promise.all([
       this.prisma.financialEntry.findMany({
         where: {
           ...doPeriodo,
@@ -141,10 +149,26 @@ export class LancamentosService {
         },
         _sum: { amount: true },
       }),
+      // sem a divisão dos bancos, o evento e a congregação distribuem do
+      // extrato daqui: o que foi para eles sai dos totais da Administrativa
+      this.prisma.treasuryAllocation.findMany({
+        where: { entry: { ...doPeriodo, ...CONTA_NOS_TOTAIS } },
+        select: {
+          amount: true,
+          entry: { select: { type: true, category: true } },
+        },
+      }),
     ]);
 
+    const distribuido = (
+      filtro: (e: { type: string; category: string }) => boolean,
+    ) =>
+      distribuidos
+        .filter((d) => filtro(d.entry))
+        .reduce((total, d) => total + Number(d.amount), 0);
     const soma = (tipo: FinancialEntryType) =>
-      Number(porTipo.find((g) => g.type === tipo)?._sum.amount ?? 0);
+      Number(porTipo.find((g) => g.type === tipo)?._sum.amount ?? 0) -
+      distribuido((e) => e.type === tipo);
     const entradas = soma(FinancialEntryType.INCOME);
     const saidas = soma(FinancialEntryType.EXPENSE);
 
@@ -155,7 +179,10 @@ export class LancamentosService {
         entradas: arredondar(entradas),
         saidas: arredondar(saidas),
         saldo: arredondar(entradas - saidas),
-        dizimos: arredondar(Number(dizimos._sum.amount ?? 0)),
+        dizimos: arredondar(
+          Number(dizimos._sum.amount ?? 0) -
+            distribuido((e) => e.category === FinancialCategory.TITHE),
+        ),
       },
       lancamentos: lancamentos.map(paraTela),
       /** chegou no teto: a tela avisa para encurtar o período */
@@ -263,7 +290,7 @@ export class LancamentosService {
   async importar(churchId: string, actorId?: string) {
     const integracao = await this.prisma.pluggyIntegration.findUnique({
       where: { churchId },
-      select: { lastSyncAt: true },
+      select: { lastSyncAt: true, splitByTreasury: true, itemAccounts: true },
     });
     if (!integracao) {
       throw new NotFoundException(
@@ -311,13 +338,31 @@ export class LancamentosService {
     );
 
     const { count } = await this.prisma.financialEntry.createMany({
-      data: transacoes.map((t) => ({
-        churchId,
-        source: FinancialEntrySource.PLUGGY,
-        createdById: actorId ?? null,
-        updatedById: actorId ?? null,
-        ...lancamentoDaTransacao(t, porCpf),
-      })),
+      data: transacoes.map((t) => {
+        // cada movimento vai para a conta do banco de onde veio (a divisão
+        // da Pluggy); só a Administrativa conhece dízimo e dizimista — na
+        // conta de Eventos ou de Congregações, a categoria é a da alocação
+        const account = contaDoBanco(integracao, t.itemId);
+        const lancamento = lancamentoDaTransacao(t, porCpf);
+        return {
+          churchId,
+          source: FinancialEntrySource.PLUGGY,
+          createdById: actorId ?? null,
+          updatedById: actorId ?? null,
+          ...lancamento,
+          ...(account === TreasuryAccount.ADMINISTRATIVE
+            ? {}
+            : {
+                category:
+                  lancamento.type === FinancialEntryType.INCOME
+                    ? FinancialCategory.OTHER_INCOME
+                    : FinancialCategory.OTHER_EXPENSE,
+                userId: null,
+              }),
+          account,
+          bankItemId: t.itemId,
+        };
+      }),
       skipDuplicates: true,
     });
 

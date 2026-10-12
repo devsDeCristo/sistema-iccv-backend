@@ -1,13 +1,36 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { TreasuryAccount } from '@prisma/client';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
+
+/** Cada valor da divisão precisa ser uma conta de tesouraria */
+@ValidatorConstraint({ name: 'contasDosBancos' })
+class ContasDosBancos implements ValidatorConstraintInterface {
+  validate(valor: unknown) {
+    return (
+      !!valor &&
+      typeof valor === 'object' &&
+      Object.values(valor).every((conta) =>
+        Object.values(TreasuryAccount).includes(conta as TreasuryAccount),
+      )
+    );
+  }
+
+  defaultMessage() {
+    return 'Cada banco vai para ADMINISTRATIVE, EVENTS ou CONGREGATIONS';
+  }
+}
 
 export class SavePluggyDto {
   /**
@@ -44,4 +67,23 @@ export class SavePluggyDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  /** Bancos divididos por tesouraria (cada banco é de uma). Omitido, mantém. */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  splitByTreasury?: boolean;
+
+  /**
+   * Com a divisão: de qual tesouraria é cada banco (`itemId` → conta).
+   * Banco fora daqui é da Administrativa. Omitido, mantém.
+   */
+  @ApiPropertyOptional({
+    example: { 'c4a6d91e-…': 'EVENTS' },
+    description: 'itemId → ADMINISTRATIVE | EVENTS | CONGREGATIONS',
+  })
+  @IsOptional()
+  @IsObject()
+  @Validate(ContasDosBancos)
+  itemAccounts?: Record<string, TreasuryAccount>;
 }
