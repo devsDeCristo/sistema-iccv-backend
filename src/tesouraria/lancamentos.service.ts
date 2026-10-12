@@ -25,7 +25,7 @@ import {
   CreateEntryDto,
   ListEntriesQuery,
   UpdateEntryDto,
-} from './dto/financeiro.dto';
+} from './dto/tesouraria.dto';
 
 /** O que a tela precisa de cada lançamento, inclusive o vínculo da conciliação */
 export const PARA_TELA = {
@@ -187,7 +187,7 @@ export class LancamentosService {
   /**
    * No importado do banco, valor, data, tipo e forma são o que o banco diz e
    * não mudam; categoria, descrição e dizimista sim — é para isso que o
-   * financeiro abre o lançamento importado.
+   * tesouraria abre o lançamento importado.
    */
   async atualizar(
     churchId: string,

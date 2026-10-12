@@ -102,7 +102,7 @@ describe('ChurchService — igreja desativada', () => {
     // a releitura já vem sem o vínculo da igreja inativa
     const { service, tx } = montar(null, [
       { id: 'u1', role: Role.ADMIN, churchRoles: [] },
-      { id: 'u2', role: Role.FINANCE, churchRoles: [] },
+      { id: 'u2', role: Role.TESOURARIA, churchRoles: [] },
     ]);
 
     await service.update('igreja-1', { name: 'Igreja', status: 'INACTIVE' });
@@ -127,7 +127,7 @@ describe('ChurchService — igreja desativada', () => {
       {
         id: 'u1',
         role: Role.ADMIN,
-        churchRoles: [{ churchId: 'igreja-2', role: Role.FINANCE }],
+        churchRoles: [{ churchId: 'igreja-2', role: Role.TESOURARIA }],
       },
     ]);
 
@@ -135,7 +135,7 @@ describe('ChurchService — igreja desativada', () => {
 
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
-      data: { role: Role.FINANCE },
+      data: { role: Role.TESOURARIA },
     });
   });
 

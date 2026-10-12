@@ -29,8 +29,8 @@ import {
 /**
  * Membros e famílias da igreja: só o admin dela (`ADMIN_ROLES` +
  * `ChurchTenantGuard`, que cobra o perfil de admin **nesta** igreja). O
- * financeiro não entra aqui — ele vê os membros como dizimistas, em
- * `GET financeiro/dizimistas`, sem pedidos nem famílias. O service ainda confere
+ * tesouraria não entra aqui — ela vê os membros como dizimistas, em
+ * `GET tesouraria/dizimistas`, sem pedidos nem famílias. O service ainda confere
  * que a pessoa ou a família da URL é desta igreja.
  */
 @ApiTags('membros')

@@ -30,7 +30,7 @@ export class PermissoesEmMassaDto {
 
   @ApiProperty({
     nullable: true,
-    description: 'Admin (2) ou financeiro (3); null tira o perfil na igreja',
+    description: 'Admin (2) ou tesouraria (3); null tira o perfil na igreja',
   })
   @ValidateIf((dto) => dto.role !== null)
   @IsIn(CHURCH_ROLES)

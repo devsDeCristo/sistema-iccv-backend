@@ -26,9 +26,9 @@ const PESSOAS: Record<string, { role: number; churchRoles: any[] }> = {
     role: Role.ADMIN,
     churchRoles: [{ churchId: IGREJA_A, role: Role.ADMIN }],
   },
-  'financeiro-a': {
-    role: Role.FINANCE,
-    churchRoles: [{ churchId: IGREJA_A, role: Role.FINANCE }],
+  'tesouraria-a': {
+    role: Role.TESOURARIA,
+    churchRoles: [{ churchId: IGREJA_A, role: Role.TESOURARIA }],
   },
   super: { role: Role.SUPER_ADMIN, churchRoles: [] },
   dev: { role: Role.DEV, churchRoles: [] },
@@ -69,11 +69,11 @@ describe('DashboardService — a igreja pedida na URL', () => {
     expect(conferidas).toEqual([]);
   });
 
-  it('barra o financeiro do mesmo jeito', async () => {
+  it('barra a tesouraria do mesmo jeito', async () => {
     const { service } = montar();
 
     await expect(
-      service.overview('financeiro-a', IGREJA_B),
+      service.overview('tesouraria-a', IGREJA_B),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 

@@ -78,7 +78,7 @@ export class ChurchTenantGuard implements CanActivate {
 
   /**
    * Perfis de igreja exigidos pela rota. `@Roles(...ADMIN_ROLES)` cobra "admin
-   * **nesta** igreja" e deixa o financeiro de fora — que é o desenho pedido
+   * **nesta** igreja" e deixa a tesouraria de fora — que é o desenho pedido
    * para a configuração de cobrança: quem dá baixa em pagamento não é quem
    * decide para qual conta o dinheiro vai.
    */

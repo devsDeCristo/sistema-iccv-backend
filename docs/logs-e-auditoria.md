@@ -143,7 +143,7 @@ paginação do log de atividades, com resumo de sucesso/falha.
 | Dinheiro do evento | `GET /events/:idEvent/payments/logs` | `ADMIN_AREA_ROLES`, restrito à própria igreja |
 
 Tela correspondente: `ic-front/docs/logs-e-logins.md` (atividades e login) e
-`ic-front/docs/admin-pagamentos.md` (histórico financeiro do evento).
+`ic-front/docs/admin-pagamentos.md` (histórico tesouraria do evento).
 
 ## Testes
 

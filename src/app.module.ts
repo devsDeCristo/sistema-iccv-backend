@@ -16,7 +16,7 @@ import { CryptoModule } from './crypto/crypto.module';
 import { PaymentModule } from './payment/payment.module';
 import { PaymentProviderModule } from './payment-providers/payment-provider.module';
 import { PluggyModule } from './pluggy/pluggy.module';
-import { FinanceiroModule } from './financeiro/financeiro.module';
+import { TesourariaModule } from './tesouraria/tesouraria.module';
 import { MembrosModule } from './membros/membros.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
@@ -49,7 +49,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     PaymentModule,
     PaymentProviderModule,
     PluggyModule,
-    FinanceiroModule,
+    TesourariaModule,
     MembrosModule,
     WebhooksModule,
     CronModule,

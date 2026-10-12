@@ -139,14 +139,14 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   trocar CPF/e-mail sem a validação de `updateMe`).
 - **Quem a igreja alcança (`userChurchScope`):** quem tem vínculo de painel com ela, quem está inscrito ou na lista de espera de um evento dela, **os membros dela e quem pediu para ser membro** (`memberChurchId`/`requestedChurchId`). Os dois últimos entraram quando a tela de Usuários passou a ser só do super admin: a igreja chega numa pessoa pelos inscritos do evento e por Membros, e um membro que nunca se inscreveu em evento precisa abrir o cadastro. Vale para ler, alterar e para a lista `GET /users` (que as telas de evento usam).
 - **Quem alcança o cadastro de quem (`assertUserInScope`, `assertCanReachUser`):**
-  - **ler** (`GET /users/:id`, `/users/:id/groups`): admin e financeiro das
-    igrejas da pessoa. O financeiro **não recebe saúde nem religião**
+  - **ler** (`GET /users/:id`, `/users/:id/groups`): admin e tesouraria das
+    igrejas da pessoa. A tesouraria **não recebe saúde nem religião**
     (`CAMPOS_SENSIVEIS`, LGPD art. 11); só quem é admin de uma igreja da
     pessoa, o super admin/dev ou o próprio titular recebem;
   - **alterar** (`PUT /users/:id`, foto): só quem é **admin** de uma igreja
-    da pessoa. Quem é admin na A e financeiro na B não edita quem só tem
+    da pessoa. Quem é admin na A e tesouraria na B não edita quem só tem
     relação com a B. Até 09/10/2026 o escopo de edição e da foto incluía as
-    igrejas onde ele era só financeiro;
+    igrejas onde ele era só tesouraria;
   - fora disso, `403` ("Este usuário é de outra igreja").
 - **Grupos da pessoa (`GET /users/:id/groups`):** para o painel, só os de
   eventos das igrejas de quem pede (antes vinham os de todas, com o link do
@@ -160,7 +160,7 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   perfil.
 - **E-mail e CPF de quem tem painel em outra igreja:** quem não é super admin
   só troca o e-mail ou o CPF de outra pessoa com vínculo de painel
-  (admin/financeiro) se administrar **todas** as igrejas dela
+  (admin/tesouraria) se administrar **todas** as igrejas dela
   (`assertAdministraTodasAsIgrejasDe`); senão, `403`. Os outros campos
   continuam editáveis dentro do escopo.
   - **Por quê (09/10/2026):** estar no escopo basta para ter a pessoa inscrita
@@ -176,7 +176,7 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
 - **Conceder Super Admin:** só quem já é super admin concede.
 - **Conceder Dev:** só quem já é Dev concede (super admin não pode criar Dev).
 - **`role`** só aceita `DEV`, `SUPER_ADMIN` ou `USER` nesta rota — Admin e
-  Financeiro são definidos por igreja em `churchRoles`, não pelo perfil
+  Tesouraria são definidos por igreja em `churchRoles`, não pelo perfil
   global.
 
 ## Permissão em massa (`PUT /users/permissions`)
@@ -184,7 +184,7 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
 O mesmo perfil, numa igreja, para várias pessoas de uma vez — a barra de
 seleção da tela de usuários.
 
-- **Corpo:** `{ userIds, churchId, role }`. `role` é admin (2) ou financeiro
+- **Corpo:** `{ userIds, churchId, role }`. `role` é admin (2) ou tesouraria
   (3); `null` tira o perfil da pessoa naquela igreja. Até 200 pessoas por
   pedido (`MAXIMO_EM_MASSA`).
 - **Antes de tudo:** quem pede precisa ser admin (perfil efetivo) — a edição

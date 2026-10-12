@@ -37,7 +37,7 @@ Arquivos: `src/church/church.controller.ts`, `src/church/church.service.ts`,
 - **`ACTIVE`:** aparece no filtro de igrejas da home.
 - **`INACTIVE`:** a igreja continua no sistema com eventos e histórico, mas
   some do filtro de quem procura evento.
-- **Igreja inativa não dá painel.** Admin e financeiro dela passam a ser
+- **Igreja inativa não dá painel.** Admin e tesouraria dela passam a ser
   usuários comuns ali: não entram na área de admin pela igreja nem alcançam
   dados dela. Quem tem vínculo também em outra igreja ativa continua com o
   perfil de lá, só lá. Dev e super admin não mudam.

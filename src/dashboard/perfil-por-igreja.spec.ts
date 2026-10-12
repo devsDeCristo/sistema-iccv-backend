@@ -2,7 +2,7 @@ import { Role } from '../auth/roles';
 import { DashboardService } from './dashboard.service';
 
 /**
- * Perfil por igreja na home: quem é admin na A e financeiro na B não vê a B
+ * Perfil por igreja na home: quem é admin na A e tesouraria na B não vê a B
  * como admin. As consultas pesadas são dublês — o que se confere aqui é qual
  * home sai e com qual recorte cada bloco é montado.
  */
@@ -10,7 +10,7 @@ const misto = {
   role: Role.ADMIN,
   churchRoles: [
     { churchId: 'A', role: Role.ADMIN },
-    { churchId: 'B', role: Role.FINANCE },
+    { churchId: 'B', role: Role.TESOURARIA },
   ],
 };
 
@@ -39,12 +39,12 @@ function montar() {
 }
 
 describe('DashboardService — perfil por igreja', () => {
-  it('abrindo a B, onde é financeiro: home do financeiro, sem mural nem inscrições', async () => {
+  it('abrindo a B, onde é tesouraria: home da tesouraria, sem mural nem inscrições', async () => {
     const { service, inscricoes, mural, tesouraria } = montar();
 
     const home = await service.overview('u', 'B');
 
-    expect(home.role).toBe(Role.FINANCE);
+    expect(home.role).toBe(Role.TESOURARIA);
     expect(tesouraria).toHaveBeenCalled();
     expect(inscricoes).not.toHaveBeenCalled();
     expect(mural).not.toHaveBeenCalled();

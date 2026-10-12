@@ -25,9 +25,9 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
 /**
  * Integração da igreja com a Pluggy (Configurações › Integrações).
  *
- * `ADMIN_AREA_ROLES`: além do admin, o financeiro — a Pluggy só lê os bancos,
+ * `ADMIN_AREA_ROLES`: além do admin, a tesouraria — a Pluggy só lê os bancos,
  * não move dinheiro, e alimenta o módulo dele. O `ChurchTenantGuard` cobra o
- * vínculo **nesta** igreja, então o financeiro de uma não alcança a credencial
+ * vínculo **nesta** igreja, então a tesouraria de uma não alcança a credencial
  * da outra trocando o `:churchId` da URL. Nenhuma resposta devolve credencial.
  */
 @ApiTags('pluggy')

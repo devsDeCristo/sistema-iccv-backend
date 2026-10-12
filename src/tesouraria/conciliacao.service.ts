@@ -40,7 +40,7 @@ const ORDEM: Record<EstadoDaLinha, number> = {
  * totais (vale o do banco) e o do banco herda a categoria e o dizimista que a
  * pessoa deu no manual.
  *
- * Como nos outros services do financeiro, tudo é pela igreja da rota: os dois
+ * Como nos outros services da tesouraria, tudo é pela igreja da rota: os dois
  * lados do par precisam ser dela.
  */
 @Injectable()

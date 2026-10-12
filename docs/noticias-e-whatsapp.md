@@ -223,7 +223,7 @@ Arquivos: `src/news/agendamento.ts` (calendário, com testes), `src/news/news.se
 
 ### Rotas (`/churches/:churchId/whatsapp`)
 
-Protegidas por `JwtAuthGuard` + `RolesGuard` (`ADMIN_ROLES`, fora o financeiro)
+Protegidas por `JwtAuthGuard` + `RolesGuard` (`ADMIN_ROLES`, fora a tesouraria)
 + `ChurchTenantGuard` (o `:churchId` da URL precisa ser uma igreja administrada
 por quem chama).
 

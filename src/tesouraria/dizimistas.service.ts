@@ -14,7 +14,7 @@ export const arredondar = (valor: number) => Math.round(valor * 100) / 100;
 
 /**
  * Dizimistas da igreja: **todos os membros** dela — todo membro é um dizimista
- * em potencial, e não há cadastro à parte. O que o financeiro ajusta é o
+ * em potencial, e não há cadastro à parte. O que a tesouraria ajusta é o
  * valor do dízimo de cada um (`User.titheAmount`), que separa dízimo de oferta
  * na importação do banco.
  *

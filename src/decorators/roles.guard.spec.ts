@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
+import { ACEITA_TESOUREIRO_KEY } from 'src/auth/tesoureiro-do-evento';
 import { RolesGuard } from './roles.guard';
 
 /**
@@ -9,10 +10,21 @@ import { RolesGuard } from './roles.guard';
  * efetivo, a partir dos vínculos que valem (o Prisma já os entrega sem os de
  * igreja inativa).
  */
-function montar(pessoa: object | null) {
-  const prisma = { user: { findUnique: jest.fn().mockResolvedValue(pessoa) } };
+function montar(
+  pessoa: object | null,
+  { aceitaTesoureiro = false, tesoureiro = false } = {},
+) {
+  const prisma = {
+    user: { findUnique: jest.fn().mockResolvedValue(pessoa) },
+    eventTreasurer: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(tesoureiro ? { eventId: 'evento-1' } : null),
+    },
+  };
   const reflector = {
-    getAllAndOverride: () => ADMIN_AREA_ROLES,
+    getAllAndOverride: (chave: string) =>
+      chave === ACEITA_TESOUREIRO_KEY ? aceitaTesoureiro : ADMIN_AREA_ROLES,
   } as unknown as Reflector;
   const request = { user: { userId: 'u1' } as Record<string, unknown> };
   const context = {
@@ -50,5 +62,40 @@ describe('RolesGuard', () => {
     });
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  /**
+   * O tesoureiro(a) de evento é usuário comum: passa só em rota que o aceita,
+   * e o evento certo quem confere é o `EventTenantGuard`.
+   */
+  it('tesoureiro de evento passa em rota que o aceita', async () => {
+    const { guard, context } = montar(
+      { role: Role.USER, churchRoles: [] },
+      { aceitaTesoureiro: true, tesoureiro: true },
+    );
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it('tesoureiro de evento é barrado em rota que não o aceita', async () => {
+    const { guard, context } = montar(
+      { role: Role.USER, churchRoles: [] },
+      { tesoureiro: true },
+    );
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('rota que aceita tesoureiro não abre para quem não é tesoureiro', async () => {
+    const { guard, context } = montar(
+      { role: Role.USER, churchRoles: [] },
+      { aceitaTesoureiro: true },
+    );
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });

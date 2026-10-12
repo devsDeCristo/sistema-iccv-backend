@@ -48,8 +48,8 @@ const POR_PAGINA = 500;
 const selo = (churchId: string) => `pluggy:${churchId}`;
 
 /**
- * A credencial da Pluggy de cada igreja, para o módulo financeiro: guarda,
- * testa e lê o extrato das contas bancárias (`transacoes`), que o financeiro
+ * A credencial da Pluggy de cada igreja, para o módulo de tesouraria: guarda,
+ * testa e lê o extrato das contas bancárias (`transacoes`), que a tesouraria
  * importa como lançamentos.
  */
 @Injectable()

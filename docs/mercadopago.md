@@ -176,7 +176,7 @@ para que quem chama distinga "ninguém tentou pagar" de "a casa está fora do ar
 
 Como em sandbox o webhook não vem, a reconciliação é o caminho normal aqui. Ela
 roda de 3 em 3 horas, e existe um botão **Conferir no gateway** na aba
-Financeiro do evento que dispara a mesma rotina sob demanda, recortada àquele
+Tesouraria do evento que dispara a mesma rotina sob demanda, recortada àquele
 evento. O botão é **só do perfil dev**, na tela e na rota: cada clique fala com
 o gateway uma vez por cobrança pendente, e numa fila grande um clique repetido
 vira uma rajada de chamadas na conta da igreja.

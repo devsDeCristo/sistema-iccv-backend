@@ -131,7 +131,7 @@ const FINANCE_NOISE = new Set(['createdAt', 'updatedAt', 'updateAt']);
 
 /**
  * Campos grandes demais para copiar linha a linha. O retorno do PagBank tem
- * quilobytes de JSON, e o que interessa ao financeiro é que ele mudou.
+ * quilobytes de JSON, e o que interessa à tesouraria é que ele mudou.
  */
 const BULKY_FIELDS = new Set(['payload']);
 
@@ -500,7 +500,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       );
 
       if (FINANCE_MODELS.has(model)) {
-        await this.registrarNoFinanceiro({
+        await this.registrarNaTesouraria({
           model,
           action: params.action,
           before,
@@ -521,13 +521,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
    *
    * Roda ao lado da auditoria genérica e não no lugar dela — `Log` continua
    * guardando o retrato inteiro para quem investiga o sistema. Aqui a linha é
-   * do financeiro: valor, status e de onde veio a mudança, consultáveis por
+   * da tesouraria: valor, status e de onde veio a mudança, consultáveis por
    * evento e por pessoa sem abrir JSON.
    *
    * Nunca derruba a operação: um erro ao registrar a trilha não pode desfazer
    * um pagamento que já entrou. Vira aviso no log da aplicação.
    */
-  private async registrarNoFinanceiro(dados: {
+  private async registrarNaTesouraria(dados: {
     model: string;
     action: string;
     before: any;

@@ -32,27 +32,27 @@ import {
   ImportarPlanilhaDto,
   PreviaDaPlanilhaDto,
   UpdateEntryDto,
-} from './dto/financeiro.dto';
+} from './dto/tesouraria.dto';
 import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
 
 /**
- * Módulo financeiro da igreja: dizimistas e livro-caixa.
+ * Módulo de tesouraria da igreja: dizimistas e livro-caixa.
  *
- * Mesmo recorte da Pluggy: admin e financeiro, e o `ChurchTenantGuard` cobra
- * o vínculo **nesta** igreja — o financeiro de uma não lê o caixa da outra
+ * Mesmo recorte da Pluggy: admin e tesouraria, e o `ChurchTenantGuard` cobra
+ * o vínculo **nesta** igreja — a tesouraria de uma não lê o caixa da outra
  * trocando o `:churchId` da URL. Os services ainda conferem que o registro
  * (`:id`) é da igreja da rota.
  */
-@ApiTags('financeiro')
+@ApiTags('tesouraria')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_AREA_ROLES)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
 @Modulo(ChurchModule.TREASURY)
-@Controller('churches/:churchId/financeiro')
-export class FinanceiroController {
+@Controller('churches/:churchId/tesouraria')
+export class TesourariaController {
   constructor(
     private readonly dizimistas: DizimistasService,
     private readonly lancamentos: LancamentosService,

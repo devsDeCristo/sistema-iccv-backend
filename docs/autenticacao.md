@@ -199,7 +199,7 @@ Arquivo: `src/auth/senha.ts`.
 | `USER` | 5 | usuário comum, não pertence a nenhuma igreja |
 
 - `ADMIN_ROLES` = Dev + Super Admin + Admin (acesso total ao painel).
-- `ADMIN_AREA_ROLES` = `ADMIN_ROLES` + Financeiro (entra no painel, com abas
+- `ADMIN_AREA_ROLES` = `ADMIN_ROLES` + Tesouraria (entra no painel, com abas
   restritas no front).
 - `role` é **derivado**: sempre igual ao mais alto perfil entre os vínculos
   que valem (`perfilEfetivo`, `src/auth/tenant.ts`). É recalculado na mesma
@@ -223,7 +223,7 @@ Arquivo: `src/auth/senha.ts`.
 ## Recorte por igreja (`src/auth/tenant.ts`)
 
 Multi-tenant: quem administra mora em `UserChurchRole` (uma linha por
-igreja). A mesma pessoa pode ser admin de uma igreja e financeiro de outra.
+igreja). A mesma pessoa pode ser admin de uma igreja e tesouraria de outra.
 
 - **`isSuperAdmin`:** super admin ou dev — atravessa todas as igrejas.
 - **`tenantChurchIds`:** igrejas que o requisitante alcança. `null` = sem

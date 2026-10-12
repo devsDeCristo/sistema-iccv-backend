@@ -4,18 +4,18 @@ import { UserService } from './user.service';
 
 /**
  * Recorte do cadastro de pessoas entre igrejas. O caso a cuidar é quem tem
- * perfis diferentes em igrejas diferentes: admin na A, financeiro na B.
+ * perfis diferentes em igrejas diferentes: admin na A, tesouraria na B.
  */
-const adminAFinanceiroB = {
+const adminATesourariaB = {
   role: Role.ADMIN,
   churchRoles: [
     { churchId: 'A', role: Role.ADMIN },
-    { churchId: 'B', role: Role.FINANCE },
+    { churchId: 'B', role: Role.TESOURARIA },
   ],
 };
-const financeiroDeA = {
-  role: Role.FINANCE,
-  churchRoles: [{ churchId: 'A', role: Role.FINANCE }],
+const tesourariaDeA = {
+  role: Role.TESOURARIA,
+  churchRoles: [{ churchId: 'A', role: Role.TESOURARIA }],
 };
 const adminDeA = {
   role: Role.ADMIN,
@@ -66,15 +66,15 @@ function montar(requester: object, igrejasDoAlvo: string[]) {
 }
 
 describe('Cadastro de pessoas — recorte por igreja', () => {
-  it('admin na A e financeiro na B não edita quem só tem relação com a B', async () => {
-    const { service } = montar(adminAFinanceiroB, ['B']);
+  it('admin na A e tesouraria na B não edita quem só tem relação com a B', async () => {
+    const { service } = montar(adminATesourariaB, ['B']);
     await expect(
       service.update('alvo', { fullName: 'x' } as any, 'req'),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('financeiro lê o cadastro, mas sem saúde e religião', async () => {
-    const { service } = montar(financeiroDeA, ['A']);
+  it('tesouraria lê o cadastro, mas sem saúde e religião', async () => {
+    const { service } = montar(tesourariaDeA, ['A']);
     const pessoa: any = await service.findOne('alvo', 'req');
     expect(pessoa.fullName).toBe('Pessoa');
     expect(pessoa).not.toHaveProperty('religion');
@@ -88,8 +88,8 @@ describe('Cadastro de pessoas — recorte por igreja', () => {
     expect(pessoa.religion).toBe('Católica');
   });
 
-  it('financeiro não troca a foto', async () => {
-    const { service } = montar(financeiroDeA, ['A']);
+  it('tesouraria não troca a foto', async () => {
+    const { service } = montar(tesourariaDeA, ['A']);
     await expect(
       service.assertPodeTrocarFoto('req', 'alvo'),
     ).rejects.toBeInstanceOf(ForbiddenException);

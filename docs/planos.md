@@ -2,7 +2,7 @@
 
 O plano de uma igreja diz quais módulos ela usa. Fora do plano, o módulo some do painel daquela igreja e a API dele recusa; **nada é apagado** — voltar o módulo ao plano devolve tudo.
 
-**O plano recorta quem trabalha na igreja** (admin, financeiro). **Dev e super admin veem todos os módulos de todas as igrejas**: o plano não vale para eles.
+**O plano recorta quem trabalha na igreja** (admin, tesouraria). **Dev e super admin veem todos os módulos de todas as igrejas**: o plano não vale para eles.
 
 Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modulos.ts`).
 
@@ -15,30 +15,31 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 
 ### Módulos (`ChurchModule`)
 
-**Membros não é módulo:** toda igreja tem, com ou sem plano (e o financeiro depende dele — os dizimistas são os membros). **As configurações seguem o módulo a que servem:** Pagamentos é de Eventos, Disparadores (WhatsApp) de Notícias, Integrações (Pluggy) de Tesouraria — WhatsApp e Integrações já foram módulos próprios e saíram (migration `20261012130000`).
+**Membros não é módulo:** toda igreja tem, com ou sem plano (e a tesouraria depende dele — os dizimistas são os membros). **As configurações seguem o módulo a que servem:** Pagamentos é de Eventos, Disparadores (WhatsApp) de Notícias, Integrações (Pluggy) de Tesouraria — WhatsApp e Integrações já foram módulos próprios e saíram (migration `20261012130000`).
 
-| Módulo | O que fecha |
-| --- | --- |
-| `EVENTS` | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; e a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos) |
-| `NEWS` | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores) |
-| `TREASURY` | Tesouraria (`/churches/:churchId/financeiro`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações) |
+| Módulo            | O que fecha                                                                                                                                                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EVENTS`          | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; e a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos) |
+| `NEWS`            | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores)                                                                                                                            |
+| `TREASURY`        | Tesouraria (`/churches/:churchId/tesouraria`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações)                                                                                                    |
+| `ONLINE_PAYMENTS` | Cobrança online nos eventos (o antigo `Church.modulePayment`)                                                                                                                                                                |
 
 ## Rotas (`/plans`)
 
 Só **dev e super admin** (`SUPER_ADMIN_ROLES`), como a gestão de igrejas.
 
-| Método | Rota | O que faz |
-| --- | --- | --- |
-| `GET` | `/plans` | Lista, com `_count.churches` |
-| `POST` | `/plans` | `{ name, description?, price, modules[] }` (`price` ≥ 0, até 2 decimais) |
-| `PUT` | `/plans/:id` | Atualiza; os módulos novos valem na hora para as igrejas do plano |
-| `DELETE` | `/plans/:id` | Só plano que nenhuma igreja usa (409 com quantas usam) |
+| Método   | Rota         | O que faz                                                                |
+| -------- | ------------ | ------------------------------------------------------------------------ |
+| `GET`    | `/plans`     | Lista, com `_count.churches`                                             |
+| `POST`   | `/plans`     | `{ name, description?, price, modules[] }` (`price` ≥ 0, até 2 decimais) |
+| `PUT`    | `/plans/:id` | Atualiza; os módulos novos valem na hora para as igrejas do plano        |
+| `DELETE` | `/plans/:id` | Só plano que nenhuma igreja usa (409 com quantas usam)                   |
 
 As listas vêm do mais barato ao mais caro (e por nome). Nome repetido (sem diferenciar maiúsculas) responde 409. O plano da igreja se escolhe em `POST/PUT /churches` (`planId`; `null` tira o plano; omitido na edição mantém) — ver `docs/igrejas.md`.
 
 ## "Meus planos" (`GET /churches/:churchId/plano`)
 
-Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e financeiro **desta** igreja; dev e super admin). Só leitura: `{ atual, planos }` — o plano da igreja (ou `null`) e todos os planos, do mais barato ao mais caro, com nome, descrição, valor e módulos. **Sem** quantas igrejas usam cada plano: não é da conta de uma igreja. `PlanoDaIgrejaController`.
+Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e tesouraria **desta** igreja; dev e super admin). Só leitura: `{ atual, planos }` — o plano da igreja (ou `null`) e todos os planos, do mais barato ao mais caro, com nome, descrição, valor e módulos. **Sem** quantas igrejas usam cada plano: não é da conta de uma igreja. `PlanoDaIgrejaController`.
 
 ## Como o módulo é cobrado
 

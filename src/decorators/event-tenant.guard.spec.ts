@@ -3,8 +3,9 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Role } from '../auth/roles';
+import { ADMIN_AREA_ROLES, Role } from '../auth/roles';
 import { EventTenantGuard } from './event-tenant.guard';
+import { ROLES_KEY } from './roles.decorator';
 
 /**
  * O guard é a fronteira das rotas penduradas em um evento — quartos, equipes,
@@ -25,21 +26,37 @@ const PESSOAS: Record<string, Pessoa> = {
     role: Role.ADMIN,
     churchRoles: [{ churchId: IGREJA_A, role: Role.ADMIN }],
   },
-  'financeiro-a': {
-    role: Role.FINANCE,
-    churchRoles: [{ churchId: IGREJA_A, role: Role.FINANCE }],
+  'tesouraria-a': {
+    role: Role.TESOURARIA,
+    churchRoles: [{ churchId: IGREJA_A, role: Role.TESOURARIA }],
   },
-  // admin numa igreja e financeiro na outra
+  // admin numa igreja e tesouraria na outra
   'dois-chapeus': {
     role: Role.ADMIN,
     churchRoles: [
       { churchId: IGREJA_A, role: Role.ADMIN },
-      { churchId: IGREJA_B, role: Role.FINANCE },
+      { churchId: IGREJA_B, role: Role.TESOURARIA },
     ],
   },
   super: { role: Role.SUPER_ADMIN, churchRoles: [] },
   inscrito: { role: Role.USER, churchRoles: [] },
+  // só tesoureiro(a) do evento A: continua usuário comum
+  'tesoureiro-de-a': { role: Role.USER, churchRoles: [] },
+  // tesouraria da igreja A e tesoureira de um evento da B
+  'tesouraria-a-tesoureira-de-b': {
+    role: Role.TESOURARIA,
+    churchRoles: [{ churchId: IGREJA_A, role: Role.TESOURARIA }],
+  },
 };
+
+const TESOUREIROS = [
+  { userId: 'tesoureiro-de-a', eventId: 'evento-a', kind: 'BASICO' },
+  {
+    userId: 'tesouraria-a-tesoureira-de-b',
+    eventId: 'evento-b',
+    kind: 'COMPLETO',
+  },
+];
 
 const EVENTOS: Record<string, { churchId: string }> = {
   'evento-a': { churchId: IGREJA_A },
@@ -63,11 +80,28 @@ const prismaFalso = {
     findUnique: ({ where }: any) =>
       Promise.resolve(PAGAMENTOS[where.id] ?? null),
   },
+  eventTreasurer: {
+    findFirst: ({ where }: any) =>
+      Promise.resolve(
+        TESOUREIROS.find(
+          (t) => t.userId === where.userId && t.eventId === where.eventId,
+        ) ?? null,
+      ),
+  },
 } as any;
 
-/** o guard lê o `@Roles` da rota pelo Reflector para saber qual perfil cobrar */
-const guardComRoles = (roles?: Role[]) =>
-  new EventTenantGuard({ getAllAndOverride: () => roles } as any, prismaFalso);
+/**
+ * O guard lê pelo Reflector o `@Roles` da rota, para saber qual perfil
+ * cobrar, e o `@AceitaTesoureiroDoEvento()`.
+ */
+const guardComRoles = (roles?: Role[], aceitaTesoureiro = false) =>
+  new EventTenantGuard(
+    {
+      getAllAndOverride: (chave: string) =>
+        chave === ROLES_KEY ? roles : aceitaTesoureiro,
+    } as any,
+    prismaFalso,
+  );
 
 const guard = guardComRoles([Role.SUPER_ADMIN, Role.ADMIN]);
 
@@ -93,34 +127,34 @@ describe('EventTenantGuard', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('barra o financeiro no evento de outra igreja', async () => {
+  it('barra a tesouraria no evento de outra igreja', async () => {
     await expect(
-      guard.canActivate(contexto('financeiro-a', { eventId: 'evento-b' })),
+      guard.canActivate(contexto('tesouraria-a', { eventId: 'evento-b' })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('barra o financeiro em rota que exige admin, mesmo na igreja dele', async () => {
+  it('barra a tesouraria em rota que exige admin, mesmo na igreja dela', async () => {
     await expect(
-      guard.canActivate(contexto('financeiro-a', { idEvent: 'evento-a' })),
+      guard.canActivate(contexto('tesouraria-a', { idEvent: 'evento-a' })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('aceita o financeiro na rota que admite financeiro', async () => {
-    const rotaDoFinanceiro = guardComRoles([
+  it('aceita a tesouraria na rota que admite tesouraria', async () => {
+    const rotaDaTesouraria = guardComRoles([
       Role.SUPER_ADMIN,
       Role.ADMIN,
-      Role.FINANCE,
+      Role.TESOURARIA,
     ]);
 
     await expect(
-      rotaDoFinanceiro.canActivate(
-        contexto('financeiro-a', { idEvent: 'evento-a' }),
+      rotaDaTesouraria.canActivate(
+        contexto('tesouraria-a', { idEvent: 'evento-a' }),
       ),
     ).resolves.toBe(true);
   });
 
   it('não deixa o perfil de uma igreja valer na outra', async () => {
-    // admin na A, financeiro na B: administrar a B continua barrado
+    // admin na A, tesouraria na B: administrar a B continua barrado
     await expect(
       guard.canActivate(contexto('dois-chapeus', { idEvent: 'evento-b' })),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -130,15 +164,15 @@ describe('EventTenantGuard', () => {
     ).resolves.toBe(true);
   });
 
-  it('deixa o financeiro da outra igreja ver o que é de financeiro lá', async () => {
-    const rotaDoFinanceiro = guardComRoles([
+  it('deixa a tesouraria da outra igreja ver o que é de tesouraria lá', async () => {
+    const rotaDaTesouraria = guardComRoles([
       Role.SUPER_ADMIN,
       Role.ADMIN,
-      Role.FINANCE,
+      Role.TESOURARIA,
     ]);
 
     await expect(
-      rotaDoFinanceiro.canActivate(
+      rotaDaTesouraria.canActivate(
         contexto('dois-chapeus', { idEvent: 'evento-b' }),
       ),
     ).resolves.toBe(true);
@@ -151,8 +185,12 @@ describe('EventTenantGuard', () => {
   });
 
   it('não recorta o inscrito: ele se inscreve em evento de qualquer igreja', async () => {
+    // a inscrição é área do usuário: rota sem `@Roles`. Em rota de painel o
+    // `RolesGuard` já o barra, e aqui ele só passaria como tesoureiro
     await expect(
-      guard.canActivate(contexto('inscrito', { idEvent: 'evento-b' })),
+      guardComRoles().canActivate(
+        contexto('inscrito', { idEvent: 'evento-b' }),
+      ),
     ).resolves.toBe(true);
   });
 
@@ -243,5 +281,66 @@ describe('EventTenantGuard', () => {
     await expect(guard.canActivate(contexto('admin-a', {}))).resolves.toBe(
       true,
     );
+  });
+});
+
+/**
+ * O tesoureiro(a) de evento não tem perfil de painel: entra só em rota marcada
+ * com `@AceitaTesoureiroDoEvento()`, e só no evento dele. O risco que estes
+ * testes fecham é o usuário comum cair no "não é recortado" do guard e
+ * alcançar o caixa de qualquer igreja.
+ */
+describe('EventTenantGuard — tesoureiro(a) do evento', () => {
+  const aceita = guardComRoles(ADMIN_AREA_ROLES, true);
+  const naoAceita = guardComRoles(ADMIN_AREA_ROLES, false);
+
+  it('deixa o tesoureiro entrar no evento dele em rota que o aceita', async () => {
+    await expect(
+      aceita.canActivate(contexto('tesoureiro-de-a', { idEvent: 'evento-a' })),
+    ).resolves.toBe(true);
+  });
+
+  it('barra o tesoureiro em evento que não é dele', async () => {
+    await expect(
+      aceita.canActivate(contexto('tesoureiro-de-a', { idEvent: 'evento-b' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('barra o tesoureiro em rota que não o aceita, mesmo no evento dele', async () => {
+    await expect(
+      naoAceita.canActivate(
+        contexto('tesoureiro-de-a', { idEvent: 'evento-a' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('barra o inscrito comum, que não é tesoureiro de nada', async () => {
+    await expect(
+      aceita.canActivate(contexto('inscrito', { idEvent: 'evento-a' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('acha o evento pelo pagamento também para o tesoureiro', async () => {
+    await expect(
+      aceita.canActivate(
+        contexto('tesouraria-a-tesoureira-de-b', { paymentId: 'pag-b' }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('deixa a tesouraria de uma igreja entrar no evento da outra de que é tesoureira', async () => {
+    await expect(
+      aceita.canActivate(
+        contexto('tesouraria-a-tesoureira-de-b', { idEvent: 'evento-b' }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('sem a rota aceitar, a tesouraria de A continua fora do evento de B', async () => {
+    await expect(
+      naoAceita.canActivate(
+        contexto('tesouraria-a-tesoureira-de-b', { idEvent: 'evento-b' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

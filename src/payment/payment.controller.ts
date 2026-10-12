@@ -38,12 +38,19 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
+import { AceitaTesoureiroDoEvento } from 'src/auth/tesoureiro-do-evento';
 
 @ApiTags('payments')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
 @Modulo(ChurchModule.EVENTS)
+/**
+ * A aba Tesouraria dos detalhes do evento (lista, histórico, baixa e
+ * reembolso) aceita também o tesoureiro(a) daquele evento
+ * (`@AceitaTesoureiroDoEvento()`); a entrega de produtos é da aba Pedidos,
+ * que ele não vê.
+ */
 @Controller()
 export class PaymentController {
   constructor(
@@ -77,6 +84,7 @@ export class PaymentController {
   // ===============================
   @ApiOperation({ summary: 'Get payments by event' })
   @Roles(...ADMIN_AREA_ROLES)
+  @AceitaTesoureiroDoEvento()
   @Get('events/:idEvent/payments')
   findByEvent(@Param('idEvent') eventId: string) {
     return this.paymentService.findPaymentsByEvent(eventId);
@@ -124,7 +132,7 @@ export class PaymentController {
    * que é a tela de onde se chega aqui.
    *
    * O recorte por igreja vem do `EventTenantGuard`: quem não administra a
-   * igreja do evento não passa, e o financeiro de uma igreja não enxerga o
+   * igreja do evento não passa, e a tesouraria de uma igreja não enxerga o
    * caixa da outra.
    */
   @ApiOperation({
@@ -133,6 +141,7 @@ export class PaymentController {
       'Toda mudança em cobrança e checkout, inclusive as feitas pela reconciliação automática e pelo retorno do PagBank.',
   })
   @Roles(...ADMIN_AREA_ROLES)
+  @AceitaTesoureiroDoEvento()
   @Get('events/:idEvent/payments/logs')
   findLogsByEvent(
     @Param('idEvent') eventId: string,
@@ -171,6 +180,7 @@ export class PaymentController {
 
   @ApiOperation({ summary: 'Update payment' })
   @Roles(...ADMIN_AREA_ROLES)
+  @AceitaTesoureiroDoEvento()
   @Put('payments/:paymentId')
   @UseInterceptors(
     FileFieldsInterceptor([{ name: 'receiptFile', maxCount: 1 }]),
@@ -193,6 +203,7 @@ export class PaymentController {
   // ===============================
   @ApiOperation({ summary: 'Refund payment' })
   @Roles(...ADMIN_AREA_ROLES)
+  @AceitaTesoureiroDoEvento()
   @Patch('payments/:paymentId/refund')
   refund(@Param('paymentId') paymentId: string) {
     return this.paymentService.refundPayment(paymentId);

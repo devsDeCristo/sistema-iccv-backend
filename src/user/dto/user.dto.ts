@@ -23,7 +23,7 @@ export class ChurchRoleDto {
   @IsString()
   churchId: string;
 
-  @ApiProperty({ example: 2, description: '2 = admin, 3 = financeiro' })
+  @ApiProperty({ example: 2, description: '2 = admin, 3 = tesouraria' })
   @IsInt()
   role: number;
 }
@@ -103,7 +103,7 @@ export class UserDTO {
   @ApiProperty({
     example: 5,
     description:
-      'Permissão - -1: Dev, 1: Super Admin, 2: Admin, 3: Financeiro, 5: Usuário',
+      'Permissão - -1: Dev, 1: Super Admin, 2: Admin, 3: Tesouraria, 5: Usuário',
     enum: ASSIGNABLE_ROLES,
   })
   @IsInt()
@@ -331,7 +331,7 @@ export class UserDTO {
   @ApiProperty({
     description:
       'Vínculos de painel: em qual igreja a pessoa é admin (2) e em qual é ' +
-      'financeiro (3). A mesma pessoa pode ter perfis diferentes em igrejas ' +
+      'tesouraria (3). A mesma pessoa pode ter perfis diferentes em igrejas ' +
       'diferentes. Lista vazia tira a pessoa do painel.',
     required: false,
     type: 'array',

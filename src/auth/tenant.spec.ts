@@ -13,12 +13,12 @@ import {
 const IGREJA_A = 'igreja-a';
 const IGREJA_B = 'igreja-b';
 
-/** admin numa igreja e financeiro na outra: o caso que o modelo existe para atender */
+/** admin numa igreja e tesouraria na outra: o caso que o modelo existe para atender */
 const doisChapeus = {
   role: Role.ADMIN,
   churchRoles: [
     { churchId: IGREJA_A, role: Role.ADMIN },
-    { churchId: IGREJA_B, role: Role.FINANCE },
+    { churchId: IGREJA_B, role: Role.TESOURARIA },
   ],
 };
 
@@ -31,9 +31,11 @@ const superAdmin = { role: Role.SUPER_ADMIN, churchRoles: [] };
 const inscrito = { role: Role.USER, churchRoles: [] };
 
 describe('churchIdsComPerfil', () => {
-  it('separa onde a pessoa é admin de onde ela é financeiro', () => {
+  it('separa onde a pessoa é admin de onde ela é tesouraria', () => {
     expect(churchIdsComPerfil(doisChapeus, [Role.ADMIN])).toEqual([IGREJA_A]);
-    expect(churchIdsComPerfil(doisChapeus, [Role.FINANCE])).toEqual([IGREJA_B]);
+    expect(churchIdsComPerfil(doisChapeus, [Role.TESOURARIA])).toEqual([
+      IGREJA_B,
+    ]);
     expect(churchIdsComPerfil(doisChapeus, ADMIN_AREA_ROLES)).toEqual([
       IGREJA_A,
       IGREJA_B,
@@ -44,7 +46,7 @@ describe('churchIdsComPerfil', () => {
 describe('perfilNaIgreja', () => {
   it('devolve o perfil daquela igreja, não o mais alto', () => {
     expect(perfilNaIgreja(doisChapeus, IGREJA_A)).toBe(Role.ADMIN);
-    expect(perfilNaIgreja(doisChapeus, IGREJA_B)).toBe(Role.FINANCE);
+    expect(perfilNaIgreja(doisChapeus, IGREJA_B)).toBe(Role.TESOURARIA);
   });
 
   it('devolve null onde ela não administra', () => {
@@ -61,7 +63,7 @@ describe('tenantChurchIds', () => {
 
   it('lista vazia quando o perfil pedido ela não tem em lugar nenhum', () => {
     // vazio é "nenhuma igreja", e não "todas": o recorte falha fechado
-    expect(tenantChurchIds(adminDeA, [Role.FINANCE])).toEqual([]);
+    expect(tenantChurchIds(adminDeA, [Role.TESOURARIA])).toEqual([]);
   });
 
   it('não abre tudo para perfil de painel que ficou sem vínculo', () => {
@@ -78,13 +80,13 @@ describe('assertChurchAccess', () => {
   });
 
   it('barra o perfil de uma igreja de valer na outra', () => {
-    // é financeiro na B: administrar a B continua fora de alcance
+    // é tesouraria na B: administrar a B continua fora de alcance
     expect(() =>
       assertChurchAccess(doisChapeus, IGREJA_B, { roles: [Role.ADMIN] }),
     ).toThrow(ForbiddenException);
   });
 
-  it('aceita o financeiro onde a rota admite financeiro', () => {
+  it('aceita a tesouraria onde a rota admite tesouraria', () => {
     expect(() =>
       assertChurchAccess(doisChapeus, IGREJA_B, { roles: ADMIN_AREA_ROLES }),
     ).not.toThrow();

@@ -120,7 +120,7 @@ independentes.
 |---|---|
 | `RolesGuard` | esta pessoa pode chegar nesta rota **em alguma** igreja? |
 | `ChurchTenantGuard` | ela tem esse perfil **nesta** igreja da URL? |
-| `EventTenantGuard` | ela tem esse perfil na igreja **deste evento/pagamento**? |
+| `EventTenantGuard` | ela tem esse perfil na igreja **deste evento/pagamento**? Ou, em rota com `@AceitaTesoureiroDoEvento()`, é tesoureira **deste** evento? (ver `docs/tesouraria.md`) |
 | Selo do envelope | esta credencial é mesmo desta igreja? |
 | `filtroDaCasa` | este retorno de gateway pode mexer nesta cobrança? |
 
@@ -250,7 +250,7 @@ Duas decisões que valem registro:
   Mercado Pago, onde em sandbox o webhook nunca pega.
 
 Além do relógio, a rotina tem um gatilho manual: o botão **Conferir no gateway**
-na aba Financeiro do evento, recortado àquele evento e limitado ao perfil dev —
+na aba Tesouraria do evento, recortado àquele evento e limitado ao perfil dev —
 na tela e na rota. Cada clique fala com o gateway uma vez por cobrança pendente.
 
 ---

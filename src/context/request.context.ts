@@ -19,7 +19,7 @@ export interface RequestContext {
   operation?: string;
   /**
    * Quem está por trás da escrita: uma pessoa, o gateway, uma rotina, ou
-   * ninguém. É a primeira pergunta do log financeiro — dinheiro que muda de
+   * ninguém. É a primeira pergunta do log tesouraria — dinheiro que muda de
    * status sozinho e dinheiro que alguém mudou não são o mesmo evento.
    */
   source?: OrigemDaEscrita;

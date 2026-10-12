@@ -50,7 +50,7 @@ export function filtroDaBusca(texto: string): Prisma.UserWhereInput | null {
  * Membros da igreja e as famílias deles.
  *
  * Membro é o usuário com `memberChurchId` desta igreja — uma igreja por pessoa,
- * garantido por ser campo. Quem entra: o admin ou o financeiro coloca (busca)
+ * garantido por ser campo. Quem entra: o admin ou a tesouraria coloca (busca)
  * ou aceita o pedido feito na inscrição. Toda escrita confere que a pessoa ou
  * a família é **desta** igreja; a rota já passou pelo `ChurchTenantGuard`.
  */

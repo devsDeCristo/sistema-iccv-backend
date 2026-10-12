@@ -8,7 +8,7 @@ Arquivos: `src/cracha/*`, `src/pdf/navegador.ts`, `src/pdf/imagens.ts`, `src/pdf
 
 | Método | Caminho | Quem pode | O que faz |
 | --- | --- | --- | --- |
-| `POST` | `/events/:idEvent/crachas/pdf` | perfis de `ADMIN_AREA_ROLES` (dev, super admin, admin, financeiro) | gera e devolve o PDF dos crachás |
+| `POST` | `/events/:idEvent/crachas/pdf` | perfis de `ADMIN_AREA_ROLES` (dev, super admin, admin, tesouraria) | gera e devolve o PDF dos crachás |
 
 É `POST` porque quem decide quais crachás entram, em que ordem e com que cabeçalho de seção é a tela (modal do painel), e isso vai no corpo da requisição. Guardas: `JwtAuthGuard`, `RolesGuard`, `EventTenantGuard`.
 

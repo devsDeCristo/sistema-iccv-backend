@@ -31,7 +31,7 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
  * ninguém.
  *
  * A proteção é a mesma da configuração de cobrança, e pelo mesmo motivo:
- * `@Roles(...ADMIN_ROLES)` deixa o financeiro de fora, e o `ChurchTenantGuard`
+ * `@Roles(...ADMIN_ROLES)` deixa a tesouraria de fora, e o `ChurchTenantGuard`
  * garante que o `:churchId` da URL é uma igreja que a pessoa administra — sem
  * ele bastaria trocar o id para desconectar o número da igreja vizinha.
  */

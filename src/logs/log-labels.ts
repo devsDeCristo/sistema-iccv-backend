@@ -35,12 +35,13 @@ export const MODEL_LABELS: Record<string, string> = {
   Waitlist: 'Lista de espera',
   // Legado: a lista de dizimistas virou os membros; linhas antigas no log
   Tither: 'Dizimista',
-  FinancialEntry: 'Lançamento financeiro',
+  FinancialEntry: 'Lançamento da tesouraria',
   Family: 'Família',
   Plan: 'Plano',
   // Legado: saíram do schema, mas as linhas antigas continuam no log
   Church: 'Igreja',
   UserChurchRole: 'Vínculo com igreja',
+  EventTreasurer: 'Tesoureiro(a) do evento',
 };
 
 /**

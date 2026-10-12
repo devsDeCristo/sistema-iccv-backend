@@ -1,7 +1,7 @@
 /**
  * Perfis de acesso do sistema. O valor é gravado em `User.role` (Int).
  * Os números não são sequenciais por histórico: 1 (super admin) e 5 (usuário)
- * já existiam em produção antes de admin e financeiro serem criados.
+ * já existiam em produção antes de admin e tesouraria serem criados.
  *
  * O dev é -1, e não 0, de propósito: 0 é falsy, e os vários `user.role ||
  * PADRAO` espalhados pelo front rebaixariam o dev para usuário comum sem
@@ -11,7 +11,7 @@ export enum Role {
   DEV = -1,
   SUPER_ADMIN = 1,
   ADMIN = 2,
-  FINANCE = 3,
+  TESOURARIA = 3,
   USER = 5,
 }
 
@@ -26,13 +26,13 @@ export const ADMIN_ROLES = [...SUPER_ADMIN_ROLES, Role.ADMIN];
  * atravessa todas e o usuário comum não pertence a nenhuma, então nenhum dos
  * dois aparece aqui.
  */
-export const CHURCH_ROLES = [Role.ADMIN, Role.FINANCE];
+export const CHURCH_ROLES = [Role.ADMIN, Role.TESOURARIA];
 
 /**
  * Perfis que entram no painel administrativo.
- * O financeiro entra, mas só enxerga inscritos e pagamentos dos eventos.
+ * A tesouraria entra, mas só enxerga inscritos e pagamentos dos eventos.
  */
-export const ADMIN_AREA_ROLES = [...ADMIN_ROLES, Role.FINANCE];
+export const ADMIN_AREA_ROLES = [...ADMIN_ROLES, Role.TESOURARIA];
 
 /**
  * Valores aceitos no campo `role` do usuário. O dev entra aqui para passar na
@@ -43,7 +43,7 @@ export const ASSIGNABLE_ROLES = [
   Role.DEV,
   Role.SUPER_ADMIN,
   Role.ADMIN,
-  Role.FINANCE,
+  Role.TESOURARIA,
   Role.USER,
 ];
 
@@ -51,7 +51,7 @@ export const ROLE_LABELS: Record<number, string> = {
   [Role.DEV]: 'Dev',
   [Role.SUPER_ADMIN]: 'Super Admin',
   [Role.ADMIN]: 'Admin',
-  [Role.FINANCE]: 'Financeiro',
+  [Role.TESOURARIA]: 'Tesouraria',
   [Role.USER]: 'Usuário',
 };
 

@@ -13,6 +13,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { UserService } from 'src/user/user.service';
 import { ADMIN_AREA_ROLES } from './roles';
 import { perfilEfetivo } from './tenant';
+import { eventosDoTesoureiro } from './tesoureiro-do-evento';
 import {
   captchaValido,
   FALHAS_PARA_BLOQUEIO,
@@ -70,14 +71,25 @@ export class AuthService {
     // o perfil sai dos vínculos que valem, e não do gravado, que pode estar
     // atrasado (igreja desativada antes do recálculo existir)
     const role = perfilEfetivo({ role: userConsult.role, churchRoles });
-    // o financeiro também entra no painel, mas com abas restritas no front
-    if (test === 'admin' && !ADMIN_AREA_ROLES.includes(role)) {
+    /**
+     * Os eventos em que a pessoa é tesoureira (`EventTreasurer`). Não mudam o
+     * perfil, mas abrem o painel: o tesoureiro(a) de evento entra só nos
+     * eventos dele, e o front monta o menu com esta lista.
+     */
+    const eventTreasurers = await this.eventosComoTesoureiro(userConsult.id);
+    // a tesouraria também entra no painel, mas com abas restritas no front
+    if (
+      test === 'admin' &&
+      !ADMIN_AREA_ROLES.includes(role) &&
+      !eventTreasurers.length
+    ) {
       throw new UnauthorizedException('Usuário não é administrador');
     }
     return {
       id: userConsult.id,
       role,
       churchRoles,
+      eventTreasurers,
       fullName: userConsult.fullName,
       email: userConsult.email,
       cpf: userConsult.cpf,
@@ -250,7 +262,23 @@ export class AuthService {
     };
     return {
       access_token: this.jwtService.sign(payload),
-      user,
+      // o front decide pelo perfil e por esta lista se a pessoa abre o painel
+      user: {
+        ...user,
+        eventTreasurers: await this.eventosComoTesoureiro(user.id),
+      },
     };
+  }
+
+  /** Os eventos em que a pessoa é tesoureira, no formato que o front guarda */
+  private async eventosComoTesoureiro(userId: string) {
+    return (await eventosDoTesoureiro(this.prisma, userId)).map(
+      ({ kind, event }) => ({
+        eventId: event.id,
+        eventName: event.name,
+        churchId: event.churchId,
+        kind,
+      }),
+    );
   }
 }

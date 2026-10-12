@@ -9,6 +9,10 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma';
 import { Role } from 'src/auth/roles';
 import { perfilEfetivo, SELECT_TENANT } from 'src/auth/tenant';
+import {
+  ACEITA_TESOUREIRO_KEY,
+  temVinculoDeTesoureiro,
+} from 'src/auth/tesoureiro-do-evento';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -56,7 +60,20 @@ export class RolesGuard implements CanActivate {
 
     const user = { role: perfilEfetivo(pessoa) };
 
-    if (!requiredRoles.includes(user.role as Role)) {
+    /**
+     * Fora dos perfis da rota, só passa o tesoureiro(a) de evento, e só em
+     * rota que o aceita. Aqui basta ter algum vínculo: se é deste evento,
+     * quem responde é o `EventTenantGuard`, que vem depois.
+     */
+    if (
+      !requiredRoles.includes(user.role as Role) &&
+      !(
+        this.reflector.getAllAndOverride<boolean>(ACEITA_TESOUREIRO_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]) && (await temVinculoDeTesoureiro(this.prisma, userId))
+      )
+    ) {
       throw new ForbiddenException(
         'Você não tem permissão para acessar este recurso',
       );

@@ -15,7 +15,7 @@ import {
   palavrasDaBusca,
   palavrasDoNome,
 } from './planilha';
-import { LinhaDaPlanilhaDto } from './dto/financeiro.dto';
+import { LinhaDaPlanilhaDto } from './dto/tesouraria.dto';
 
 const COM_ACENTO = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
 const SEM_ACENTO = 'aaaaaeeeeiiiiooooouuuucn';

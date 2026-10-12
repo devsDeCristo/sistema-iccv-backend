@@ -31,7 +31,7 @@ describe('módulos do evento', () => {
   });
 
   it('chave desconhecida não entra na paleta de módulos', () => {
-    expect(normalizarModulos({ bedrooms: false, financeiro: true })).toEqual({
+    expect(normalizarModulos({ bedrooms: false, tesouraria: true })).toEqual({
       bedrooms: false,
       teams: true,
       transport: true,

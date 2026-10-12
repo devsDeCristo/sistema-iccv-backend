@@ -14,7 +14,7 @@ Cada um dos três só aceita cadastro se o respectivo módulo estiver ligado no 
 
 ## Rotas
 
-Todas atrás de `JwtAuthGuard`, `RolesGuard`, `EventTenantGuard` e `@Roles(...ADMIN_ROLES)` — dev, super admin e admin da igreja; **financeiro não entra** em nenhum dos três módulos.
+Todas atrás de `JwtAuthGuard`, `RolesGuard`, `EventTenantGuard` e `@Roles(...ADMIN_ROLES)` — dev, super admin e admin da igreja; **tesouraria não entra** em nenhum dos três módulos.
 
 | Módulo | Método | Caminho |
 | --- | --- | --- |

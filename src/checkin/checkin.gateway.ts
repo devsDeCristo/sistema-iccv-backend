@@ -97,7 +97,7 @@ export class CheckinGateway implements OnGatewayConnection {
 
     if (!requester || !event) return { joined: false };
 
-    // check-in é trabalho de admin: o financeiro e o inscrito não entram, e o
+    // check-in é trabalho de admin: a tesouraria e o inscrito não entram, e o
     // admin só entra na sala de evento de igreja que ele administra
     const igrejas = tenantChurchIds(requester, [Role.ADMIN]);
 

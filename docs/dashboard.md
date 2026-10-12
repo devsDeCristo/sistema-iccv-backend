@@ -8,21 +8,21 @@ Arquivos: `src/dashboard/dashboard.controller.ts`, `src/dashboard/dashboard.serv
 
 | Método | Caminho | Quem pode | Query |
 | --- | --- | --- | --- |
-| `GET` | `/dashboard` | `ADMIN_AREA_ROLES` (dev, super admin, admin, financeiro) | `churchId` opcional |
+| `GET` | `/dashboard` | `ADMIN_AREA_ROLES` (dev, super admin, admin, tesouraria) | `churchId` opcional |
 
 Guardas: `JwtAuthGuard`, `RolesGuard`. Sem `EventTenantGuard` — o recorte por igreja é feito dentro do serviço, porque a rota não pertence a um evento específico.
 
 ## `churchId`: abrir a home de outra igreja
 
-- Usado pelo super admin para abrir a home de uma igreja específica a partir da lista de igrejas; o admin/financeiro comuns chegam na própria home sem passar o parâmetro.
-- **Não é uma chave de acesso.** Quem pode abrir cada igreja é decidido pelo vínculo de quem pediu (`assertChurchAccess`): super admin atravessa todas; admin e financeiro só alcançam as igrejas em que têm vínculo. Pedir a igreja de outra pessoa dá `403` "Você não administra esta igreja" — checado **antes** de confirmar se a igreja existe, para a resposta não revelar quais ids existem.
+- Usado pelo super admin para abrir a home de uma igreja específica a partir da lista de igrejas; o admin/tesouraria comuns chegam na própria home sem passar o parâmetro.
+- **Não é uma chave de acesso.** Quem pode abrir cada igreja é decidido pelo vínculo de quem pediu (`assertChurchAccess`): super admin atravessa todas; admin e tesouraria só alcançam as igrejas em que têm vínculo. Pedir a igreja de outra pessoa dá `403` "Você não administra esta igreja" — checado **antes** de confirmar se a igreja existe, para a resposta não revelar quais ids existem.
 - Igreja inexistente: `404` "Igreja não encontrada".
 
 ## Escopo: `system` vs `church`
 
 O campo `scope` da resposta diz qual dos dois formatos veio:
 
-- **`church`:** quando há recorte por igreja — seja porque `churchId` foi passado, seja porque quem pediu (admin/financeiro) só alcança as suas. Vem com `events`, `recentRegistrations`, `treasury` (se financeiro) e `news` (mural).
+- **`church`:** quando há recorte por igreja — seja porque `churchId` foi passado, seja porque quem pediu (admin/tesouraria) só alcança as suas. Vem com `events`, `recentRegistrations`, `treasury` (se tesouraria) e `news` (mural).
 - **`system`:** quando quem pediu é super admin ou dev **sem** `churchId` (`tenantChurchIds` devolve `null`, ou seja, nenhum recorte). Vem com `byChurch` (leitura por igreja), e, dependendo do perfil, `panorama` (super admin) ou `insights` (dev). `events`, `recentRegistrations` e `news` saem `null` nesse modo.
 
 ## Perfil por igreja (multitenant)
@@ -30,26 +30,26 @@ O campo `scope` da resposta diz qual dos dois formatos veio:
 O perfil que decide o formato da home é o da pessoa **na igreja vista**:
 
 - **com `churchId`** (e quem pede não é super admin/dev): vale
-  `perfilNaIgreja`. Quem é admin na A e financeiro na B, ao abrir a B,
-  recebe a home do financeiro (`treasury`, sem `recentRegistrations` nem
+  `perfilNaIgreja`. Quem é admin na A e tesouraria na B, ao abrir a B,
+  recebe a home da tesouraria (`treasury`, sem `recentRegistrations` nem
   `news`);
 - **sem `churchId`:** vale o perfil efetivo (`perfilEfetivo`), e as
   inscrições recentes e o mural, que são blocos de admin, só incluem as
   igrejas onde a pessoa é admin.
 
 Até 09/10/2026 valia o `User.role` gravado (o mais alto) em qualquer igreja,
-e o financeiro da B via a B como admin: inscrições recentes e mural.
+e a tesouraria da B via a B como admin: inscrições recentes e mural.
 
 ## Conteúdo por perfil
 
 | Bloco | Quem recebe | Descrição |
 | --- | --- | --- |
-| `churches` | quem tem recorte (`scope: church`) | igrejas da pessoa, cada uma com o perfil que ela tem lá (pode ser admin de uma e financeiro de outra) |
-| `events` | quem tem recorte, exceto financeiro na leitura de "abertos" (financeiro recebe `eventosComSaldo`, ver abaixo) | eventos da igreja, todos do mesmo tamanho na tela |
-| `pending` | todos com recorte, exceto lista de espera para financeiro | pendências acionáveis: comprovantes em análise e lista de espera com vaga livre |
-| `recentRegistrations` | quem tem recorte, exceto financeiro | últimas 6 inscrições, com pessoa e evento |
-| `treasury` | só financeiro | resumo de cobrança em aberto (ver "Métricas financeiras") |
-| `news` | quem tem recorte e não é financeiro | mural: últimas 3 notícias publicadas + contagem de rascunhos |
+| `churches` | quem tem recorte (`scope: church`) | igrejas da pessoa, cada uma com o perfil que ela tem lá (pode ser admin de uma e tesouraria de outra) |
+| `events` | quem tem recorte, exceto tesouraria na leitura de "abertos" (tesouraria recebe `eventosComSaldo`, ver abaixo) | eventos da igreja, todos do mesmo tamanho na tela |
+| `pending` | todos com recorte, exceto lista de espera para tesouraria | pendências acionáveis: comprovantes em análise e lista de espera com vaga livre |
+| `recentRegistrations` | quem tem recorte, exceto tesouraria | últimas 6 inscrições, com pessoa e evento |
+| `treasury` | só tesouraria | resumo de cobrança em aberto (ver "Métricas financeiras") |
+| `news` | quem tem recorte e não é tesouraria | mural: últimas 3 notícias publicadas + contagem de rascunhos |
 | `byChurch` | super admin/dev sem `churchId` | uma linha por igreja: admins, total de eventos, inscrições históricas, eventos abertos, evento em destaque |
 | `panorama` | super admin sem `churchId` | base de usuários do sistema (ver "Panorama do super admin") |
 | `insights` | dev sem `churchId` | indicadores de funcionamento do sistema (ver "Indicadores do dev") |
@@ -57,7 +57,7 @@ e o financeiro da B via a B como admin: inscrições recentes e mural.
 ### Quais eventos aparecem em `events`
 
 - **Administração comum (admin, super admin, dev com recorte):** os eventos com `status` em `ACTIVE` ou `TEST` (`eventosAbertos`). Sem nenhum aberto, a lista não fica vazia — entra o último evento encerrado (`ultimoEncerrado`), para a tela não abrir em branco no dia seguinte ao evento. **A data de término não filtra este conjunto**: um evento marcado `ACTIVE` continua aparecendo mesmo depois de terminar, porque o dinheiro dele (comprovantes a conferir) não desaparece com o fim do evento.
-- **Financeiro:** `eventosComSaldo` — os eventos ativos **mais qualquer evento com pagamento `WAITING` ou `IN_ANALYSIS`**, esteja ele desligado ou encerrado há meses. Ordenados pelo valor em aberto, do maior para o menor — é a fila de trabalho do financeiro.
+- **Tesouraria:** `eventosComSaldo` — os eventos ativos **mais qualquer evento com pagamento `WAITING` ou `IN_ANALYSIS`**, esteja ele desligado ou encerrado há meses. Ordenados pelo valor em aberto, do maior para o menor — é a fila de trabalho da tesouraria.
 - Cada evento detalhado (`detalhar`) traz: fase (`ongoing`/`upcoming`/`finished`, calculada pelo dia cheio, contando o dia inteiro nas duas pontas), pessoas inscritas, ocupação por grupo de inscrição (com capacidade em `GroupRoles.capacity`), lista de espera, caixa (`finance`), ritmo de inscrição (últimos 7 dias vs. os 7 anteriores) e check-in (`null` enquanto ninguém fez check-in ainda, para não mostrar "0 de N" como se fosse alarme).
 
 ### Pendências (`pending`)
@@ -65,9 +65,9 @@ e o financeiro da B via a B como admin: inscrições recentes e mural.
 Duas categorias, cada uma amarrada a um evento específico:
 
 - **`receipts`:** evento com comprovante `IN_ANALYSIS` > 0 — mesmo em evento já encerrado, porque o dinheiro continua sendo tarefa.
-- **`waitlist`:** evento com lista de espera **e** vaga livre (`seats.total - seats.taken > 0`), e que ainda não terminou (`phase !== 'finished'`). Fila em evento lotado não é pendência; chamar alguém para um evento já encerrado também não é. Financeiro nunca recebe pendência de lista de espera — quem chama da fila é quem administra a inscrição.
+- **`waitlist`:** evento com lista de espera **e** vaga livre (`seats.total - seats.taken > 0`), e que ainda não terminou (`phase !== 'finished'`). Fila em evento lotado não é pendência; chamar alguém para um evento já encerrado também não é. Tesouraria nunca recebe pendência de lista de espera — quem chama da fila é quem administra a inscrição.
 
-## Métricas financeiras (`treasury`, só financeiro)
+## Métricas financeiras (`treasury`, só tesouraria)
 
 - **`debtors`:** pessoas distintas, número de cobranças e valor total com pagamento `WAITING` nos eventos do recorte.
 - **`refunded`:** contagem e valor de pagamentos `REFUNDED`.

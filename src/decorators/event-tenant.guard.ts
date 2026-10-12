@@ -9,7 +9,11 @@ import {
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma';
 import { CHURCH_ROLES, Role } from 'src/auth/roles';
-import { SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
+import { perfilEfetivo, SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
+import {
+  ACEITA_TESOUREIRO_KEY,
+  tesoureiroDoEvento,
+} from 'src/auth/tesoureiro-do-evento';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -18,11 +22,14 @@ import { ROLES_KEY } from './roles.decorator';
  *
  * É aqui que a permissão por igreja é cobrada de verdade. O `RolesGuard` só
  * responde "esta pessoa pode chegar nesta rota em alguma igreja?"; quem é admin
- * numa e financeiro noutra passaria por ele com o perfil mais alto. Este guard
+ * numa e tesouraria noutra passaria por ele com o perfil mais alto. Este guard
  * pergunta o resto: o perfil que a rota exige, ela tem **nesta** igreja?
  *
  * Como o `RolesGuard`, o vínculo é lido do banco e não do JWT — o token dura
  * 24h e guardaria a permissão antiga depois de uma mudança.
+ *
+ * Em rota com `@AceitaTesoureiroDoEvento()`, quem é tesoureiro(a) **deste**
+ * evento também entra, mesmo sem vínculo com a igreja dele.
  */
 @Injectable()
 export class EventTenantGuard implements CanActivate {
@@ -64,6 +71,33 @@ export class EventTenantGuard implements CanActivate {
      */
     if (!exigidos.length && request.params?.idUser === userId) return true;
 
+    const aceitaTesoureiro = this.reflector.getAllAndOverride<boolean>(
+      ACEITA_TESOUREIRO_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    const ehTesoureiroDaqui = async () => {
+      if (!aceitaTesoureiro) return false;
+      const eventId = await this.resolveEventId(request);
+      return (
+        !!eventId && !!(await tesoureiroDoEvento(this.prisma, userId, eventId))
+      );
+    };
+
+    /**
+     * Sem o perfil da rota, a pessoa só passou pelo `RolesGuard` por ser
+     * tesoureira de algum evento: aqui vale só o evento dela. Sem esta saída o
+     * usuário comum caía no "não é recortado" lá embaixo e alcançava o evento
+     * de qualquer igreja.
+     */
+    if (exigidos.length && !exigidos.includes(perfilEfetivo(requester))) {
+      if (!(await ehTesoureiroDaqui())) {
+        throw new ForbiddenException('Você não é tesoureiro(a) deste evento');
+      }
+      request.user.role = requester.role;
+      request.user.churchRoles = requester.churchRoles;
+      return true;
+    }
+
     const churchIds = tenantChurchIds(requester, this.perfisDaRota(exigidos));
 
     // super admin e usuário comum não são recortados
@@ -81,7 +115,8 @@ export class EventTenantGuard implements CanActivate {
       throw new NotFoundException('Event does not exist');
     }
 
-    if (!churchIds.includes(event.churchId)) {
+    // admin ou tesouraria de outra igreja que é tesoureiro(a) deste evento
+    if (!churchIds.includes(event.churchId) && !(await ehTesoureiroDaqui())) {
       throw new ForbiddenException(
         'Você não tem esta permissão na igreja deste evento',
       );
@@ -109,7 +144,7 @@ export class EventTenantGuard implements CanActivate {
 
   /**
    * Perfis de igreja que a rota exige. `@Roles(...ADMIN_ROLES)` vira "admin
-   * naquela igreja"; `@Roles(...ADMIN_AREA_ROLES)` aceita o financeiro também.
+   * naquela igreja"; `@Roles(...ADMIN_AREA_ROLES)` aceita a tesouraria também.
    * Rota sem `@Roles` (a inscrição, por exemplo) aceita qualquer vínculo.
    */
   private perfisDaRota(exigidos: Role[]): number[] {

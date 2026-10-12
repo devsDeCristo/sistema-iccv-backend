@@ -49,7 +49,7 @@ eventos do painel.
   senão o Nest casaria "status" como um id. Sem id na URL o `EventTenantGuard`
   deixa passar, e quem confere a igreja de cada evento é o serviço.
 - **Por evento:** só admin da igreja dele, ou super admin (`assertChurchAccess`
-  com `Role.ADMIN`, a mesma régua da edição). Financeiro não muda status.
+  com `Role.ADMIN`, a mesma régua da edição). Tesouraria não muda status.
 - **Gravação:** um `updateMany` só, com os que passaram. Trocar o status é só
   gravar o campo; a edição completa não faz nada além disso com ele.
 - **Resposta:** `{ atualizados, falhas: [{ eventId, nome, motivo }] }`. Evento
@@ -67,8 +67,8 @@ Arquivos: `src/event/event.service.ts` (`atualizarStatusEmMassa`),
   pediu (`emPainel=true`); a regra de `TEST` se aplica em cima disso.
 - **`filtroDeEventoEmTeste`** (filtro de listagem) e **`podeVerEventoEmTeste`**
   (caso a caso, em `findOne`/`assertEventIsVisible`) olham a igreja do evento,
-  não o perfil efetivo do usuário: quem é admin numa igreja e financeiro em
-  outra não vê o ensaio da igreja onde só cuida do financeiro. Super admin
+  não o perfil efetivo do usuário: quem é admin numa igreja e tesouraria em
+  outra não vê o ensaio da igreja onde só cuida da tesouraria. Super admin
   atravessa todas. Fora do alcance, o evento `TEST` devolve `404` como se não
   existisse.
 
@@ -180,7 +180,7 @@ Arquivo: `src/event/event.service.ts` (método `remove`), rota
 | --- | --- | --- | --- |
 | `POST` | `/events` | `ADMIN_ROLES` (admin, super admin, dev) | Cria evento; igreja vem do vínculo de quem cria (super admin escolhe via `churchId`). |
 | `GET` | `/events` | Qualquer autenticado | `?painel=true` traz a lista recortada pelas igrejas administradas por quem pediu; sem o parâmetro é o catálogo completo (todas as igrejas), igual para admin e inscrito. |
-| `GET` | `/events/insights` | `ADMIN_AREA_ROLES` (+ financeiro) | Números agregados, recortados pelas igrejas de quem pediu. |
+| `GET` | `/events/insights` | `ADMIN_AREA_ROLES` (+ tesouraria) | Números agregados, recortados pelas igrejas de quem pediu. |
 | `GET` | `/events/:id` | Qualquer autenticado | `?painel=true` restringe às igrejas administradas (fora disso, `404`); `?embedImages=true` inclui `logoBase64`/`coverBase64`, só para geração de PDF. |
 | `PUT` | `/events/:idEvent` | `ADMIN_ROLES` | Edita evento, grupos, produtos e imagens; só admin da igreja do evento (ou super admin, que também pode mover o evento de igreja). |
 | `DELETE` | `/events/:idEvent` | `Role.DEV` | Ver seção "Exclusão do evento". |
@@ -196,7 +196,7 @@ evento pela URL antes da checagem de perfil.
 - **Painel:** com `painel=true`, a lista (e a abertura de um evento
   específico) é recortada por `tenantChurchIds`, que devolve as igrejas
   onde o requisitante tem perfil em `ADMIN_AREA_ROLES` (admin, super admin,
-  dev, financeiro). Super admin recebe `null` do `tenantChurchIds` e por
+  dev, tesouraria). Super admin recebe `null` do `tenantChurchIds` e por
   isso não é filtrado — vê tudo.
 - Abrir um evento pelo painel que não é de nenhuma igreja administrada
   devolve `404`, mesmo que o evento exista.

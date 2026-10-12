@@ -209,7 +209,7 @@ export class UserService {
   ): Promise<UserDTO> {
     // as duas travas: a igreja diz quem o admin alcança, e a do dev protege
     // uma conta que não pertence a igreja nenhuma
-    // trocar a foto é alterar o cadastro: só admin, não financeiro
+    // trocar a foto é alterar o cadastro: só admin, não tesouraria
     await this.assertCanReachUser(requesterId, id, [Role.ADMIN]);
     await this.assertDevAccountIsUntouchableById(requesterId, id);
 
@@ -235,7 +235,7 @@ export class UserService {
      * nunca amplia.
      */
     // gerenciar pessoas é trabalho de admin: as igrejas onde ela é só
-    // financeiro não entram na lista
+    // tesouraria não entram na lista
     const alcance = churchIdsComPerfil(requester, [Role.ADMIN]);
     const podeUsarLente =
       !!filters?.churchId &&
@@ -366,7 +366,7 @@ export class UserService {
     const { password: _password, ...userWithoutPassword } = user;
 
     // Saúde e religião (LGPD, art. 11) só para quem administra a pessoa: o
-    // financeiro chega ao cadastro para cobrar, e não precisa desses campos
+    // tesouraria chega ao cadastro para cobrar, e não precisa desses campos
     if (!(await this.podeVerSensiveis(requesterId, id))) {
       for (const campo of CAMPOS_SENSIVEIS) delete userWithoutPassword[campo];
     }
@@ -415,7 +415,7 @@ export class UserService {
 
     if (limpos.some((vinculo) => !CHURCH_ROLES.includes(vinculo.role))) {
       throw new BadRequestException(
-        'Só admin e financeiro são perfis de igreja',
+        'Só admin e tesouraria são perfis de igreja',
       );
     }
 
@@ -507,7 +507,7 @@ export class UserService {
   private async assertUserInScope(
     requester: { role?: number | null; churchId?: string | null } | null,
     targetId: string,
-    // quem alcança: admin e financeiro para ler; só admin para alterar
+    // quem alcança: admin e tesouraria para ler; só admin para alterar
     roles: number[] = ADMIN_AREA_ROLES,
   ) {
     const scope = userChurchScope(requester, roles);
@@ -583,7 +583,7 @@ export class UserService {
    * autenticado subir arquivo para o storage em nome de outra pessoa.
    */
   async assertPodeTrocarFoto(requesterId: string | undefined, id: string) {
-    // trocar a foto é alterar o cadastro: só admin, não financeiro
+    // trocar a foto é alterar o cadastro: só admin, não tesouraria
     await this.assertCanReachUser(requesterId, id, [Role.ADMIN]);
     await this.assertDevAccountIsUntouchableById(requesterId, id);
   }
@@ -609,7 +609,7 @@ export class UserService {
     }
 
     // a igreja de membro não se troca pelo cadastro: só na inscrição, e
-    // depois só o admin ou o financeiro da igreja, em Membros
+    // depois só o admin ou a tesouraria da igreja, em Membros
     delete data.requestedChurchId;
     delete data.otherChurchName;
 
@@ -661,7 +661,7 @@ export class UserService {
             );
           }
 
-          // só as igrejas onde ele é admin: quem é admin em A e financeiro
+          // só as igrejas onde ele é admin: quem é admin em A e tesouraria
           // em B não edita o cadastro de quem só tem relação com B
           await this.assertUserInScope(requester, id, [Role.ADMIN]);
 
@@ -676,13 +676,13 @@ export class UserService {
         }
 
         // o perfil global só tem três valores: dev, super admin e usuário
-        // comum. Admin e financeiro moram nos vínculos, um por igreja.
+        // comum. Admin e tesouraria moram nos vínculos, um por igreja.
         if (data.role !== undefined) {
           if (
             ![Role.DEV, Role.SUPER_ADMIN, Role.USER].includes(data.role)
           ) {
             throw new BadRequestException(
-              'Admin e financeiro são definidos por igreja, em churchRoles',
+              'Admin e tesouraria são definidos por igreja, em churchRoles',
             );
           }
 
@@ -901,7 +901,7 @@ export class UserService {
   }
 
   /**
-   * Quem tem vínculo de painel (admin/financeiro) em alguma igreja que o
+   * Quem tem vínculo de painel (admin/tesouraria) em alguma igreja que o
    * requisitante não administra não tem o acesso (e-mail, CPF) trocado por
    * ele. Só o super admin, que alcança todas, ou quem administra todas elas.
    */

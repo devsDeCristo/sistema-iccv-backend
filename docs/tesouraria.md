@@ -1,16 +1,41 @@
-# Financeiro (dizimistas, livro-caixa e Pluggy)
+# Tesouraria (dizimistas, livro-caixa e Pluggy)
 
-Módulo financeiro de cada igreja: quem dizima nela (**dizimistas**) e o livro-caixa (**lançamentos**), com entradas e saídas lançadas à mão e importadas do extrato dos bancos pela Pluggy.
+Módulo de tesouraria de cada igreja: quem dizima nela (**dizimistas**) e o livro-caixa (**lançamentos**), com entradas e saídas lançadas à mão e importadas do extrato dos bancos pela Pluggy.
 
-Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`, `ConciliacaoService`, `PlanilhaService`, `categorias.ts`, `conciliacao.ts`, `planilha.ts`) e `src/pluggy/pluggy.service.ts` (leitura do extrato).
+Código: `src/tesouraria` (controller, `DizimistasService`, `LancamentosService`, `ConciliacaoService`, `PlanilhaService`, `categorias.ts`, `conciliacao.ts`, `planilha.ts`) e `src/pluggy/pluggy.service.ts` (leitura do extrato).
 
 ## Quem acessa
 
-- `@Roles(...ADMIN_AREA_ROLES)` + `ChurchTenantGuard`, como a Pluggy: dev, super admin, e admin ou financeiro **da igreja da rota**. O financeiro de uma igreja não lê o caixa da outra trocando o `:churchId`.
+- `@Roles(...ADMIN_AREA_ROLES)` + `ChurchTenantGuard`, como a Pluggy: dev, super admin, e admin ou tesouraria **da igreja da rota**. A tesouraria de uma igreja não lê o caixa da outra trocando o `:churchId`.
 - Além do guard, todo acesso a um registro é pela igreja da rota junto: um lançamento de outra igreja, ou uma pessoa que não é membro desta, responde 404 e não altera nada.
 - Ligar um lançamento a um dizimista exige que a pessoa seja **membro** desta igreja (400 caso contrário).
 
-## Rotas (`/churches/:churchId/financeiro`)
+## Tesoureiro(a) de evento (`EventTreasurer`)
+
+O perfil da igreja que cuida do caixa se chamava "Financeiro" e agora é **Tesouraria** (`Role.TESOURARIA`, o mesmo 3 em `User.role` e `UserChurchRole.role` — nada mudou no banco). Além dele há o tesoureiro(a) **de evento**: quem cuida da tesouraria de um evento sem ser admin nem tesouraria da igreja.
+
+- **Modelo:** `EventTreasurer` (tabela `event_treasurers`), chave `(eventId, userId)`, `kind` (`BASICO` ou `COMPLETO`), `createdById` (o admin que deu o vínculo). Apagar o evento ou a pessoa apaga o vínculo. Migration `20261012150000_event_treasurers` — só cria a tabela e o enum; **não foi aplicada em banco nenhum**.
+- **Não é perfil:** não muda `User.role` nem entra em `perfilEfetivo`. Quem é só tesoureiro de evento continua usuário comum para o resto do sistema.
+- **Básico** vê só a aba Tesouraria dos detalhes do evento; **completo** vê também Tesouraria › Eventos no painel (hoje ainda de exemplo, só no front).
+- **Vínculo de igreja desativada não vale**, como o de igreja (`VINCULO_VALE`).
+- **O acesso** (`src/auth/tesoureiro-do-evento.ts`):
+  - a rota que aceita o tesoureiro diz isso com `@AceitaTesoureiroDoEvento()`. Sem o decorator, nada muda: a rota continua fechada para ele;
+  - `RolesGuard`: fora dos perfis do `@Roles`, deixa passar quem tem algum vínculo de tesoureiro, só em rota com o decorator;
+  - `EventTenantGuard`: quem passou assim só entra **no evento dele** (pelo `:idEvent`, `:eventId` ou pelo evento do `:paymentId`). Sem isto o usuário comum caía no "não é recortado" e alcançava o evento de qualquer igreja — os testes fecham esse caso. Também deixa entrar a tesouraria (ou o admin) de outra igreja que é tesoureira deste evento;
+  - rotas com o decorator: `GET events/:idEvent/payments`, `GET events/:idEvent/payments/logs`, `PUT payments/:paymentId` e `PATCH payments/:paymentId/refund` (a aba Tesouraria). A entrega de produtos é da aba Pedidos, e fica de fora.
+- **Eventos no painel:** `GET /events?painel=true` traz os eventos das igrejas da pessoa **e** os de que ela é tesoureira; quem não tem igreja nenhuma fica só com os dele (antes, o usuário comum recebia o catálogo inteiro com `painel=true`). `GET /events/:id?painel=true` também abre o evento de que ela é tesoureira.
+- **Login:** o `login` e o `GET /auth/admin/validate` (e o `/auth/validate`) mandam `eventTreasurers` (`eventId`, `eventName`, `churchId`, `kind`). O painel admite quem tem perfil de painel **ou** algum vínculo de tesoureiro.
+- **Quem dá o vínculo** (`src/event/tesoureiros.controller.ts`, `events/:idEvent/tesoureiros`):
+
+| Rota | Quem | O que faz |
+|---|---|---|
+| `GET /events/:idEvent/tesoureiros` | `ADMIN_AREA_ROLES` da igreja do evento | os tesoureiros: id, nome, e-mail, foto e `kind` |
+| `PUT /events/:idEvent/tesoureiros/:userId` | `ADMIN_ROLES` da igreja do evento | dá o vínculo ou troca o tipo (`{ kind }`); recusa (400) quem já é admin ou tesouraria da igreja do evento |
+| `DELETE /events/:idEvent/tesoureiros/:userId` | `ADMIN_ROLES` da igreja do evento | tira o vínculo |
+
+  O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela busca de Membros (`GET /churches/:churchId/membros/busca`). O log de auditoria chama a tabela de "Tesoureiro(a) do evento".
+
+## Rotas (`/churches/:churchId/tesouraria`)
 
 | Rota | O que faz |
 | --- | --- |
@@ -30,7 +55,7 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
 
 ## Dizimistas são os membros
 
-- **Não há cadastro de dizimista:** todo membro da igreja (`User.memberChurchId`, ver `docs/membros.md`) é um dizimista em potencial. A lista de dizimistas é a lista de membros; quem entra e sai é o admin, em Membros. O financeiro não adiciona nem tira ninguém.
+- **Não há cadastro de dizimista:** todo membro da igreja (`User.memberChurchId`, ver `docs/membros.md`) é um dizimista em potencial. A lista de dizimistas é a lista de membros; quem entra e sai é o admin, em Membros. A tesouraria não adiciona nem tira ninguém.
 - **Valor do dízimo** (`User.titheAmount`, `Decimal(12,2)`, opcional): o dízimo combinado com o membro, na igreja de que ele é membro (uma só). É o que a importação usa, junto com o CPF, para separar dízimo de oferta (ver abaixo). `PATCH dizimistas/:userId` define; `null` tira. Só vale para membro desta igreja (404 caso contrário). Deixar de ser membro zera o valor.
 - **Números do ano** (`listar`): saem dos lançamentos `INCOME` de categoria `TITHE` desta igreja ligados à pessoa, manuais ou importados. Por membro: total no ano, quanto em cada mês (`porMes`, janeiro a dezembro — a visão por mês da tela), meses do ano com dízimo (1 a 12) e o último dízimo (de qualquer ano). No resumo: membros, quantos dizimaram no mês e no ano, total do mês e do ano, e o total da igreja em cada mês (`porMes`).
 - Apagar a conta do usuário não apaga o dinheiro: o lançamento fica com `userId` nulo (`SetNull`).
@@ -57,7 +82,7 @@ Código: `src/financeiro` (controller, `DizimistasService`, `LancamentosService`
     - outro valor → `OFFERING` (oferta), ainda ligada a ele;
     - dizimista sem valor cadastrado → `TITHE` (o Pix do dízimo é o caso comum).
     
-    Continua sendo um palpite: quem manda dízimo e oferta juntos num Pix só, ou mudou o valor do dízimo sem atualizar o cadastro, cai em oferta — o financeiro corrige a categoria (e o valor no cadastro).
+    Continua sendo um palpite: quem manda dízimo e oferta juntos num Pix só, ou mudou o valor do dízimo sem atualizar o cadastro, cai em oferta — a tesouraria corrige a categoria (e o valor no cadastro).
   - Outro crédito → "outra entrada", sem pessoa.
   - Débito → categoria pela categoria da Pluggy quando há equivalente claro (tarifas → tarifas bancárias; luz, água, telefone, internet → água/luz/internet; aluguel; salários); o resto, "outra saída".
   - Forma: Pix → Pix; TED/DOC/TEF → transferência; boleto → boleto; o resto fica vazio.
@@ -88,7 +113,7 @@ O mesmo dinheiro costuma estar duas vezes no livro-caixa: o Pix que veio do extr
 
 ## Auditoria
 
-`FinancialEntry` passa pelo log de auditoria como as outras tabelas, com o rótulo "Lançamento financeiro" (`MODEL_LABELS`), e é tabela principal (`MAIN_MODELS`); o valor do dízimo aparece nas alterações de "Cadastro". O rótulo "Dizimista" (`Tither`) ficou só para as linhas antigas do log. A importação grava um `createMany` só.
+`FinancialEntry` passa pelo log de auditoria como as outras tabelas, com o rótulo "Lançamento da tesouraria" (`MODEL_LABELS`), e é tabela principal (`MAIN_MODELS`); o valor do dízimo aparece nas alterações de "Cadastro". O rótulo "Dizimista" (`Tither`) ficou só para as linhas antigas do log. A importação grava um `createMany` só.
 
 ## Migration
 

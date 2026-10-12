@@ -13,9 +13,9 @@ function montar(requester: object) {
     {
       id: 'ana',
       fullName: 'Ana',
-      role: Role.FINANCE,
+      role: Role.TESOURARIA,
       churchRoles: [
-        { churchId: 'c1', role: Role.FINANCE },
+        { churchId: 'c1', role: Role.TESOURARIA },
         { churchId: 'c2', role: Role.ADMIN },
       ],
     },
@@ -83,7 +83,11 @@ describe('UserService.atualizarPermissoesEmMassa', () => {
 
     const { atualizados, falhas } = await servico.atualizarPermissoesEmMassa(
       'eu',
-      { userIds: ['eu', 'chefe', 'bia'], churchId: 'c1', role: Role.FINANCE },
+      {
+        userIds: ['eu', 'chefe', 'bia'],
+        churchId: 'c1',
+        role: Role.TESOURARIA,
+      },
     );
 
     expect(atualizados).toBe(1);
@@ -122,8 +126,8 @@ describe('UserService.atualizarPermissoesEmMassa', () => {
 
   it('quem não é admin: 403', async () => {
     const { servico } = montar({
-      role: Role.FINANCE,
-      churchRoles: [{ role: Role.FINANCE, churchId: 'c1' }],
+      role: Role.TESOURARIA,
+      churchRoles: [{ role: Role.TESOURARIA, churchId: 'c1' }],
     });
 
     await expect(

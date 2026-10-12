@@ -9,7 +9,7 @@ import { PlanosService } from './planos.service';
 
 /**
  * "Meus planos": o plano da igreja e os outros que existem, para quem
- * trabalha nela (admin e financeiro) comparar. Só leitura — quem troca o plano
+ * trabalha nela (admin e tesouraria) comparar. Só leitura — quem troca o plano
  * é o super admin, em Igrejas.
  */
 @ApiTags('planos')

@@ -103,7 +103,7 @@ export class DashboardService {
    * Aqui cada número mora dentro do evento a que pertence, e o evento que
    * merece a tela vem separado dos outros.
    *
-   * A home tem dois formatos. Quem administra igreja (admin e financeiro) vê a
+   * A home tem dois formatos. Quem administra igreja (admin e tesouraria) vê a
    * dela; quem atravessa todas (super admin e dev) vê o sistema, e mesmo lá a
    * leitura é por igreja, com o evento em foco de cada uma.
    *
@@ -124,7 +124,7 @@ export class DashboardService {
      * Pedir uma igreja não é o mesmo que poder abri-la.
      *
      * O `churchId` chega pela URL, então quem decide é o vínculo de quem
-     * pediu: super admin atravessa todas, admin e financeiro só alcançam as
+     * pediu: super admin atravessa todas, admin e tesouraria só alcançam as
      * suas. Sem esta linha, o parâmetro seria um jeito de qualquer admin ler o
      * painel inteiro de outra igreja — inscritos, caixa e mural.
      *
@@ -157,13 +157,13 @@ export class DashboardService {
 
     /**
      * O perfil é **por igreja**. Com uma igreja aberta, vale o que a pessoa é
-     * nela: quem é admin na A e financeiro na B, ao abrir a B, vê a home do
-     * financeiro. Sem igreja escolhida vale o perfil efetivo (o mais alto dos
+     * nela: quem é admin na A e tesouraria na B, ao abrir a B, vê a home do
+     * tesouraria. Sem igreja escolhida vale o perfil efetivo (o mais alto dos
      * vínculos que valem), e os blocos de admin — inscrições recentes e mural
      * — se limitam às igrejas onde ela é admin.
      *
      * Até 09/10/2026 valia o `User.role` gravado, o mais alto, em qualquer
-     * igreja: o financeiro de B via a B como admin.
+     * igreja: a tesouraria de B via a B como admin.
      */
     const perfil =
       churchId && !isSuperAdmin(requester)
@@ -186,24 +186,24 @@ export class DashboardService {
       ? {}
       : { churchId: { in: churchIds } };
 
-    /** Publicar notícia é do admin: o financeiro não entra no mural */
+    /** Publicar notícia é do admin: a tesouraria não entra no mural */
     const veMural = !!igrejasDeAdmin?.length;
 
     const ehDev = perfil === Role.DEV;
-    const ehFinanceiro = perfil === Role.FINANCE;
+    const ehTesouraria = perfil === Role.TESOURARIA;
 
     const [abertos, churches, recentRegistrations, news] = await Promise.all([
       this.eventosAbertos(doRecorte),
       todasAsIgrejas ? null : this.minhasIgrejas(requester, churchIds),
       /**
-       * O financeiro não recebe a lista de quem entrou: para ele o que importa
+       * A tesouraria não recebe a lista de quem entrou: para ela o que importa
        * não é quem se inscreveu, e sim quem ainda não pagou.
        */
-      ehFinanceiro ? null : this.inscricoesRecentes(doRecorteDeAdmin),
+      ehTesouraria ? null : this.inscricoesRecentes(doRecorteDeAdmin),
       veMural ? this.mural(igrejasDeAdmin) : null,
     ]);
 
-    const treasury = ehFinanceiro ? await this.tesouraria(doRecorte) : null;
+    const treasury = ehTesouraria ? await this.tesouraria(doRecorte) : null;
 
     /**
      * Os indicadores do sistema são do dev: é o perfil que cuida da operação
@@ -242,12 +242,12 @@ export class DashboardService {
      * Para quem administra, o eixo é o que está em cartaz: o status diz o que
      * ele marcou como ativo, e é isso que ele está tocando.
      *
-     * Para o financeiro, status e data não significam nada. Cobrança de um
+     * Para a tesouraria, status e data não significam nada. Cobrança de um
      * cursilho de fevereiro, desligado há meses, continua sendo dinheiro a
      * receber — e é justamente essa que ninguém lembra de cobrar. O eixo dele
      * é ter saldo em aberto.
      */
-    const daIgreja = ehFinanceiro
+    const daIgreja = ehTesouraria
       ? await this.eventosComSaldo(doRecorte)
       : abertos.length
       ? abertos
@@ -288,7 +288,7 @@ export class DashboardService {
    * ela, um evento que a pessoa marcou como ativo sumia da home no dia
    * seguinte ao fim, enquanto continuava ativo na tela de eventos. Pior — o
    * dinheiro dele sumia junto, e um cursilho encerrado com R$ 15 mil a receber
-   * é exatamente o que o financeiro precisa ver.
+   * é exatamente o que a tesouraria precisa ver.
    *
    * Quem diz se o evento está ativo é o status, que é o campo que a pessoa
    * controla. Em que pé ele está quem diz é a fase, calculada pelas datas — e
@@ -324,7 +324,7 @@ export class DashboardService {
   }
 
   /**
-   * Os eventos que o financeiro precisa ver: os ativos, mais **qualquer um**
+   * Os eventos que a tesouraria precisa ver: os ativos, mais **qualquer um**
    * com dinheiro em aberto, esteja ele desligado ou encerrado há um ano.
    *
    * Filtrar por status aqui esconderia exatamente o que interessa. No banco
@@ -634,7 +634,7 @@ export class DashboardService {
 
       /**
        * Lista de espera só vira tarefa quando existe vaga para chamar alguém —
-       * fila em evento lotado é situação normal, não pendência. O financeiro
+       * fila em evento lotado é situação normal, não pendência. A tesouraria
        * fica de fora: quem chama da lista é quem administra.
        */
       const livres =
@@ -642,7 +642,7 @@ export class DashboardService {
           ? 0
           : evento.seats.total - evento.seats.taken;
 
-      const gerenciaInscricao = todasAsIgrejas || perfil !== Role.FINANCE;
+      const gerenciaInscricao = todasAsIgrejas || perfil !== Role.TESOURARIA;
 
       // chamar alguém para um evento que já acabou não é tarefa de ninguém
       if (
@@ -667,7 +667,7 @@ export class DashboardService {
 
   /**
    * As igrejas da pessoa, com o perfil que ela tem em cada uma — quem é admin
-   * de uma e financeiro de outra precisa ver os dois chapéus, e não só o mais
+   * de uma e tesouraria de outra precisa ver os dois chapéus, e não só o mais
    * alto que ficou em `User.role`.
    */
   private async minhasIgrejas(
@@ -960,7 +960,7 @@ export class DashboardService {
       this.prisma.user.count({ where: { churchRoles: { some: {} } } }),
       /**
        * Ações do time de cada igreja: escritas feitas por quem tem vínculo
-       * com ela — admin e financeiro.
+       * com ela — admin e tesouraria.
        *
        * A igreja sai do **autor**, e não da coisa mexida. Tentar pelo alvo
        * exigiria resolver o caminho até o evento model por model (equipe →

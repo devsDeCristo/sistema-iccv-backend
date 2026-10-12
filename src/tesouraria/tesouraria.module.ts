@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PluggyModule } from 'src/pluggy/pluggy.module';
 import { MembrosModule } from 'src/membros/membros.module';
-import { FinanceiroController } from './financeiro.controller';
+import { TesourariaController } from './tesouraria.controller';
 import { DizimistasService } from './dizimistas.service';
 import { LancamentosService } from './lancamentos.service';
 import { ConciliacaoService } from './conciliacao.service';
@@ -9,7 +9,7 @@ import { PlanilhaService } from './planilha.service';
 
 @Module({
   imports: [PluggyModule, MembrosModule],
-  controllers: [FinanceiroController],
+  controllers: [TesourariaController],
   providers: [
     DizimistasService,
     LancamentosService,
@@ -17,4 +17,4 @@ import { PlanilhaService } from './planilha.service';
     PlanilhaService,
   ],
 })
-export class FinanceiroModule {}
+export class TesourariaModule {}

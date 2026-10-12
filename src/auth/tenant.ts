@@ -11,8 +11,8 @@ import {
  * Recorte multi-tenant do sistema.
  *
  * A permissão de quem administra mora em `UserChurchRole`: uma linha por
- * igreja, dizendo se a pessoa é admin ou financeiro **naquela** igreja. A mesma
- * pessoa pode ser admin de uma e financeiro de outra, e o perfil de uma não
+ * igreja, dizendo se a pessoa é admin ou tesouraria **naquela** igreja. A mesma
+ * pessoa pode ser admin de uma e tesouraria de outra, e o perfil de uma não
  * vale na outra.
  *
  * Fora dos vínculos existem dois perfis, nenhum deles de igreja: o super admin,
@@ -81,7 +81,7 @@ export function perfilEfetivo(
   const perfis = (pessoa.churchRoles ?? []).map((vinculo) => vinculo.role);
 
   if (perfis.includes(Role.ADMIN)) return Role.ADMIN;
-  if (perfis.includes(Role.FINANCE)) return Role.FINANCE;
+  if (perfis.includes(Role.TESOURARIA)) return Role.TESOURARIA;
 
   return Role.USER;
 }

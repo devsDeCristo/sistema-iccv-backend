@@ -37,7 +37,7 @@ export const categoriaCabeNoTipo = (
 
 /**
  * Categoria da Pluggy (em inglês) para a nossa, nas saídas. Só as que têm
- * equivalente claro; o resto entra como "outra saída" para o financeiro
+ * equivalente claro; o resto entra como "outra saída" para a tesouraria
  * reclassificar.
  */
 const SAIDAS_DA_PLUGGY: [RegExp, FinancialCategory][] = [
@@ -83,7 +83,7 @@ const mesmoValor = (a: number, b: number) =>
  * Crédito cujo pagador tem o CPF de um dizimista da igreja fica ligado a ele,
  * e o valor decide o que é: igual ao dízimo combinado, dízimo; diferente,
  * oferta. Sem valor combinado no cadastro, é dízimo — o Pix do dízimo é o caso
- * comum. Sem dizimista, crédito é "outra entrada". Em todos, o financeiro
+ * comum. Sem dizimista, crédito é "outra entrada". Em todos, a tesouraria
  * corrige a categoria se o palpite errar.
  *
  * `dizimistaPorCpf`: CPF (só dígitos) → dizimista.

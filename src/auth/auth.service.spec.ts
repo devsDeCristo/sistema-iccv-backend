@@ -66,12 +66,12 @@ describe('AuthService — login de quem administra igreja', () => {
     expect(user.churchRoles).toEqual([]);
   });
 
-  it('inativa numa, financeiro na ativa: fica com o perfil da ativa', async () => {
+  it('inativa numa, tesouraria na ativa: fica com o perfil da ativa', async () => {
     const user = await logar(Role.ADMIN, [
       { status: 'INACTIVE', role: Role.ADMIN },
-      { status: 'ACTIVE', role: Role.FINANCE },
+      { status: 'ACTIVE', role: Role.TESOURARIA },
     ]);
-    expect(user.role).toBe(Role.FINANCE);
+    expect(user.role).toBe(Role.TESOURARIA);
   });
 
   it('super admin não depende de igreja', async () => {

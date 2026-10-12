@@ -58,6 +58,10 @@ import {
   tenantChurchIds,
 } from 'src/auth/tenant';
 import {
+  eventosDoTesoureiro,
+  tesoureiroDoEvento,
+} from 'src/auth/tesoureiro-do-evento';
+import {
   filtroDeEventoEmTeste,
   podeVerEventoEmTeste,
 } from './event-visibility';
@@ -2116,8 +2120,27 @@ export class EventService {
       : null;
 
     const igrejasDoPainel = tenantChurchIds(requester, ADMIN_AREA_ROLES);
+    /**
+     * No painel entram os eventos das igrejas que a pessoa administra e os
+     * de que ela é tesoureira (`EventTreasurer`). Quem não administra igreja
+     * nenhuma — o tesoureiro de evento — fica só com os dele, e não com o
+     * catálogo inteiro.
+     */
+    const doTesoureiro =
+      emPainel && requesterId
+        ? (await eventosDoTesoureiro(this.prisma, requesterId)).map(
+            (vinculo) => vinculo.event.id,
+          )
+        : [];
     const churchFilter =
-      emPainel && igrejasDoPainel ? { churchId: { in: igrejasDoPainel } } : {};
+      emPainel && !isSuperAdmin(requester)
+        ? {
+            OR: [
+              { churchId: { in: igrejasDoPainel ?? [] } },
+              { id: { in: doTesoureiro } },
+            ],
+          }
+        : {};
 
     // ensaio de configuração só aparece para quem administra aquela igreja
     const testFilter = filtroDeEventoEmTeste(requester);
@@ -2226,7 +2249,15 @@ export class EventService {
       const igrejas = emPainel
         ? tenantChurchIds(requester, ADMIN_AREA_ROLES)
         : null;
-      if (igrejas && !igrejas.includes(event.churchId)) {
+      if (
+        igrejas &&
+        !igrejas.includes(event.churchId) &&
+        // admin ou tesouraria de outra igreja que é tesoureiro(a) deste evento
+        !(
+          requesterId &&
+          (await tesoureiroDoEvento(this.prisma, requesterId, id))
+        )
+      ) {
         throw new NotFoundException('Event does not exist');
       }
 

@@ -31,7 +31,7 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
  * bancária vai o dinheiro dos inscritos. Três coisas a fecham, e as três
  * precisam valer juntas:
  *
- * - `@Roles(...ADMIN_ROLES)` — o financeiro não entra. Quem dá baixa em
+ * - `@Roles(...ADMIN_ROLES)` — a tesouraria não entra. Quem dá baixa em
  *   pagamento não é quem escolhe a conta que recebe.
  * - `ChurchTenantGuard` — admin de uma igreja não alcança a configuração da
  *   outra, mesmo trocando o `:churchId` da URL na mão.

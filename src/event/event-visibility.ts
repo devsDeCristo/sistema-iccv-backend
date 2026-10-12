@@ -12,9 +12,9 @@ import {
  *
  * Evento em teste é ensaio de configuração: só faz sentido para quem
  * **administra** aquela igreja. A pergunta é por igreja e não pelo perfil
- * efetivo — quem é admin numa igreja e financeiro em outra tem perfil efetivo
+ * efetivo — quem é admin numa igreja e tesouraria em outra tem perfil efetivo
  * de admin, e decidir por ele mostrava a ela os ensaios da igreja onde ela só
- * cuida do financeiro.
+ * cuida da tesouraria.
  *
  * Vale igual no painel e no catálogo: no painel a lista já vem recortada pelas
  * igrejas da pessoa, e aqui os ensaios das que ela não administra saem fora.
@@ -36,7 +36,7 @@ export function filtroDeEventoEmTeste(requester?: TenantRequester | null) {
 
   const igrejasQueAdministra = churchIdsComPerfil(requester, [Role.ADMIN]);
 
-  // inscrito e financeiro puro não administram nada: nenhum ensaio para eles
+  // inscrito e tesouraria puro não administram nada: nenhum ensaio para eles
   if (igrejasQueAdministra.length === 0) {
     return FORA_DE_ENSAIO;
   }

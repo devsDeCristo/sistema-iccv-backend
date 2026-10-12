@@ -61,10 +61,10 @@ describe('EventService.atualizarStatusEmMassa', () => {
     ]);
   });
 
-  it('financeiro da igreja não muda status', async () => {
+  it('tesouraria da igreja não muda status', async () => {
     const { servico, prisma } = montar({
-      role: Role.FINANCE,
-      churchRoles: [{ role: Role.FINANCE, churchId: 'c1' }],
+      role: Role.TESOURARIA,
+      churchRoles: [{ role: Role.TESOURARIA, churchId: 'c1' }],
     });
 
     const resultado = await servico.atualizarStatusEmMassa('eu', {

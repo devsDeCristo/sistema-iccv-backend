@@ -11,7 +11,7 @@ export class DashboardQueryDto {
    *
    * **Não é uma chave de acesso.** Quem pode pedir cada igreja é decidido no
    * serviço, pelo vínculo de quem pediu: super admin atravessa todas, e admin
-   * e financeiro só alcançam as suas. Mandar o id de outra igreja aqui rende
+   * e tesouraria só alcançam as suas. Mandar o id de outra igreja aqui rende
    * 403, e não um painel.
    */
   @ApiProperty({

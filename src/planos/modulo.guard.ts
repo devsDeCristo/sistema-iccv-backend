@@ -16,7 +16,7 @@ import { MODULO_KEY, exigirModulo } from './modulos';
  * evento, inscrever-se, pagar a própria inscrição) e passa — o evento já
  * publicado segue aberto ao público mesmo com Eventos fora do plano.
  *
- * Recorta quem trabalha na igreja (admin, financeiro). Dev e super admin veem
+ * Recorta quem trabalha na igreja (admin, tesouraria). Dev e super admin veem
  * todos os módulos de todas as igrejas: o plano não vale para eles.
  *
  * A igreja sai da rota: `:churchId`; o evento (`:idEvent`, `:eventId`, ou
