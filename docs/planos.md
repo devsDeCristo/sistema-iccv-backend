@@ -10,19 +10,18 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 
 - `Plan { id, name (único), description?, price, modules ChurchModule[] }`, tabela `plans`. `price` é o **valor mensal** em reais, `Decimal(10,2)` (como o dinheiro do livro-caixa), padrão 0 = gratuito; a API devolve número.
 - `Church.planId` (opcional, `onDelete: Restrict`): o plano da igreja.
-- **Igreja sem plano não tem módulo nenhum**: só o painel básico (Início, Usuários e Membros). Nenhuma igreja nasce com plano — nem as que já existiam: depois da migração, o super admin escolhe um plano para cada uma em Igrejas.
+- **Igreja sem plano não tem módulo nenhum**: só o painel básico (Início, Meus planos e Membros; Usuários é só de dev e super admin). Nenhuma igreja nasce com plano — nem as que já existiam: depois da migração, o super admin escolhe um plano para cada uma em Igrejas.
 - Os limites que vierem (quantidade de eventos e etc.) entram no `Plan` como colunas próprias.
 
 ### Módulos (`ChurchModule`)
 
 **Membros não é módulo:** toda igreja tem, com ou sem plano (e a tesouraria depende dele — os dizimistas são os membros). **As configurações seguem o módulo a que servem:** Pagamentos é de Eventos, Disparadores (WhatsApp) de Notícias, Integrações (Pluggy) de Tesouraria — WhatsApp e Integrações já foram módulos próprios e saíram (migration `20261012130000`).
 
-| Módulo            | O que fecha                                                                                                                                                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EVENTS`          | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; e a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos) |
-| `NEWS`            | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores)                                                                                                                            |
-| `TREASURY`        | Tesouraria (`/churches/:churchId/tesouraria`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações)                                                                                                    |
-| `ONLINE_PAYMENTS` | Cobrança online nos eventos (o antigo `Church.modulePayment`)                                                                                                                                                                |
+| Módulo     | O que fecha                                                                                                                                                                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EVENTS`   | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos); e a cobrança online nas inscrições (ver abaixo) |
+| `NEWS`     | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores)                                                                                                                                                                           |
+| `TREASURY` | Tesouraria (`/churches/:churchId/tesouraria`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações)                                                                                                                                                   |
 
 ## Rotas (`/plans`)
 
