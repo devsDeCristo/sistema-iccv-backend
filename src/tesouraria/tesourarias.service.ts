@@ -906,6 +906,8 @@ export class TesourariasService {
           where: {
             eventId: { in: [...tesourariaDoEvento.keys()] },
             status: PaymentStatus.PAID,
+            // inscrição gratuita: não há dinheiro para conciliar
+            amount: { gt: 0 },
           },
           include: {
             treasuryLink: true,
