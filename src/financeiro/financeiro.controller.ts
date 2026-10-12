@@ -33,6 +33,9 @@ import {
   PreviaDaPlanilhaDto,
   UpdateEntryDto,
 } from './dto/financeiro.dto';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 /**
  * Módulo financeiro da igreja: dizimistas e livro-caixa.
@@ -44,8 +47,10 @@ import {
  */
 @ApiTags('financeiro')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_AREA_ROLES)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.TREASURY)
 @Controller('churches/:churchId/financeiro')
 export class FinanceiroController {
   constructor(

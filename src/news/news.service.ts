@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { runAsJob } from 'src/context/request.context';
-import { NewsDispatchOrigin, NewsScheduleKind } from '@prisma/client';
+import {
+  ChurchModule,
+  NewsDispatchOrigin,
+  NewsScheduleKind,
+} from '@prisma/client';
 import { EventStatus, PrismaService } from '../prisma';
 import {
   SELECT_TENANT,
@@ -32,6 +36,7 @@ import {
   TOLERANCIA_DE_ATRASO_MS,
   validarAgendamento,
 } from './agendamento';
+import { exigirModulo } from 'src/planos/modulos';
 
 /**
  * Tamanho máximo da mensagem.
@@ -234,6 +239,11 @@ export class NewsService {
       eventId,
       data.churchId,
     );
+    // o plano da igreja precisa ter Notícias (a igreja pode nem vir no corpo).
+    // Dev e super admin veem todos os módulos
+    if (igrejaDaNoticia && !isSuperAdmin(autor)) {
+      await exigirModulo(this.prisma, igrejaDaNoticia, ChurchModule.NEWS);
+    }
     const links = normalizaLinks(data.groupLinks);
     await this.assertEventoDaIgreja(eventId, igrejaDaNoticia);
     await this.assertDestinosDaIgreja(
@@ -303,6 +313,11 @@ export class NewsService {
       data.churchId && data.churchId !== atual.churchId
         ? await this.igrejaDaPublicacao(requester, null, data.churchId)
         : atual.churchId;
+    // a nova igreja também precisa ter Notícias no plano (dev e super admin
+    // veem todos os módulos)
+    if (igreja && igreja !== atual.churchId && !isSuperAdmin(requester)) {
+      await exigirModulo(this.prisma, igreja, ChurchModule.NEWS);
+    }
     await this.assertEventoDaIgreja(eventId, igreja);
     await this.assertDestinosDaIgreja(igreja, data.groupRoleIds, links);
 

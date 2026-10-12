@@ -34,10 +34,15 @@ import { aquecerImagensDoCracha } from 'src/cracha/cracha.service';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES, ADMIN_ROLES, Role } from 'src/auth/roles';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 @ApiTags('events')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.EVENTS)
 @Controller('events')
 export class EventController {
   constructor(private readonly eventService: EventService) {}

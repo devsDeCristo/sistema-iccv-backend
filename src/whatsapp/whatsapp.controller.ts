@@ -17,6 +17,9 @@ import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { PairingCodeDto } from './dto/whatsapp.dto';
 import { WhatsappService } from './whatsapp.service';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 /**
  * Painel do disparador de WhatsApp de uma igreja.
@@ -34,8 +37,10 @@ import { WhatsappService } from './whatsapp.service';
  */
 @ApiTags('whatsapp')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_ROLES)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.WHATSAPP)
 @Controller('churches/:churchId/whatsapp')
 export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}

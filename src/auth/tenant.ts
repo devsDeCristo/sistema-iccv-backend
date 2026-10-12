@@ -188,9 +188,11 @@ export function assertChurchAccess(
  * `where` do Prisma que limita a lista de pessoas às igrejas do requisitante.
  *
  * O que traz alguém para a lista é participar de um evento da igreja —
- * inscrito ou na lista de espera — ou administrar a própria igreja. Usuário
- * comum não tem vínculo e entra só pelos eventos; quem se cadastrou e ainda não
- * se inscreveu em nada não aparece para admin nenhum, só para o super admin.
+ * inscrito ou na lista de espera —, administrar a própria igreja, ou ser
+ * membro dela (ou ter pedido para ser, na inscrição). É por Eventos e por
+ * Membros que a igreja chega numa pessoa: a tela de Usuários é só do super
+ * admin. Quem se cadastrou e não tem nada disso com igreja nenhuma não
+ * aparece para admin nenhum, só para o super admin.
  */
 export function userChurchScope(
   requester?: TenantRequester | null,
@@ -204,6 +206,8 @@ export function userChurchScope(
       { churchRoles: { some: { churchId: { in: churchIds } } } },
       { events: { some: { event: { churchId: { in: churchIds } } } } },
       { waitlists: { some: { event: { churchId: { in: churchIds } } } } },
+      { memberChurchId: { in: churchIds } },
+      { requestedChurchId: { in: churchIds } },
     ],
   };
 }

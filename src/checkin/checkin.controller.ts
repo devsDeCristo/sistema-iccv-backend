@@ -16,11 +16,16 @@ import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 import { CheckinService } from './checkin.service';
 import { CompleteCheckinDto, SearchCheckinDto } from './dto/checkin.dto';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 @ApiTags('checkin')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
 @Roles(...ADMIN_ROLES)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.EVENTS)
 @Controller('events/:eventId/checkin')
 export class CheckinController {
   constructor(private readonly checkinService: CheckinService) {}

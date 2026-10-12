@@ -17,11 +17,16 @@ import { RolesGuard } from 'src/decorators/roles.guard';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 @ApiTags('bedrooms')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
 @Roles(...ADMIN_ROLES)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.EVENTS)
 @Controller('events/:idEvent/bedrooms')
 export class BedroomsController {
   constructor(private readonly bedroomsService: BedroomsService) {}

@@ -28,12 +28,17 @@ import { ADMIN_ROLES } from 'src/auth/roles';
 import { NewsService } from './news.service';
 import { NewsDto } from './dto/news.dto';
 import { SaveNewsSchedulesDto } from './dto/news-schedule.dto';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 const IMAGEM = FileFieldsInterceptor([{ name: 'imageFile', maxCount: 1 }]);
 
 @ApiTags('news')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuloGuard)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.NEWS)
 @Controller('news')
 export class NewsController {
   constructor(private readonly newsService: NewsService) {}

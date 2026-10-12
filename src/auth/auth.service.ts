@@ -20,6 +20,7 @@ import {
   JANELA_MS,
   situacaoDoLogin,
 } from './protecao-de-login';
+import { modulosDa } from 'src/planos/modulos';
 
 /** De onde veio a tentativa. O controller extrai da requisição. */
 export type ContextoDeLogin = {
@@ -59,9 +60,13 @@ export class AuthService {
     }
     // o painel usa os vínculos para saber em quais igrejas a pessoa trabalha;
     // igreja inativa não dá painel (ver `VINCULO_VALE`)
-    const churchRoles = userConsult.churchRoles.filter(
-      (vinculo) => vinculo.church.status !== ChurchStatus.INACTIVE,
-    );
+    const churchRoles = userConsult.churchRoles
+      .filter((vinculo) => vinculo.church.status !== ChurchStatus.INACTIVE)
+      // os módulos do plano de cada igreja: o painel esconde o que está fora
+      .map(({ church: { plan, ...church }, ...vinculo }) => ({
+        ...vinculo,
+        church: { ...church, modulos: modulosDa({ plan }) },
+      }));
     // o perfil sai dos vínculos que valem, e não do gravado, que pode estar
     // atrasado (igreja desativada antes do recálculo existir)
     const role = perfilEfetivo({ role: userConsult.role, churchRoles });

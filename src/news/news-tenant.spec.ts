@@ -100,8 +100,14 @@ describe('NewsService — recorte das telas por igreja', () => {
 });
 
 describe('NewsService — trocar a igreja na edição', () => {
-  const editar = (churchId: string, grupos: number) => {
+  const editar = (churchId: string, grupos: number, modulos = ['NEWS']) => {
     const prisma = {
+      // o plano da igreja nova precisa ter Notícias
+      church: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ name: churchId, plan: { modules: modulos } }),
+      },
       news: {
         findUnique: jest
           .fn()
@@ -131,5 +137,9 @@ describe('NewsService — trocar a igreja na edição', () => {
 
   it('trocando para B, os grupos da igreja A são recusados', async () => {
     await expect(editar('B', 0)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('trocando para uma igreja sem Notícias no plano, recusa', async () => {
+    await expect(editar('B', 0, [])).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

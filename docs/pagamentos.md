@@ -213,9 +213,9 @@ R$ 300 vira `IN_ANALYSIS`.
 
 ---
 
-## 7. `MODULE_PAYMENT` por igreja
+## 7. Cobrança online por igreja
 
-`Church.modulePayment` substituiu as duas variáveis globais. Desligado:
+Substituiu as duas variáveis globais. Foi `Church.modulePayment`; hoje é o módulo `ONLINE_PAYMENTS` do **plano** da igreja (ver `docs/planos.md`) — as respostas seguem com o nome `modulePayment`, calculado pelo plano. Sem o módulo:
 
 - `createCheckout` recusa com **503** antes de qualquer escrita;
 - a reconciliação **pula** as cobranças daquela igreja;
@@ -225,13 +225,9 @@ R$ 300 vira `IN_ANALYSIS`.
 As credenciais **não** são apagadas: desligar pausa, religar devolve tudo como
 estava — que é o caso comum (pausar uma igreja por um mês).
 
-**Quem liga e desliga é dev ou super admin**, não quem administra a igreja.
-Continua sendo decisão de plataforma, como era quando morava no `.env`. Deixar o
-admin desligar daria a ele um jeito de parar a reconciliação das cobranças que
-ele mesmo abriu — o dinheiro entra e ninguém dá baixa.
+**Quem decide é dev ou super admin**, pelo plano da igreja — não quem administra a igreja. Deixar o admin desligar daria a ele um jeito de parar a reconciliação das cobranças que ele mesmo abriu.
 
-Nasce **ligado**. Era esse o valor das variáveis em produção, e nascer desligado
-tiraria a cobrança de quem já cobra, sem ninguém pedir.
+Igreja sem plano não cobra: depois da migração dos planos, nenhuma cobra até receber um plano com Cobrança online.
 
 ---
 

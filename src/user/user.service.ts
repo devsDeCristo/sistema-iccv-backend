@@ -49,6 +49,7 @@ import {
   mascararEmail,
   mudaAcesso,
 } from './acesso';
+import { SELECT_MODULOS } from 'src/planos/modulos';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -346,11 +347,14 @@ export class UserService {
       include: {
         // o painel precisa saber em quais igrejas a pessoa trabalha. A
         // situação vai junto: a sessão (`/auth/validate`) descarta as
-        // inativas, e a tela de permissões mostra todas
+        // inativas, e a tela de permissões mostra todas. Os módulos do plano
+        // de cada uma dizem o que o painel mostra nela
         churchRoles: {
           select: {
             role: true,
-            church: { select: { id: true, name: true, status: true } },
+            church: {
+              select: { id: true, name: true, status: true, ...SELECT_MODULOS },
+            },
           },
         },
       },

@@ -40,6 +40,7 @@ import {
   emTransacaoSerializavel,
   reativarCompras,
 } from 'src/event/event-products';
+import { SELECT_MODULOS, cobraOnline } from 'src/planos/modulos';
 /**
  * Os estados que só se alcançam quando alguém declara, pela mão, que o
  * dinheiro chegou ou está a caminho: baixa direta e comprovante anexado.
@@ -156,17 +157,16 @@ export class PaymentService {
    *
    * Substitui o antigo `PAGBANK_PAYMENT_ENABLED`, que era do servidor inteiro:
    * desligar tirava a cobrança de todas as igrejas de uma vez, e não havia como
-   * uma cobrar e a vizinha não. Agora é `Church.modulePayment`.
+   * uma cobrar e a vizinha não. Depois foi `Church.modulePayment`; agora é o
+   * módulo `ONLINE_PAYMENTS` do plano da igreja.
    *
    * Fica acima da configuração de gateway, e não junto: uma igreja pode ter a
    * casa cadastrada e certa e ainda assim não cobrar, porque o módulo dela está
    * desligado. A ordem importa — conferir a casa primeiro devolveria "nenhuma
    * casa configurada" para quem na verdade está com o módulo fora.
    */
-  private exigirModuloDePagamento(church: {
-    modulePayment: boolean;
-  }) {
-    if (!church.modulePayment) {
+  private exigirModuloDePagamento(church: Parameters<typeof cobraOnline>[0]) {
+    if (!cobraOnline(church)) {
       // mesma frase do gateway ausente: para quem está do outro lado da tela,
       // módulo desligado e casa sem cadastro são a mesma coisa — esta igreja
       // não recebe pelo site
@@ -227,7 +227,7 @@ export class PaymentService {
       // se esta igreja cobra online
       const event = await this.prisma.event.findUnique({
         where: { id: eventId },
-        include: { church: { select: { modulePayment: true } } },
+        include: { church: { select: SELECT_MODULOS } },
       });
       if (!event) throw new NotFoundException('Event not found');
 
@@ -1285,7 +1285,7 @@ export class PaymentService {
         // O módulo da igreja dona do evento: é ele que decide se a tela mostra
         // ou esconde tudo que fala de pagamento neste cartão. Sem vir daqui, a
         // tela teria que perguntar igreja por igreja para montar a lista.
-        church: { select: { modulePayment: true } },
+        church: { select: SELECT_MODULOS },
 
         users: {
           where: { userId },
@@ -1361,7 +1361,8 @@ export class PaymentService {
       eventId: event.id,
       eventName: event.name,
       data: event.data,
-      modulePayment: event.church.modulePayment,
+      // o nome antigo, para a tela: agora sai do plano da igreja
+      modulePayment: cobraOnline(event.church),
 
       /** 🔹 Liberação de menor de idade — NOT_REQUIRED quando não há inscrição do usuário neste evento */
       minorApprovalStatus:

@@ -30,7 +30,7 @@ Arquivos: `src/church/church.controller.ts`, `src/church/church.service.ts`,
 | `name` | `String`, único (case-insensitive) | mínimo 3 caracteres; nome repetido responde `409 Conflict` |
 | `status` | `ChurchStatus` (`ACTIVE`/`INACTIVE`) | padrão `ACTIVE` na criação; omitido na edição mantém o que já estava |
 | `spiritualLeaderId` | `String?` (id de `User`) | quem responde pela igreja; `null` desfaz o vínculo, omitido mantém o atual |
-| `modulePayment` | `Boolean`, padrão `true` | liga/desliga a cobrança online da igreja — não é editado por este controller (ver seção própria) |
+| `planId` | `String?` (id de `Plan`) | o plano: quais módulos a igreja usa (ver `docs/planos.md`); `null` tira o plano (a igreja fica sem módulo nenhum), omitido na edição mantém; plano inexistente responde 400. A listagem traz `plan { id, name, modules }` |
 
 ## Situação (ativa/inativa)
 
@@ -79,32 +79,9 @@ Vincular alguém como `spiritualLeaderId`:
 - **`SetNull` no banco:** apagar a conta do líder não apaga a igreja; ela
   fica sem assinatura até vincularem outra pessoa.
 
-## Módulo de pagamento por igreja (`modulePayment`)
+## Cobrança online por igreja
 
-Cada igreja liga/desliga a própria cobrança online. Substitui variáveis de
-ambiente globais que existiam antes (`PAGBANK_PAYMENT_ENABLED` no servidor,
-`VITE_MODULE_PAYMENT` na tela), que desligavam a cobrança de todas as igrejas
-ao mesmo tempo.
-
-| Método | Rota | Quem pode | Ação |
-| --- | --- | --- | --- |
-| `PATCH` | `/churches/:churchId/payment-providers/module` | `SUPER_ADMIN_ROLES` (sobrescreve o `ADMIN_ROLES` da classe) | liga/desliga a cobrança da igreja |
-
-- Rota vive no controller de gateways de pagamento
-  (`src/payment-providers/payment-provider.controller.ts`), não no
-  `ChurchController` — mas o campo é da `Church`.
-- **Só super admin/dev**, mesmo sendo uma rota sob `/churches/:churchId/...`
-  fechada por `ChurchTenantGuard` (que normalmente aceitaria admin da própria
-  igreja): decisão de plataforma, como era a variável de ambiente, não do
-  admin da igreja — evita que o admin desligue e pare a reconciliação das
-  cobranças que ele mesmo abriu.
-- **Desligado:** o sistema não abre checkout para a igreja, a reconciliação
-  pula as cobranças dela e a tela esconde tudo que fala de pagamento. Igreja
-  sem gateway cadastrado continua sem cobrar de qualquer forma.
-- **Ligado por padrão** para igrejas já existentes (era o valor da variável
-  global antes da migração).
-- Ver `docs/pagamentos.md` para o cadastro do gateway em si
-  (`PaymentProviderConfig`).
+Era o `Church.modulePayment` (com a rota `PATCH /churches/:churchId/payment-providers/module`). Virou o módulo `ONLINE_PAYMENTS` do plano da igreja — ver `docs/planos.md`. A coluna e a rota saíram.
 
 ## Remoção
 

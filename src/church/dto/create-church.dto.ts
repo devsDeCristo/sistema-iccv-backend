@@ -43,4 +43,14 @@ export class CreateChurchDto {
   @ValidateIf((dto) => dto.spiritualLeaderId !== null)
   @IsUUID()
   spiritualLeaderId?: string | null;
+
+  /**
+   * O plano da igreja: quais módulos ela usa. `null` tira o plano (a igreja
+   * fica sem módulo nenhum); omitido, a edição mantém o que já estava.
+   */
+  @ApiPropertyOptional({ description: 'Id do plano', nullable: true })
+  @IsOptional()
+  @ValidateIf((dto) => dto.planId !== null)
+  @IsUUID()
+  planId?: string | null;
 }

@@ -115,7 +115,7 @@ describe('assertChurchAccess', () => {
 });
 
 describe('userChurchScope', () => {
-  it('alcança quem administra as igrejas e quem participa dos eventos delas', () => {
+  it('alcança quem administra as igrejas, quem participa dos eventos delas e os membros (e pedidos)', () => {
     expect(userChurchScope(doisChapeus)).toEqual({
       OR: [
         { churchRoles: { some: { churchId: { in: [IGREJA_A, IGREJA_B] } } } },
@@ -129,6 +129,8 @@ describe('userChurchScope', () => {
             some: { event: { churchId: { in: [IGREJA_A, IGREJA_B] } } },
           },
         },
+        { memberChurchId: { in: [IGREJA_A, IGREJA_B] } },
+        { requestedChurchId: { in: [IGREJA_A, IGREJA_B] } },
       ],
     });
   });

@@ -17,6 +17,9 @@ import { RolesGuard } from 'src/decorators/roles.guard';
 import { CrachaService } from './cracha.service';
 import { GerarCrachasDto } from './dto/gerar-crachas.dto';
 import { naFilaDaRequisicao } from 'src/pdf/fila';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 /**
  * Os mesmos perfis que abrem a lista de inscritos do evento — é dela que saem
@@ -25,7 +28,9 @@ import { naFilaDaRequisicao } from 'src/pdf/fila';
  */
 @ApiTags('crachas')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.EVENTS)
 @Controller('events/:idEvent/crachas')
 export class CrachaController {
   constructor(private readonly crachaService: CrachaService) {}

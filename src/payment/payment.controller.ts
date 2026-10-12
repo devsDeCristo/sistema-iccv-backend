@@ -35,10 +35,15 @@ import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { ListPaymentLogsDto } from './dto/list-payment-logs.dto';
 import { UpdateProductsDeliveryDto } from './dto/update-products-delivery.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 @ApiTags('payments')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.EVENTS)
 @Controller()
 export class PaymentController {
   constructor(

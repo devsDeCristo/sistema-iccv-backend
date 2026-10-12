@@ -18,6 +18,9 @@ import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import { PluggyService } from './pluggy.service';
 import { SavePluggyDto } from './dto/save-pluggy.dto';
+import { ChurchModule } from '@prisma/client';
+import { Modulo } from 'src/planos/modulos';
+import { ModuloGuard } from 'src/planos/modulo.guard';
 
 /**
  * Integração da igreja com a Pluggy (Configurações › Integrações).
@@ -29,8 +32,10 @@ import { SavePluggyDto } from './dto/save-pluggy.dto';
  */
 @ApiTags('pluggy')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
 @Roles(...ADMIN_AREA_ROLES)
+// fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
+@Modulo(ChurchModule.INTEGRATIONS)
 @Controller('churches/:churchId/pluggy')
 export class PluggyController {
   constructor(private readonly service: PluggyService) {}

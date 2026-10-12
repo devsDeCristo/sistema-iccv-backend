@@ -13,6 +13,7 @@ import * as sharp from 'sharp';
 
 import {
   CheckoutStatus,
+  ChurchModule,
   ChurchStatus,
   Event,
   EventStatus,
@@ -71,6 +72,7 @@ import {
 import { calculateAge } from 'src/utils/age';
 import { PaymentGatewayRegistry } from 'src/gateways/core/payment-gateway.registry';
 import { fileToDataUri } from 'src/utils/documentBase64';
+import { SELECT_MODULOS, cobraOnline, exigirModulo } from 'src/planos/modulos';
 
 type EventWithGroupRole = Prisma.EventGetPayload<{
   include: {
@@ -1710,6 +1712,12 @@ export class EventService {
       if (!church) {
         throw new BadRequestException('Igreja não encontrada');
       }
+
+      // o plano da igreja precisa ter Eventos (a rota não sabe a igreja: quem
+      // administra uma só nem a manda). Dev e super admin veem todos os módulos
+      if (!isSuperAdmin(requester)) {
+        await exigirModulo(this.prisma, churchId, ChurchModule.EVENTS);
+      }
     }
 
     if (!churchId) {
@@ -2180,11 +2188,11 @@ export class EventService {
       const event = await this.prisma.event.findUnique({
         where: { id },
         include: {
-          // O módulo de cobrança da igreja dona do evento. A tela de inscrição
-          // decide por ele se oferece pagamento ou confirma direto — antes isso
-          // vinha de uma variável de ambiente do front, igual para todas.
-          // o nome vai no cabeçalho das planilhas exportadas da página
-          church: { select: { modulePayment: true, name: true } },
+          // O plano da igreja dona do evento diz se ela cobra online (módulo
+          // `ONLINE_PAYMENTS`). A tela de inscrição decide por ele se oferece
+          // pagamento ou confirma direto. O nome vai no cabeçalho das
+          // planilhas exportadas da página
+          church: { select: { name: true, ...SELECT_MODULOS } },
           groupRoles: {
             include: {
               roles: {
@@ -2236,8 +2244,10 @@ export class EventService {
        */
       const comCobranca = {
         ...event,
+        // `modulePayment` segue o nome antigo para a tela: agora sai do plano
         church: {
-          ...event.church,
+          name: event.church.name,
+          modulePayment: cobraOnline(event.church),
           chargesOnline: await this.registry.igrejaCobraOnline(event.churchId),
         },
       };

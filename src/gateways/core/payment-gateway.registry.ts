@@ -9,6 +9,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { SecretCryptoService } from 'src/crypto/secret-crypto.service';
 import { PAYMENT_GATEWAYS, PaymentGateway } from './payment-gateway.interface';
 import { GatewayContext, PaymentGatewayDescriptor } from './gateway.types';
+import { SELECT_MODULOS, cobraOnline } from 'src/planos/modulos';
 
 /** A casa, a credencial aberta e a linha do banco, juntas */
 export interface GatewayResolvido {
@@ -98,13 +99,14 @@ export class PaymentGatewayRegistry {
   /** A igreja tem alguma casa ligada? Usado para não oferecer o botão de pagar. */
   async igrejaCobraOnline(churchId: string): Promise<boolean> {
     // O módulo vem antes da casa: a igreja pode ter gateway cadastrado, certo e
-    // ligado e mesmo assim não cobrar, porque o módulo dela está desligado.
+    // ligado e mesmo assim não cobrar, porque o plano dela não tem cobrança
+    // online (`ONLINE_PAYMENTS`).
     const igreja = await this.prisma.church.findUnique({
       where: { id: churchId },
-      select: { modulePayment: true },
+      select: SELECT_MODULOS,
     });
 
-    if (!igreja?.modulePayment) return false;
+    if (!cobraOnline(igreja)) return false;
 
     const total = await this.prisma.paymentProviderConfig.count({
       where: { churchId, enabled: true, isDefault: true },

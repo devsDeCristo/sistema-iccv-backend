@@ -27,7 +27,7 @@ Arquivo: `prisma/schema.prisma` (enum `EventStatus`).
 
 ### Igreja no detalhe do evento
 
-`GET /events/:id` traz da igreja `modulePayment`, `name` (o cabeçalho das
+`GET /events/:id` traz da igreja `modulePayment` (o módulo `ONLINE_PAYMENTS` do plano, ver `docs/planos.md`), `name` (o cabeçalho das
 planilhas exportadas da página do evento) e `chargesOnline` (módulo ligado e
 gateway ativo, calculado por `igrejaCobraOnline`; o painel mostra "Conferir no
 gateway" só com ele ligado).

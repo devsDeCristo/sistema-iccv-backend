@@ -32,22 +32,17 @@ model Church {
   membershipRequests User[]                  @relation("MembershipRequest")
   families           Family[]
 
-  /// O módulo de cobrança online está ligado para esta igreja?
+  /// O plano da igreja: quais módulos ela usa (ver `Plan`). Sem plano, ela não
+  /// tem módulo nenhum — só o painel básico (Início, Usuários e Membros, que toda
+  /// igreja tem).
   ///
-  /// Substitui as duas variáveis de ambiente que faziam isso antes
-  /// (`PAGBANK_PAYMENT_ENABLED` no servidor, `VITE_MODULE_PAYMENT` na tela),
-  /// que eram globais: desligar uma delas tirava a cobrança de todas as
-  /// igrejas ao mesmo tempo, e não havia como uma cobrar e a outra não.
+  /// A cobrança online, que antes era o `modulePayment` daqui, virou o módulo
+  /// `ONLINE_PAYMENTS` do plano.
   ///
-  /// Desligado, o sistema não abre checkout, a reconciliação pula as cobranças
-  /// desta igreja e a tela esconde tudo que fala de pagamento. Quem liga e
-  /// desliga é dev ou super admin — é decisão de plataforma, não de quem
-  /// administra a igreja, do mesmo jeito que a variável de ambiente era.
-  ///
-  /// Nasce ligado para as igrejas que já existem: era esse o valor da variável
-  /// global, e mudar o padrão na migração tiraria a cobrança de quem já cobra.
-  /// Igreja sem gateway cadastrado continua sem cobrar de qualquer forma.
-  modulePayment Boolean @default(true)
+  /// `Restrict`: um plano em uso não se apaga — tiraria os módulos das igrejas
+  /// dele sem ninguém escolher.
+  planId String?
+  plan   Plan?   @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   /// Quem responde pela igreja. É o nome que assina o e-mail de confirmação
   /// dos eventos dela — a assinatura era uma só, fixa no template, e saía com
@@ -1424,4 +1419,41 @@ model Family {
 
   @@index([churchId])
   @@map("families")
+}
+
+/// Os módulos que um plano libera para a igreja. Fora do plano, o módulo some
+/// do painel dela e a API dele recusa (ver `ModuloGuard`); nada é apagado.
+///
+/// Membros não é módulo: toda igreja tem, com ou sem plano.
+enum ChurchModule {
+  /// Eventos: criar e gerir no painel (inscrição, equipes, quartos, check-in,
+  /// pagamentos do evento). O evento já publicado segue aberto ao público.
+  EVENTS
+  /// Notícias e disparos
+  NEWS
+  /// Tesouraria: dizimistas, lançamentos e conciliação
+  TREASURY
+  /// WhatsApp da igreja (disparadores)
+  WHATSAPP
+  /// Integrações: os bancos pela Pluggy
+  INTEGRATIONS
+  /// Cobrança online nos eventos (o antigo `Church.modulePayment`)
+  ONLINE_PAYMENTS
+}
+
+/// O plano de uma igreja: o que ela pode usar no sistema. Só dev e super admin
+/// criam e trocam plano — é decisão de plataforma.
+///
+/// Hoje só os módulos; os limites que vierem (quantidade de eventos e etc.)
+/// entram aqui como colunas próprias.
+model Plan {
+  id          String         @id @default(uuid())
+  name        String         @unique
+  description String?
+  modules     ChurchModule[]
+  churches    Church[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("plans")
 }

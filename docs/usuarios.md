@@ -137,6 +137,7 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   pela tela de perfil (`PUT /users/me`) — usar `PUT /users/:id` diretamente
   para o próprio id responde `403` pedindo para usar a tela de perfil (evita
   trocar CPF/e-mail sem a validação de `updateMe`).
+- **Quem a igreja alcança (`userChurchScope`):** quem tem vínculo de painel com ela, quem está inscrito ou na lista de espera de um evento dela, **os membros dela e quem pediu para ser membro** (`memberChurchId`/`requestedChurchId`). Os dois últimos entraram quando a tela de Usuários passou a ser só do super admin: a igreja chega numa pessoa pelos inscritos do evento e por Membros, e um membro que nunca se inscreveu em evento precisa abrir o cadastro. Vale para ler, alterar e para a lista `GET /users` (que as telas de evento usam).
 - **Quem alcança o cadastro de quem (`assertUserInScope`, `assertCanReachUser`):**
   - **ler** (`GET /users/:id`, `/users/:id/groups`): admin e financeiro das
     igrejas da pessoa. O financeiro **não recebe saúde nem religião**

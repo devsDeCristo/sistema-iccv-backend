@@ -23,6 +23,7 @@ import { CredentialField } from 'src/gateways/core/gateway.types';
 import { montarUrlDeWebhook } from 'src/gateways/core/webhook-url';
 import { Role } from 'src/auth/roles';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
+import { SELECT_MODULOS, cobraOnline } from 'src/planos/modulos';
 
 /** Teto por campo. Nenhuma credencial de gateway chega perto disso. */
 const TAMANHO_MAXIMO = 2000;
@@ -66,7 +67,7 @@ export class PaymentProviderService {
     const [igreja, configs] = await Promise.all([
       this.prisma.church.findUnique({
         where: { id: churchId },
-        select: { modulePayment: true },
+        select: SELECT_MODULOS,
       }),
       this.prisma.paymentProviderConfig.findMany({ where: { churchId } }),
     ]);
@@ -91,38 +92,10 @@ export class PaymentProviderService {
 
     return {
       cofreDisponivel: this.crypto.disponivel,
-      // Acima de tudo o que vem depois: com o módulo desligado a igreja não
-      // cobra, mesmo com casa cadastrada e certa.
-      modulePayment: igreja?.modulePayment ?? false,
+      // Acima de tudo o que vem depois: sem cobrança online no plano a igreja
+      // não cobra, mesmo com casa cadastrada e certa. Quem muda é o plano.
+      modulePayment: cobraOnline(igreja),
       integracoes,
-    };
-  }
-
-  /**
-   * Liga e desliga o módulo de cobrança de uma igreja.
-   *
-   * Substitui as variáveis de ambiente que faziam isso para o servidor inteiro,
-   * e por isso a rota é de dev e super admin: continua sendo decisão de
-   * plataforma. Quem administra a igreja escolhe por qual casa ela cobra, não
-   * se ela pode cobrar.
-   *
-   * Desligar não apaga credencial nenhuma. A igreja para de cobrar, a
-   * reconciliação para de olhar as cobranças dela, e religar devolve tudo do
-   * jeito que estava — o que importa quando isso é usado para pausar uma igreja
-   * por um mês, que é o caso comum.
-   */
-  async definirModulo(churchId: string, ativo: boolean) {
-    const igreja = await this.prisma.church.update({
-      where: { id: churchId },
-      data: { modulePayment: ativo },
-      select: { id: true, name: true, modulePayment: true },
-    });
-
-    return {
-      modulePayment: igreja.modulePayment,
-      message: igreja.modulePayment
-        ? `Cobrança online ligada para ${igreja.name}.`
-        : `Cobrança online desligada para ${igreja.name}.`,
     };
   }
 

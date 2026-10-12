@@ -27,6 +27,7 @@ import { LogsModule } from './logs/logs.module';
 import { ChurchModule } from './church/church.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PdfModule } from './pdf/pdf.module';
+import { PlanosModule } from './planos/planos.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { RequestContextInterceptor } from './middleware/request-context.middleware';
 
@@ -59,6 +60,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     ChurchModule,
     DashboardModule,
     PdfModule,
+    PlanosModule,
   ],
   controllers: [AuthController],
   providers: [

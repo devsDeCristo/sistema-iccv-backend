@@ -14,6 +14,7 @@ import {
 } from 'src/gateways/core/payment-gateway.registry';
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
 import { conferirValorPago } from 'src/payment/amount-check';
+import { SEM_COBRANCA_ONLINE } from 'src/planos/modulos';
 
 /** O que a rodada fez, para quem a disparou pelo painel poder ler na tela */
 export interface ResumoDaReconciliacao {
@@ -241,7 +242,7 @@ export class CronService {
     if (!eventIds.length) return new Set();
 
     const eventos = await this.prisma.event.findMany({
-      where: { id: { in: eventIds }, church: { modulePayment: false } },
+      where: { id: { in: eventIds }, church: SEM_COBRANCA_ONLINE },
       select: { id: true },
     });
 

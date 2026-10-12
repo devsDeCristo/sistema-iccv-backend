@@ -10,12 +10,16 @@ import { perfilEfetivo, SELECT_TENANT } from 'src/auth/tenant';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateChurchDto } from './dto/create-church.dto';
 
-/** O que as telas de igreja leem: nome, situação e quem assina os e-mails. */
+/**
+ * O que as telas de igreja leem: nome, situação, quem assina os e-mails e o
+ * plano (com os módulos, que o seletor de igreja dos módulos também usa).
+ */
 const SELECT_CHURCH = {
   id: true,
   name: true,
   status: true,
   spiritualLeader: { select: { id: true, fullName: true } },
+  plan: { select: { id: true, name: true, modules: true } },
 };
 
 @Injectable()
@@ -41,6 +45,7 @@ export class ChurchService {
     const name = dto.name.trim();
     await this.ensureNameIsAvailable(name);
     const lider = await this.findLeaderOrFail(dto.spiritualLeaderId);
+    await this.planoExiste(dto.planId);
 
     return this.prisma.$transaction(async (tx) => {
       const church = await tx.church.create({
@@ -48,6 +53,7 @@ export class ChurchService {
           name,
           status: dto.status,
           spiritualLeaderId: dto.spiritualLeaderId ?? null,
+          planId: dto.planId ?? null,
         },
         select: SELECT_CHURCH,
       });
@@ -64,6 +70,7 @@ export class ChurchService {
     await this.findOneOrFail(id);
     await this.ensureNameIsAvailable(name, id);
     const lider = await this.findLeaderOrFail(dto.spiritualLeaderId);
+    await this.planoExiste(dto.planId);
 
     return this.prisma.$transaction(async (tx) => {
       const church = await tx.church.update({
@@ -75,6 +82,7 @@ export class ChurchService {
           name,
           status: dto.status,
           spiritualLeaderId: dto.spiritualLeaderId,
+          planId: dto.planId,
         },
         select: SELECT_CHURCH,
       });
@@ -144,6 +152,15 @@ export class ChurchService {
    * A conta do líder é conferida antes de gravar: o erro do banco pela chave
    * estrangeira sairia como 500, e isto aqui é um id errado no corpo.
    */
+  private async planoExiste(planId?: string | null) {
+    if (!planId) return;
+    const plano = await this.prisma.plan.findUnique({
+      where: { id: planId },
+      select: { id: true },
+    });
+    if (!plano) throw new BadRequestException('Plano não encontrado');
+  }
+
   private async findLeaderOrFail(userId?: string | null) {
     if (!userId) return null;
 
