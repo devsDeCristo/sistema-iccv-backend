@@ -1449,6 +1449,9 @@ model Plan {
   id          String         @id @default(uuid())
   name        String         @unique
   description String?
+  /// Valor mensal, em reais. `Decimal` como o dinheiro do livro-caixa: soma
+  /// de `Float` erra centavo. Zero é plano gratuito.
+  price       Decimal        @default(0) @db.Decimal(10, 2)
   modules     ChurchModule[]
   churches    Church[]
   createdAt   DateTime       @default(now())

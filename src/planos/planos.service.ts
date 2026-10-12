@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PlanoDto } from './dto/plano.dto';
 
@@ -10,33 +11,47 @@ const SELECT_PLANO = {
   id: true,
   name: true,
   description: true,
+  price: true,
   modules: true,
   _count: { select: { churches: true } },
 } as const;
+
+/** Do mais barato ao mais caro: é como se compara plano */
+const POR_VALOR = [{ price: 'asc' as const }, { name: 'asc' as const }];
+
+/** O valor sai do banco como `Decimal`; a API devolve número */
+const comValor = <T extends { price: Prisma.Decimal }>(plano: T) => ({
+  ...plano,
+  price: Number(plano.price),
+});
 
 /** Os planos: quais módulos cada igreja usa. Ver `Plan` */
 @Injectable()
 export class PlanosService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listar() {
-    return this.prisma.plan.findMany({
+  async listar() {
+    const planos = await this.prisma.plan.findMany({
       select: SELECT_PLANO,
-      orderBy: { name: 'asc' },
+      orderBy: POR_VALOR,
     });
+    return planos.map(comValor);
   }
 
   async criar(dto: PlanoDto) {
     const name = dto.name.trim();
     await this.nomeLivre(name);
-    return this.prisma.plan.create({
-      data: {
-        name,
-        description: dto.description?.trim() || null,
-        modules: dto.modules,
-      },
-      select: SELECT_PLANO,
-    });
+    return comValor(
+      await this.prisma.plan.create({
+        data: {
+          name,
+          description: dto.description?.trim() || null,
+          price: dto.price,
+          modules: dto.modules,
+        },
+        select: SELECT_PLANO,
+      }),
+    );
   }
 
   /** Mudar os módulos vale na hora para todas as igrejas do plano */
@@ -44,15 +59,44 @@ export class PlanosService {
     await this.existe(id);
     const name = dto.name.trim();
     await this.nomeLivre(name, id);
-    return this.prisma.plan.update({
-      where: { id },
-      data: {
-        name,
-        description: dto.description?.trim() || null,
-        modules: dto.modules,
-      },
-      select: SELECT_PLANO,
-    });
+    return comValor(
+      await this.prisma.plan.update({
+        where: { id },
+        data: {
+          name,
+          description: dto.description?.trim() || null,
+          price: dto.price,
+          modules: dto.modules,
+        },
+        select: SELECT_PLANO,
+      }),
+    );
+  }
+
+  /**
+   * O plano da igreja e o catálogo, para "Meus planos". Sem a contagem de
+   * igrejas: quem lê é o admin de uma igreja, e quantas outras usam cada plano
+   * não é da conta dele.
+   */
+  async daIgreja(churchId: string) {
+    const visivel = {
+      id: true,
+      name: true,
+      description: true,
+      price: true,
+      modules: true,
+    };
+    const [igreja, planos] = await Promise.all([
+      this.prisma.church.findUnique({
+        where: { id: churchId },
+        select: { plan: { select: visivel } },
+      }),
+      this.prisma.plan.findMany({ select: visivel, orderBy: POR_VALOR }),
+    ]);
+    return {
+      atual: igreja?.plan ? comValor(igreja.plan) : null,
+      planos: planos.map(comValor),
+    };
   }
 
   /** Plano em uso não se apaga: as igrejas dele ficariam sem módulo nenhum */

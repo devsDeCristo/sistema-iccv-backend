@@ -8,7 +8,7 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 
 ## Modelo
 
-- `Plan { id, name (único), description?, modules ChurchModule[] }`, tabela `plans`.
+- `Plan { id, name (único), description?, price, modules ChurchModule[] }`, tabela `plans`. `price` é o **valor mensal** em reais, `Decimal(10,2)` (como o dinheiro do livro-caixa), padrão 0 = gratuito; a API devolve número.
 - `Church.planId` (opcional, `onDelete: Restrict`): o plano da igreja.
 - **Igreja sem plano não tem módulo nenhum**: só o painel básico (Início, Usuários e Membros). Nenhuma igreja nasce com plano — nem as que já existiam: depois da migração, o super admin escolhe um plano para cada uma em Igrejas.
 - Os limites que vierem (quantidade de eventos e etc.) entram no `Plan` como colunas próprias.
@@ -31,11 +31,15 @@ Só **dev e super admin** (`SUPER_ADMIN_ROLES`), como a gestão de igrejas.
 | Método | Rota | O que faz |
 | --- | --- | --- |
 | `GET` | `/plans` | Lista, com `_count.churches` |
-| `POST` | `/plans` | `{ name, description?, modules[] }` |
+| `POST` | `/plans` | `{ name, description?, price, modules[] }` (`price` ≥ 0, até 2 decimais) |
 | `PUT` | `/plans/:id` | Atualiza; os módulos novos valem na hora para as igrejas do plano |
 | `DELETE` | `/plans/:id` | Só plano que nenhuma igreja usa (409 com quantas usam) |
 
-Nome repetido (sem diferenciar maiúsculas) responde 409. O plano da igreja se escolhe em `POST/PUT /churches` (`planId`; `null` tira o plano; omitido na edição mantém) — ver `docs/igrejas.md`.
+As listas vêm do mais barato ao mais caro (e por nome). Nome repetido (sem diferenciar maiúsculas) responde 409. O plano da igreja se escolhe em `POST/PUT /churches` (`planId`; `null` tira o plano; omitido na edição mantém) — ver `docs/igrejas.md`.
+
+## "Meus planos" (`GET /churches/:churchId/plano`)
+
+Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e financeiro **desta** igreja; dev e super admin). Só leitura: `{ atual, planos }` — o plano da igreja (ou `null`) e todos os planos, do mais barato ao mais caro, com nome, descrição, valor e módulos. **Sem** quantas igrejas usam cada plano: não é da conta de uma igreja. `PlanoDaIgrejaController`.
 
 ## Como o módulo é cobrado
 
@@ -62,6 +66,10 @@ Substituiu `Church.modulePayment` (a coluna saiu na migração; a rota `PATCH /c
 ## Migration `20261012130000_modulos_das_configuracoes`
 
 Tira `WHATSAPP` e `INTEGRATIONS` do enum (recria o tipo, como o Prisma gera). Antes, apaga os dois valores dos planos que os tinham — sem virar Notícias ou Tesouraria sozinhos, o que daria à igreja um módulo que ninguém escolheu. Nova em vez de editar a `20261012120000`, que já estava commitada: editar migration aplicada quebra o `prisma migrate`. Testada sobre planos com os valores antigos e no banco vazio, com a sequência inteira.
+
+## Migration `20261012140000_valor_do_plano`
+
+Só adiciona `plans.price` (`DECIMAL(10,2)`, padrão 0): os planos que já existem ficam gratuitos até o super admin informar o valor.
 
 ## Auditoria
 
