@@ -2189,7 +2189,7 @@ export class EventService {
         where: { id },
         include: {
           // O plano da igreja dona do evento diz se ela cobra online (módulo
-          // `ONLINE_PAYMENTS`). A tela de inscrição decide por ele se oferece
+          // Eventos). A tela de inscrição decide por ele se oferece
           // pagamento ou confirma direto. O nome vai no cabeçalho das
           // planilhas exportadas da página
           church: { select: { name: true, ...SELECT_MODULOS } },

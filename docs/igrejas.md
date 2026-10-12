@@ -81,7 +81,7 @@ Vincular alguém como `spiritualLeaderId`:
 
 ## Cobrança online por igreja
 
-Era o `Church.modulePayment` (com a rota `PATCH /churches/:churchId/payment-providers/module`). Virou o módulo `ONLINE_PAYMENTS` do plano da igreja — ver `docs/planos.md`. A coluna e a rota saíram.
+Era o `Church.modulePayment` (com a rota `PATCH /churches/:churchId/payment-providers/module`). Hoje vem com o módulo Eventos do plano da igreja — ver `docs/planos.md`. A coluna e a rota saíram.
 
 ## Remoção
 

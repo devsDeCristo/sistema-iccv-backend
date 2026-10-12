@@ -37,8 +37,8 @@ só o que a rotina, como cron, decide sozinha:
   (rota `Role.DEV`, disparo sob demanda para quem não quer esperar o relógio).
   A lógica é a mesma função nos dois casos — o cron só decide o `filtro`.
 - **O que a rotina ignora:** cobranças de eventos cuja igreja não tem
-  Cobrança online no plano (`SEM_COBRANCA_ONLINE`: sem plano, ou plano sem
-  `ONLINE_PAYMENTS` — ver `docs/planos.md`). Tirar a cobrança de uma igreja
+  cobrança online (`SEM_COBRANCA_ONLINE`: sem plano, ou plano sem Eventos,
+  que inclui a cobrança — ver `docs/planos.md`). Tirar a cobrança de uma igreja
   precisa parar tudo, inclusive a parte que roda sozinha sem ninguém olhando a
   tela — sem esse filtro a rotina continuaria consultando o gateway e dando
   baixa numa igreja que, para o resto do sistema, não cobra mais.

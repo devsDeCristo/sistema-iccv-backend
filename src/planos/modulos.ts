@@ -6,7 +6,6 @@ export const ROTULO_DO_MODULO: Record<ChurchModule, string> = {
   EVENTS: 'Eventos',
   NEWS: 'Notícias',
   TREASURY: 'Tesouraria',
-  ONLINE_PAYMENTS: 'Cobrança online',
 };
 
 /** O que ler da igreja para saber os módulos dela */
@@ -17,19 +16,23 @@ export const modulosDa = (
   igreja: { plan?: { modules: ChurchModule[] } | null } | null | undefined,
 ): ChurchModule[] => igreja?.plan?.modules ?? [];
 
-/** A igreja cobra online? É o módulo `ONLINE_PAYMENTS` do plano dela */
+/**
+ * A igreja cobra online? É o módulo Eventos do plano dela: dar às igrejas o
+ * suporte a pagamentos é parte do que o módulo de eventos é. (Já foi o
+ * `Church.modulePayment`, e depois um módulo próprio, `ONLINE_PAYMENTS`.)
+ */
 export const cobraOnline = (
   igreja: { plan?: { modules: ChurchModule[] } | null } | null | undefined,
-) => modulosDa(igreja).includes(ChurchModule.ONLINE_PAYMENTS);
+) => modulosDa(igreja).includes(ChurchModule.EVENTS);
 
 /**
- * Igreja que não cobra online: sem plano, ou com um plano sem o módulo. Para o
+ * Igreja que não cobra online: sem plano, ou com um plano sem Eventos. Para o
  * `where` das consultas que antes liam `modulePayment: false`.
  */
 export const SEM_COBRANCA_ONLINE = {
   OR: [
     { planId: null },
-    { plan: { NOT: { modules: { has: ChurchModule.ONLINE_PAYMENTS } } } },
+    { plan: { NOT: { modules: { has: ChurchModule.EVENTS } } } },
   ],
 };
 

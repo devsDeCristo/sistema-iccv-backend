@@ -36,8 +36,8 @@ model Church {
   /// tem módulo nenhum — só o painel básico (Início, Usuários e Membros, que toda
   /// igreja tem).
   ///
-  /// A cobrança online, que antes era o `modulePayment` daqui, virou o módulo
-  /// `ONLINE_PAYMENTS` do plano.
+  /// A cobrança online, que antes era o `modulePayment` daqui, é parte do
+  /// módulo Eventos do plano.
   ///
   /// `Restrict`: um plano em uso não se apaga — tiraria os módulos das igrejas
   /// dele sem ninguém escolher.
@@ -1429,15 +1429,13 @@ model Family {
 /// Disparadores (WhatsApp) é de Notícias, Integrações (Pluggy) é de Tesouraria.
 enum ChurchModule {
   /// Eventos: criar e gerir no painel (inscrição, equipes, quartos, check-in,
-  /// pagamentos do evento) e os gateways de pagamento da igreja. O evento já
-  /// publicado segue aberto ao público.
+  /// pagamentos do evento), os gateways de pagamento da igreja e a cobrança
+  /// online nas inscrições. O evento já publicado segue aberto ao público.
   EVENTS
   /// Notícias, disparos e o WhatsApp da igreja
   NEWS
   /// Tesouraria: dizimistas, lançamentos, conciliação e os bancos pela Pluggy
   TREASURY
-  /// Cobrança online nos eventos (o antigo `Church.modulePayment`)
-  ONLINE_PAYMENTS
 }
 
 /// O plano de uma igreja: o que ela pode usar no sistema. Só dev e super admin

@@ -215,7 +215,7 @@ R$ 300 vira `IN_ANALYSIS`.
 
 ## 7. Cobrança online por igreja
 
-Substituiu as duas variáveis globais. Foi `Church.modulePayment`; hoje é o módulo `ONLINE_PAYMENTS` do **plano** da igreja (ver `docs/planos.md`) — as respostas seguem com o nome `modulePayment`, calculado pelo plano. Sem o módulo:
+Substituiu as duas variáveis globais. Foi `Church.modulePayment`; hoje vem com o módulo **Eventos** do plano da igreja (ver `docs/planos.md`) — as respostas seguem com o nome `modulePayment`, calculado pelo plano. Sem o módulo:
 
 - `createCheckout` recusa com **503** antes de qualquer escrita;
 - a reconciliação **pula** as cobranças daquela igreja;
@@ -227,7 +227,7 @@ estava — que é o caso comum (pausar uma igreja por um mês).
 
 **Quem decide é dev ou super admin**, pelo plano da igreja — não quem administra a igreja. Deixar o admin desligar daria a ele um jeito de parar a reconciliação das cobranças que ele mesmo abriu.
 
-Igreja sem plano não cobra: depois da migração dos planos, nenhuma cobra até receber um plano com Cobrança online.
+Igreja sem plano não cobra: depois da migração dos planos, nenhuma cobra até receber um plano com Eventos.
 
 ---
 

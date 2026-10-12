@@ -22,7 +22,6 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 | `EVENTS` | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; e a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos) |
 | `NEWS` | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores) |
 | `TREASURY` | Tesouraria (`/churches/:churchId/financeiro`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações) |
-| `ONLINE_PAYMENTS` | Cobrança online nos eventos (o antigo `Church.modulePayment`) |
 
 ## Rotas (`/plans`)
 
@@ -46,14 +45,14 @@ Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e 
 - **`@Modulo(ChurchModule.X)` + `ModuloGuard`** nos controllers do módulo, no fim do `@UseGuards` (depois do login e do recorte por igreja). Não é global de propósito: rodaria antes do login, e um anônimo leria na recusa o nome da igreja.
 - **Recusa:** 403 "O plano de <igreja> não inclui o módulo <módulo>". **Dev e super admin passam** (o perfil lido do banco pelo `RolesGuard`, que roda antes).
 - **Só o painel:** rota sem `@Roles` é área do usuário (ver evento, inscrever-se, pagar a própria inscrição) e passa. O evento já publicado segue aberto ao público com Eventos fora do plano.
-- **Cobrança online** não é acesso de ninguém: é se a igreja cobra. Sem o módulo ela não cobra, quem quer que abra o checkout.
+- **Cobrança online** não é acesso de ninguém: é se a igreja cobra. Sem Eventos no plano ela não cobra, quem quer que abra o checkout.
 - **A igreja sai da rota:** `:churchId`; o evento (`:idEvent`, `:eventId`, ou `:id` nas rotas de Eventos); o pagamento (`:paymentId` → evento); a notícia (`:id` nas rotas de Notícias); ou o `churchId` do corpo. Sem nada disso (listas de várias igrejas, criação sem igreja escolhida), passa.
 - **Criação:** criar evento e criar notícia (e trocar a notícia de igreja) conferem no service, depois de saber a igreja — quem administra uma igreja só nem manda o `churchId`. Dev e super admin passam aqui também.
 - **Limite conhecido:** listas que juntam várias igrejas (`GET /events`, `GET /news/admin` sem igreja escolhida, insights) não filtram pelo plano; a tela esconde o módulo, e qualquer ação sobre um item volta 403.
 
-## Cobrança online (`ONLINE_PAYMENTS`)
+## Cobrança online (parte de Eventos)
 
-Substituiu `Church.modulePayment` (a coluna saiu na migração; a rota `PATCH /churches/:churchId/payment-providers/module` também). Quem lia o campo agora usa `cobraOnline(igreja)` / `SELECT_MODULOS` / `SEM_COBRANCA_ONLINE` (`src/planos/modulos.ts`): checkout (503 sem o módulo), reconciliação e cron (pulam a igreja), `igrejaCobraOnline`. Para não mudar a tela, as respostas seguem com o nome `modulePayment` (evento, minhas inscrições, configuração de gateways) — agora calculado pelo plano.
+**Quem tem Eventos no plano cobra pelo site** (se tiver gateway configurado): dar às igrejas o suporte a pagamentos é parte do que o módulo de eventos é. Já foi um módulo próprio (`ONLINE_PAYMENTS`), que saiu na migration `20261012150000`. Substituiu `Church.modulePayment` (a coluna saiu na migração; a rota `PATCH /churches/:churchId/payment-providers/module` também). Quem lia o campo agora usa `cobraOnline(igreja)` / `SELECT_MODULOS` / `SEM_COBRANCA_ONLINE` (`src/planos/modulos.ts`): checkout (503 sem o módulo), reconciliação e cron (pulam a igreja), `igrejaCobraOnline`. Para não mudar a tela, as respostas seguem com o nome `modulePayment` (evento, minhas inscrições, configuração de gateways) — agora calculado pelo plano.
 
 ## Sessão
 
@@ -66,6 +65,10 @@ Substituiu `Church.modulePayment` (a coluna saiu na migração; a rota `PATCH /c
 ## Migration `20261012130000_modulos_das_configuracoes`
 
 Tira `WHATSAPP` e `INTEGRATIONS` do enum (recria o tipo, como o Prisma gera). Antes, apaga os dois valores dos planos que os tinham — sem virar Notícias ou Tesouraria sozinhos, o que daria à igreja um módulo que ninguém escolheu. Nova em vez de editar a `20261012120000`, que já estava commitada: editar migration aplicada quebra o `prisma migrate`. Testada sobre planos com os valores antigos e no banco vazio, com a sequência inteira.
+
+## Migration `20261012150000_cobranca_em_eventos`
+
+Tira `ONLINE_PAYMENTS` dos planos e do enum (recria o tipo). Efeito: quem tinha Eventos sem a cobrança passa a cobrar pelo site (com gateway configurado); quem tinha a cobrança sem Eventos deixa de cobrar. Testada sobre planos com os valores antigos e no banco vazio, com a sequência inteira.
 
 ## Migration `20261012140000_valor_do_plano`
 

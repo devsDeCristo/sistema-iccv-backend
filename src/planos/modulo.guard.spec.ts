@@ -129,13 +129,11 @@ describe('ModuloGuard', () => {
 });
 
 describe('cobraOnline', () => {
-  it('é o módulo ONLINE_PAYMENTS do plano; sem plano, não cobra', () => {
-    expect(
-      cobraOnline({ plan: { modules: [ChurchModule.ONLINE_PAYMENTS] } }),
-    ).toBe(true);
+  it('vem com Eventos no plano; sem Eventos ou sem plano, não cobra', () => {
     expect(cobraOnline({ plan: { modules: [ChurchModule.EVENTS] } })).toBe(
-      false,
+      true,
     );
+    expect(cobraOnline({ plan: { modules: [ChurchModule.NEWS] } })).toBe(false);
     expect(cobraOnline({ plan: null })).toBe(false);
     expect(cobraOnline(null)).toBe(false);
   });

@@ -158,7 +158,7 @@ export class PaymentService {
    * Substitui o antigo `PAGBANK_PAYMENT_ENABLED`, que era do servidor inteiro:
    * desligar tirava a cobrança de todas as igrejas de uma vez, e não havia como
    * uma cobrar e a vizinha não. Depois foi `Church.modulePayment`; agora é o
-   * módulo `ONLINE_PAYMENTS` do plano da igreja.
+   * módulo Eventos do plano da igreja (que inclui a cobrança online).
    *
    * Fica acima da configuração de gateway, e não junto: uma igreja pode ter a
    * casa cadastrada e certa e ainda assim não cobrar, porque o módulo dela está
