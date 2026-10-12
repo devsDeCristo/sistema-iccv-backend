@@ -13,12 +13,16 @@ import { PARA_TELA, paraTela } from './lancamentos.service';
 
 type Lancamento = ReturnType<typeof paraTela>;
 
-/** Como uma linha do diff está: o par já feito, o sugerido ou só um lado */
+/**
+ * Como uma linha do diff está: o par já feito, o sugerido, só um lado, ou o
+ * manual que a pessoa confirmou que não consta no banco
+ */
 export type EstadoDaLinha =
   | 'conciliado'
   | 'sugerido'
   | 'so_banco'
-  | 'so_manual';
+  | 'so_manual'
+  | 'nao_consta';
 
 export interface LinhaDaConciliacao {
   estado: EstadoDaLinha;
@@ -30,7 +34,8 @@ const ORDEM: Record<EstadoDaLinha, number> = {
   sugerido: 0,
   so_banco: 1,
   so_manual: 2,
-  conciliado: 3,
+  nao_consta: 3,
+  conciliado: 4,
 };
 
 /**
@@ -97,7 +102,10 @@ export class ConciliacaoService {
     }
 
     const bancoPendente = banco.filter((b) => !b.conciliado);
-    const manualPendente = manuais.filter((m) => !m.conciliado);
+    // o que não consta no banco não entra na sugestão: já foi resolvido
+    const manualPendente = manuais.filter(
+      (m) => !m.conciliado && !m.naoConstaNoBanco,
+    );
     const sugeridos = sugerirPares(
       bancoPendente.map(paraSugestao),
       manualPendente.map(paraSugestao),
@@ -120,6 +128,11 @@ export class ConciliacaoService {
     for (const m of manualPendente) {
       if (!sugeridosIds.has(m.id)) {
         linhas.push({ estado: 'so_manual', banco: null, manual: m });
+      }
+    }
+    for (const m of manuais) {
+      if (!m.conciliado && m.naoConstaNoBanco) {
+        linhas.push({ estado: 'nao_consta', banco: null, manual: m });
       }
     }
 
@@ -148,6 +161,7 @@ export class ConciliacaoService {
         sugeridos: contar('sugerido'),
         soBanco: contar('so_banco'),
         soManual: contar('so_manual'),
+        naoConsta: contar('nao_consta'),
         /** saldo (entradas − saídas) do que está pendente de cada lado */
         valorSoBanco: soma(
           bancoPendente.filter((b) => !sugeridosIds.has(b.id)),
@@ -209,6 +223,9 @@ export class ConciliacaoService {
           reconciledWithId: banco.id,
           reconciledAt: new Date(),
           reconciledById: actorId ?? null,
+          // o banco mostrou que constava: a marca não vale mais
+          notInBankAt: null,
+          notInBankById: null,
         },
       });
     } catch (erro) {
@@ -267,6 +284,40 @@ export class ConciliacaoService {
         reconciledAt: null,
         reconciledById: null,
       },
+    });
+  }
+
+  /**
+   * O manual que não vai aparecer no extrato — dinheiro em espécie — sai da
+   * fila da conciliação como "não consta no banco". Continua contando nos
+   * totais, como todo manual sem par; desmarcar o devolve para a fila.
+   */
+  async marcarNaoConsta(
+    churchId: string,
+    manualId: string,
+    naoConsta: boolean,
+    actorId?: string,
+  ) {
+    const manual = await this.prisma.financialEntry.findFirst({
+      where: { id: manualId, churchId },
+      select: { source: true, reconciledWithId: true },
+    });
+    if (!manual) throw new NotFoundException('Lançamento não encontrado');
+    if (manual.source !== FinancialEntrySource.MANUAL) {
+      throw new BadRequestException(
+        'Só o lançamento manual pode não constar no banco',
+      );
+    }
+    if (manual.reconciledWithId) {
+      throw new ConflictException(
+        'Este lançamento está conciliado: desfaça a conciliação antes',
+      );
+    }
+    await this.prisma.financialEntry.update({
+      where: { id: manualId },
+      data: naoConsta
+        ? { notInBankAt: new Date(), notInBankById: actorId ?? null }
+        : { notInBankAt: null, notInBankById: null },
     });
   }
 

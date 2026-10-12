@@ -20,22 +20,26 @@ Código: `src/membros` (controller, service, DTOs), campos em `User` e o modelo 
 
 ## Quem acessa
 
-`ADMIN_ROLES` + `ChurchTenantGuard`: só o **admin da igreja da rota** (e dev/super admin). A tesouraria não entra no módulo — nem quem é tesouraria desta igreja e admin de outra. Ele vê os membros como dizimistas, em `GET /churches/:churchId/tesouraria/dizimistas`, sem pedidos nem famílias. Toda escrita confere ainda que a pessoa ou a família da URL é desta igreja (404 caso contrário): membro por `{ id, memberChurchId }`, pedido por `{ id, requestedChurchId }`, família por `{ id, churchId }`.
+`ADMIN_ROLES` + `ChurchTenantGuard`: quem mexe é só o **admin da igreja da rota** (e dev/super admin) — nem quem é tesouraria desta igreja e admin de outra.
+
+**Só a lista (`GET membros`) se lê também** pela **tesouraria** desta igreja e por quem é **tesoureiro(a) de um evento** dela (`@Roles(...ADMIN_AREA_ROLES)` + `@AceitaTesoureiroDoEvento()`; o `ChurchTenantGuard` confere o vínculo com um evento desta igreja). Para eles a lista vem **sem os pedidos** (`pendentes: []`): aceitar ou recusar é do admin.
+
+Dar a um membro o perfil de admin ou tesouraria na igreja não é rota daqui: é `PUT /users/permissions` (a edição em massa de Usuários), que já confere que quem dá é admin da igreja. Toda escrita confere ainda que a pessoa ou a família da URL é desta igreja (404 caso contrário): membro por `{ id, memberChurchId }`, pedido por `{ id, requestedChurchId }`, família por `{ id, churchId }`.
 
 ## Rotas (`/churches/:churchId`)
 
-| Rota | O que faz |
-| --- | --- |
-| `GET membros` | Membros (com família), famílias (com quantos membros) e pedidos pendentes |
-| `GET membros/busca?busca=` | Busca quem colocar como membro |
-| `POST membros` | `{ userId }`: coloca como membro. 409 se já é daqui ou de outra igreja ("Esta pessoa é membro de X. Quem administra lá precisa tirá-la antes.") |
-| `POST membros/:userId/aceitar` | Aceita o pedido da inscrição |
-| `POST membros/:userId/recusar` | Recusa o pedido (a pessoa continua com o cadastro) |
-| `DELETE membros/:userId/familia` | Tira da família |
-| `DELETE membros/:userId` | Deixa de ser membro: sai da família e perde o valor do dízimo combinado (os lançamentos continuam) |
-| `POST familias` | `{ nome, userIds }`: nova família com esses membros |
-| `PATCH familias/:id` | `{ nome?, adicionar? }`: renomeia e/ou junta mais membros (que saem da família anterior) |
-| `DELETE familias/:id` | Desfaz a família (as pessoas continuam membros) |
+| Rota                             | O que faz                                                                                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET membros`                    | Membros (com família e `perfil`: o perfil na igreja, 2 admin, 3 tesouraria ou nulo), famílias (com quantos membros) e pedidos pendentes         |
+| `GET membros/busca?busca=`       | Busca quem colocar como membro                                                                                                                  |
+| `POST membros`                   | `{ userId }`: coloca como membro. 409 se já é daqui ou de outra igreja ("Esta pessoa é membro de X. Quem administra lá precisa tirá-la antes.") |
+| `POST membros/:userId/aceitar`   | Aceita o pedido da inscrição                                                                                                                    |
+| `POST membros/:userId/recusar`   | Recusa o pedido (a pessoa continua com o cadastro)                                                                                              |
+| `DELETE membros/:userId/familia` | Tira da família                                                                                                                                 |
+| `DELETE membros/:userId`         | Deixa de ser membro: sai da família e perde o valor do dízimo combinado (os lançamentos continuam)                                              |
+| `POST familias`                  | `{ nome, userIds }`: nova família com esses membros                                                                                             |
+| `PATCH familias/:id`             | `{ nome?, adicionar? }`: renomeia e/ou junta mais membros (que saem da família anterior)                                                        |
+| `DELETE familias/:id`            | Desfaz a família (as pessoas continuam membros)                                                                                                 |
 
 ## Busca de pessoas
 

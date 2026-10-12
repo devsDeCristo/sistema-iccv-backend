@@ -1378,6 +1378,13 @@ model FinancialEntry {
   reconciledAt     DateTime?
   reconciledById   String?
 
+  /// No lançamento **manual** que não vai aparecer no extrato — dinheiro em
+  /// espécie que nunca passou pelo banco: a pessoa confirma que ele "não
+  /// consta no banco", e ele deixa de pedir conciliação. Conciliar desfaz a
+  /// marca (o banco mostrou que constava). Nulo: pendente ou conciliado.
+  notInBankAt   DateTime?
+  notInBankById String?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdById String?

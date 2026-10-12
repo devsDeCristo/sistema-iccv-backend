@@ -17,7 +17,9 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { ChurchTenantGuard } from 'src/decorators/church-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES, ADMIN_ROLES, Role } from 'src/auth/roles';
+import { isSuperAdmin, perfilNaIgreja } from 'src/auth/tenant';
+import { AceitaTesoureiroDoEvento } from 'src/auth/tesoureiro-do-evento';
 import { MembrosService } from './membros.service';
 import {
   AdicionarMembroDto,
@@ -27,11 +29,12 @@ import {
 } from './membros.dto';
 
 /**
- * Membros e famílias da igreja: só o admin dela (`ADMIN_ROLES` +
- * `ChurchTenantGuard`, que cobra o perfil de admin **nesta** igreja). O
- * tesouraria não entra aqui — ela vê os membros como dizimistas, em
- * `GET tesouraria/dizimistas`, sem pedidos nem famílias. O service ainda confere
- * que a pessoa ou a família da URL é desta igreja.
+ * Membros e famílias da igreja: quem mexe é só o admin dela (`ADMIN_ROLES` +
+ * `ChurchTenantGuard`, que cobra o perfil de admin **nesta** igreja). A lista
+ * também é lida, só para consulta, pela tesouraria da igreja e por quem é
+ * tesoureiro(a) de um evento dela — sem os pedidos de entrada, que são
+ * decisão do admin. O service ainda confere que a pessoa ou a família da URL
+ * é desta igreja.
  */
 @ApiTags('membros')
 @ApiBearerAuth()
@@ -41,10 +44,20 @@ import {
 export class MembrosController {
   constructor(private readonly service: MembrosService) {}
 
-  @ApiOperation({ summary: 'Membros, famílias e pedidos pendentes' })
+  @ApiOperation({
+    summary: 'Membros, famílias e pedidos pendentes',
+    description:
+      'Tesouraria e tesoureiro(a) de evento da igreja leem sem os pedidos.',
+  })
   @Get('membros')
-  listar(@Param('churchId') churchId: string) {
-    return this.service.listar(churchId);
+  @Roles(...ADMIN_AREA_ROLES)
+  @AceitaTesoureiroDoEvento()
+  listar(@Param('churchId') churchId: string, @Req() req: any) {
+    // o guard já deixou o vínculo da pessoa na requisição
+    const admin =
+      isSuperAdmin(req.user) ||
+      perfilNaIgreja(req.user, churchId) === Role.ADMIN;
+    return this.service.listar(churchId, admin);
   }
 
   @ApiOperation({

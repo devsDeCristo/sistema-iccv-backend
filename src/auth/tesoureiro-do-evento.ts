@@ -47,6 +47,22 @@ export async function tesoureiroDoEvento(
   return vinculo?.kind ?? null;
 }
 
+/**
+ * É tesoureiro(a) de algum evento desta igreja? É o que abre para ele as
+ * rotas de leitura da igreja que o aceitam (a lista de membros).
+ */
+export async function tesoureiroNaIgreja(
+  prisma: PrismaService,
+  userId: string,
+  churchId: string,
+): Promise<boolean> {
+  const vinculo = await prisma.eventTreasurer.findFirst({
+    where: { userId, event: { churchId, ...VINCULO_VALE } },
+    select: { eventId: true },
+  });
+  return !!vinculo;
+}
+
 /** Os eventos (de igreja que vale) em que a pessoa é tesoureira */
 export async function eventosDoTesoureiro(
   prisma: PrismaService,
@@ -56,7 +72,14 @@ export async function eventosDoTesoureiro(
     where: { userId, ...DE_IGREJA_QUE_VALE },
     select: {
       kind: true,
-      event: { select: { id: true, name: true, churchId: true } },
+      event: {
+        select: {
+          id: true,
+          name: true,
+          churchId: true,
+          church: { select: { name: true } },
+        },
+      },
     },
     orderBy: { createdAt: 'asc' },
   });

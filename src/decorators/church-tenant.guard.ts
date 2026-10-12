@@ -9,6 +9,10 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma';
 import { CHURCH_ROLES, Role } from 'src/auth/roles';
 import { assertChurchAccess, SELECT_TENANT } from 'src/auth/tenant';
+import {
+  ACEITA_TESOUREIRO_KEY,
+  tesoureiroNaIgreja,
+} from 'src/auth/tesoureiro-do-evento';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -64,10 +68,21 @@ export class ChurchTenantGuard implements CanActivate {
       throw new NotFoundException('Igreja não encontrada');
     }
 
-    assertChurchAccess(requester, churchId, {
-      roles: this.perfisDaRota(context),
-      message: 'Você não administra esta igreja',
-    });
+    try {
+      assertChurchAccess(requester, churchId, {
+        roles: this.perfisDaRota(context),
+        message: 'Você não administra esta igreja',
+      });
+    } catch (erro) {
+      // a rota que aceita o tesoureiro(a) de evento abre para quem é
+      // tesoureiro de um evento **desta** igreja — e só para ele
+      const aceita = this.reflector.getAllAndOverride<boolean>(
+        ACEITA_TESOUREIRO_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      if (!aceita || !(await tesoureiroNaIgreja(this.prisma, userId, churchId)))
+        throw erro;
+    }
 
     // evita a segunda consulta nos services que também precisam do vínculo
     request.user.role = requester.role;

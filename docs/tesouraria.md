@@ -22,36 +22,39 @@ O perfil da igreja que cuida do caixa se chamava "Financeiro" e agora é **Tesou
   - a rota que aceita o tesoureiro diz isso com `@AceitaTesoureiroDoEvento()`. Sem o decorator, nada muda: a rota continua fechada para ele;
   - `RolesGuard`: fora dos perfis do `@Roles`, deixa passar quem tem algum vínculo de tesoureiro, só em rota com o decorator;
   - `EventTenantGuard`: quem passou assim só entra **no evento dele** (pelo `:idEvent`, `:eventId` ou pelo evento do `:paymentId`). Sem isto o usuário comum caía no "não é recortado" e alcançava o evento de qualquer igreja — os testes fecham esse caso. Também deixa entrar a tesouraria (ou o admin) de outra igreja que é tesoureira deste evento;
-  - rotas com o decorator: `GET events/:idEvent/payments`, `GET events/:idEvent/payments/logs`, `PUT payments/:paymentId` e `PATCH payments/:paymentId/refund` (a aba Tesouraria). A entrega de produtos é da aba Pedidos, e fica de fora.
+  - `ChurchTenantGuard` (rotas `/churches/:churchId/...`): quem não tem perfil na igreja da rota só passa se a rota tem o decorator **e** ele é tesoureiro de um evento **desta** igreja (`tesoureiroNaIgreja`). Com teste (`church-tenant.guard.spec.ts`);
+  - rotas com o decorator: `GET events/:idEvent/payments`, `GET events/:idEvent/payments/logs`, `PUT payments/:paymentId` e `PATCH payments/:paymentId/refund` (a aba Tesouraria), e `GET churches/:churchId/membros` (a lista de membros, só consulta). A entrega de produtos é da aba Pedidos, e fica de fora.
 - **Eventos no painel:** `GET /events?painel=true` traz os eventos das igrejas da pessoa **e** os de que ela é tesoureira; quem não tem igreja nenhuma fica só com os dele (antes, o usuário comum recebia o catálogo inteiro com `painel=true`). `GET /events/:id?painel=true` também abre o evento de que ela é tesoureira.
-- **Login:** o `login` e o `GET /auth/admin/validate` (e o `/auth/validate`) mandam `eventTreasurers` (`eventId`, `eventName`, `churchId`, `kind`). O painel admite quem tem perfil de painel **ou** algum vínculo de tesoureiro.
+- **Login:** o `login` e o `GET /auth/admin/validate` (e o `/auth/validate`) mandam `eventTreasurers` (`eventId`, `eventName`, `churchId`, `churchName`, `kind`). O painel admite quem tem perfil de painel **ou** algum vínculo de tesoureiro.
 - **Quem dá o vínculo** (`src/event/tesoureiros.controller.ts`, `events/:idEvent/tesoureiros`):
 
-| Rota | Quem | O que faz |
-|---|---|---|
-| `GET /events/:idEvent/tesoureiros` | `ADMIN_AREA_ROLES` da igreja do evento | os tesoureiros: id, nome, e-mail, foto e `kind` |
-| `PUT /events/:idEvent/tesoureiros/:userId` | `ADMIN_ROLES` da igreja do evento | dá o vínculo ou troca o tipo (`{ kind }`); recusa (400) quem já é admin ou tesouraria da igreja do evento |
-| `DELETE /events/:idEvent/tesoureiros/:userId` | `ADMIN_ROLES` da igreja do evento | tira o vínculo |
+| Rota                                          | Quem                                   | O que faz                                                                                                 |
+| --------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `GET /events/:idEvent/tesoureiros`            | `ADMIN_AREA_ROLES` da igreja do evento | os tesoureiros: id, nome, e-mail, foto e `kind`                                                           |
+| `PUT /events/:idEvent/tesoureiros/:userId`    | `ADMIN_ROLES` da igreja do evento      | dá o vínculo ou troca o tipo (`{ kind }`); recusa (400) quem já é admin ou tesouraria da igreja do evento |
+| `DELETE /events/:idEvent/tesoureiros/:userId` | `ADMIN_ROLES` da igreja do evento      | tira o vínculo                                                                                            |
 
-  O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela busca de Membros (`GET /churches/:churchId/membros/busca`). O log de auditoria chama a tabela de "Tesoureiro(a) do evento".
+O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela busca de Membros (`GET /churches/:churchId/membros/busca`). O log de auditoria chama a tabela de "Tesoureiro(a) do evento".
 
 ## Rotas (`/churches/:churchId/tesouraria`)
 
-| Rota | O que faz |
-| --- | --- |
-| `GET dizimistas?ano=` | Todos os membros da igreja, com os números do ano (padrão: o atual) |
-| `PATCH dizimistas/:userId` | `{ titheAmount }`: o valor do dízimo do membro (`null` tira) |
-| `POST dizimistas/planilha/previa` | **Só admin.** `{ nomes }`: quem é cada nome da planilha de dízimos. Não grava |
-| `POST dizimistas/planilha` | **Só admin.** `{ ano, linhas: [{ nome, userId?, valores[12] }] }`: importa a planilha |
+| Rota                                                            | O que faz                                                                                 |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `GET dizimistas?ano=`                                           | Todos os membros da igreja, com os números do ano (padrão: o atual)                       |
+| `PATCH dizimistas/:userId`                                      | `{ titheAmount }`: o valor do dízimo do membro (`null` tira)                              |
+| `POST dizimistas/planilha/previa`                               | **Só admin.** `{ nomes }`: quem é cada nome da planilha de dízimos. Não grava             |
+| `POST dizimistas/planilha`                                      | **Só admin.** `{ ano, linhas: [{ nome, userId?, valores[12] }] }`: importa a planilha     |
 | `GET lancamentos?de&ate&type&category&source&busca&conciliacao` | Lançamentos do período, com resumo; `conciliacao=conciliado\|pendente` filtra pelo status |
-| `POST lancamentos` | Lançamento manual |
-| `PATCH lancamentos/:id` | Edita (no importado, só categoria, descrição e dizimista) |
-| `DELETE lancamentos/:id` | Apaga o manual; o importado não |
-| `POST lancamentos/importar` | Importa o extrato da Pluggy |
-| `GET conciliacao?de&ate` | As linhas do diff banco × manual do período, com resumo |
-| `POST conciliacao` | `{ bancoId, manualId }`: concilia um par |
-| `POST conciliacao/sugeridos?de&ate` | Concilia todos os pares sugeridos do período; devolve `{ conciliados }` |
-| `DELETE conciliacao/:manualId` | Desfaz o par |
+| `POST lancamentos`                                              | Lançamento manual                                                                         |
+| `PATCH lancamentos/:id`                                         | Edita (no importado, só categoria, descrição e dizimista)                                 |
+| `DELETE lancamentos/:id`                                        | Apaga o manual; o importado não                                                           |
+| `POST lancamentos/importar`                                     | Importa o extrato da Pluggy                                                               |
+| `GET conciliacao?de&ate`                                        | As linhas do diff banco × manual do período, com resumo                                   |
+| `POST conciliacao`                                              | `{ bancoId, manualId }`: concilia um par                                                  |
+| `POST conciliacao/sugeridos?de&ate`                             | Concilia todos os pares sugeridos do período; devolve `{ conciliados }`                   |
+| `DELETE conciliacao/:manualId`                                  | Desfaz o par                                                                              |
+| `PUT conciliacao/:manualId/nao-consta`                          | Marca o manual como "não consta no banco"                                                 |
+| `DELETE conciliacao/:manualId/nao-consta`                       | Devolve o manual para a conciliação                                                       |
 
 ## Dizimistas são os membros
 
@@ -78,11 +81,13 @@ O perfil da igreja que cuida do caixa se chamava "Financeiro" e agora é **Tesou
 - **Sem duplicar:** `externalId` (id da transação na Pluggy) é único por igreja, e a gravação usa `createMany` com `skipDuplicates`. Rodar de novo sobre o mesmo período não duplica nada; a resposta diz quantas foram lidas, importadas e quantas já existiam.
 - **Como vira lançamento** (`lancamentoDaTransacao`, em `categorias.ts`, com teste):
   - Crédito cujo CPF do pagador (`paymentData.payer.documentNumber`) é de um **membro** da igreja → ligado a ele, e o **valor** decide a categoria:
+
     - igual ao valor do dízimo dele (`titheAmount`, comparado ao centavo) → `TITHE`;
     - outro valor → `OFFERING` (oferta), ainda ligada a ele;
     - dizimista sem valor cadastrado → `TITHE` (o Pix do dízimo é o caso comum).
-    
+
     Continua sendo um palpite: quem manda dízimo e oferta juntos num Pix só, ou mudou o valor do dízimo sem atualizar o cadastro, cai em oferta — a tesouraria corrige a categoria (e o valor no cadastro).
+
   - Outro crédito → "outra entrada", sem pessoa.
   - Débito → categoria pela categoria da Pluggy quando há equivalente claro (tarifas → tarifas bancárias; luz, água, telefone, internet → água/luz/internet; aluguel; salários); o resto, "outra saída".
   - Forma: Pix → Pix; TED/DOC/TEF → transferência; boleto → boleto; o resto fica vazio.
@@ -102,14 +107,15 @@ Para trazer o histórico de quem já dizimava antes do sistema: uma planilha com
 
 ## Conciliação
 
-O mesmo dinheiro costuma estar duas vezes no livro-caixa: o Pix que veio do extrato (`PLUGGY`) e o lançamento que alguém fez à mão (`MANUAL`). Conciliar liga os dois.
+**O banco é a fonte; o lançamento manual fica para o que o banco não vê** (o dinheiro em espécie). Os dois contam nos totais. Quando o mesmo dinheiro está duas vezes — o Pix que veio do extrato (`PLUGGY`) e o lançamento que alguém fez à mão (`MANUAL`) —, conciliar liga os dois. O manual que nunca vai aparecer no extrato é marcado **"não consta no banco"**.
 
 - **Modelo:** o manual aponta para o do banco — `reconciledWithId` (único: uma transação do banco concilia com um manual só; `SetNull` se o do banco sumir), `reconciledAt`, `reconciledById`. O status `conciliado` de um lançamento (na lista e no filtro) vale para as duas pontas.
 - **Conta uma vez:** o manual conciliado sai dos totais — o resumo de Lançamentos e os números de Dizimistas ignoram `reconciledWithId` preenchido; vale o do banco. Na tabela os dois continuam aparecendo.
 - **Conciliar** (`conciliar`): os dois da igreja da rota (404), banco do lado `PLUGGY` e manual do lado `MANUAL` (400), mesmo tipo (400), nenhum dos dois já conciliado (409; a corrida entre duas pessoas também dá 409 pelo índice único). Valor e data **podem** diferir: valem os do extrato. O do banco **herda a categoria e o dizimista** do manual — é a classificação que a pessoa deu, e o dízimo passa a contar pelo do banco.
 - **Desfazer:** o manual volta a contar; a categoria que o banco herdou fica.
 - **Sugestão** (`sugerirPares`, em `conciliacao.ts`, com teste): entre os pendentes, mesmo tipo, mesmo valor ao centavo e datas a até 3 dias. Cada lançamento entra em um par só; com mais de um candidato vence a data mais próxima e, no empate, o mesmo dizimista. Não grava nada: "conciliar sugestões" grava os pares da lista.
-- **Linhas** (`listar`): `conciliado`, `sugerido`, `so_banco`, `so_manual`, nessa ordem de prioridade (sugerido primeiro, conciliado por último) e da data mais recente. Um par conciliado aparece se qualquer ponta cai no período. Resumo: quantos de cada e o saldo (entradas − saídas) do que está só de um lado.
+- **Não consta no banco** (`marcarNaoConsta`): `PUT conciliacao/:manualId/nao-consta` marca, `DELETE` desmarca. Só lançamento `MANUAL` (400) e não conciliado (409). Grava `notInBankAt` e `notInBankById`. O marcado sai da fila e das sugestões, e do filtro "pendente" de Lançamentos; **continua nos totais**, como todo manual sem par. Conciliar um marcado apaga a marca (o banco mostrou que constava). Na tela, `naoConstaNoBanco` em cada lançamento.
+- **Linhas** (`listar`): `sugerido`, `so_banco`, `so_manual`, `nao_consta` e `conciliado`, nessa ordem de prioridade e da data mais recente. Um par conciliado aparece se qualquer ponta cai no período. Resumo: quantos de cada (`naoConsta` inclusive) e o saldo (entradas − saídas) do que está só de um lado.
 
 ## Auditoria
 
@@ -118,5 +124,7 @@ O mesmo dinheiro costuma estar duas vezes no livro-caixa: o Pix que veio do extr
 ## Migration
 
 `20261011190000_conciliacao`: só adiciona as três colunas de conciliação em `financial_entries` (nulas), o índice único e a chave estrangeira; nada existente muda.
+
+`20261012160000_nao_consta_no_banco`: só adiciona `notInBankAt` e `notInBankById` (nulas) em `financial_entries`. Não marca nada: os manuais antigos sem par continuam na fila, e a tesouraria marca os que são dinheiro em espécie. **Não foi aplicada em banco nenhum.**
 
 `20261011150000_financeiro`: só cria as duas tabelas, os enums e os índices; não mexe em nada existente. `20261011160000_valor_do_dizimo`: só adiciona a coluna `expectedAmount` (nula) em `tithers`. `20261011180000_dizimista_e_membro`: a lista de dizimistas vira os membros — cria `users.titheAmount`, **copia** para ele o `expectedAmount` de quem era dizimista na mesma igreja de que é membro, e só então apaga `tithers` (testado: o valor do dizimista da própria igreja seguiu; o de outra igreja, não). Testada aplicando todas as migrations num Postgres vazio e rodando os serviços contra ele (somas em `Decimal`, importação repetida sem duplicar, recorte por igreja).

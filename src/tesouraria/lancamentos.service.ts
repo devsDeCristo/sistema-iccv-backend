@@ -46,6 +46,8 @@ const CONCILIADO: Prisma.FinancialEntryWhereInput = {
 const PENDENTE: Prisma.FinancialEntryWhereInput = {
   reconciledWithId: null,
   reconciledBy: { is: null },
+  // o que "não consta no banco" já foi resolvido: não pede mais conciliação
+  notInBankAt: null,
 };
 
 /** Teto da lista de um período: um ano de igreja grande cabe com folga */
@@ -392,6 +394,8 @@ export function paraTela(
     conciliado: !!(l.reconciledWithId || l.reconciledBy),
     /** o par: o id do lado de lá, para a tela de conciliação */
     conciliadoCom: l.reconciledWithId ?? l.reconciledBy?.id ?? null,
+    /** manual confirmado fora do extrato (dinheiro em espécie) */
+    naoConstaNoBanco: !!l.notInBankAt,
     createdAt: l.createdAt,
   };
 }

@@ -58,8 +58,12 @@ export function filtroDaBusca(texto: string): Prisma.UserWhereInput | null {
 export class MembrosService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Membros (com família), famílias e pedidos pendentes */
-  async listar(churchId: string) {
+  /**
+   * Membros (com família e o perfil de cada um nesta igreja), famílias e
+   * pedidos pendentes. Sem `comPedidos` (quem só consulta), os pedidos vêm
+   * vazios: aceitar ou recusar é do admin.
+   */
+  async listar(churchId: string, comPedidos = true) {
     const [membros, familias, pendentes] = await Promise.all([
       this.prisma.user.findMany({
         where: { memberChurchId: churchId },
@@ -67,6 +71,7 @@ export class MembrosService {
           ...PESSOA,
           memberSince: true,
           family: { select: { id: true, name: true } },
+          churchRoles: { where: { churchId }, select: { role: true } },
         },
         orderBy: { fullName: 'asc' },
       }),
@@ -75,15 +80,21 @@ export class MembrosService {
         select: { id: true, name: true, _count: { select: { members: true } } },
         orderBy: { name: 'asc' },
       }),
-      this.prisma.user.findMany({
-        where: { requestedChurchId: churchId },
-        select: { ...PESSOA, createdAt: true },
-        orderBy: { createdAt: 'asc' },
-      }),
+      comPedidos
+        ? this.prisma.user.findMany({
+            where: { requestedChurchId: churchId },
+            select: { ...PESSOA, createdAt: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [],
     ]);
 
     return {
-      membros,
+      // admin (2) ou tesouraria (3) aqui; nulo é membro sem perfil
+      membros: membros.map(({ churchRoles, ...m }) => ({
+        ...m,
+        perfil: churchRoles[0]?.role ?? null,
+      })),
       familias: familias.map((f) => ({
         id: f.id,
         name: f.name,

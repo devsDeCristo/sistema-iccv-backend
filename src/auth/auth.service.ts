@@ -277,6 +277,8 @@ export class AuthService {
         eventId: event.id,
         eventName: event.name,
         churchId: event.churchId,
+        // o seletor de igreja das telas que ele só consulta (Membros)
+        churchName: event.church.name,
         kind,
       }),
     );

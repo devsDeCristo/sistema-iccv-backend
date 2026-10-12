@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -184,6 +185,36 @@ export class TesourariaController {
     @Param('manualId', ParseUUIDPipe) manualId: string,
   ) {
     await this.conciliacao.desfazer(churchId, manualId);
+  }
+
+  @ApiOperation({
+    summary: 'Marca o lançamento manual como "não consta no banco"',
+    description:
+      'Dinheiro em espécie, que nunca vai aparecer no extrato: sai da fila da conciliação e continua nos totais.',
+  })
+  @Put('conciliacao/:manualId/nao-consta')
+  @HttpCode(204)
+  async marcarNaoConsta(
+    @Param('churchId') churchId: string,
+    @Param('manualId', ParseUUIDPipe) manualId: string,
+    @Req() req: any,
+  ) {
+    await this.conciliacao.marcarNaoConsta(
+      churchId,
+      manualId,
+      true,
+      req.user?.userId,
+    );
+  }
+
+  @ApiOperation({ summary: 'Devolve o lançamento manual para a conciliação' })
+  @Delete('conciliacao/:manualId/nao-consta')
+  @HttpCode(204)
+  async desmarcarNaoConsta(
+    @Param('churchId') churchId: string,
+    @Param('manualId', ParseUUIDPipe) manualId: string,
+  ) {
+    await this.conciliacao.marcarNaoConsta(churchId, manualId, false);
   }
 
   // ---- lançamentos ---------------------------------------------------------
