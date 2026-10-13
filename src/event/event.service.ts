@@ -76,7 +76,12 @@ import {
 import { calculateAge } from 'src/utils/age';
 import { PaymentGatewayRegistry } from 'src/gateways/core/payment-gateway.registry';
 import { fileToDataUri } from 'src/utils/documentBase64';
-import { SELECT_MODULOS, cobraOnline, exigirModulo } from 'src/planos/modulos';
+import {
+  SELECT_MODULOS,
+  cobraOnline,
+  exigirModulo,
+  modulosDa,
+} from 'src/planos/modulos';
 
 type EventWithGroupRole = Prisma.EventGetPayload<{
   include: {
@@ -2139,6 +2144,9 @@ export class EventService {
               { churchId: { in: igrejasDoPainel ?? [] } },
               { id: { in: doTesoureiro } },
             ],
+            // fora do plano o evento some do painel (o `ModuloGuard` já
+            // recusa abri-lo); os dados continuam guardados
+            church: { plan: { modules: { has: ChurchModule.EVENTS } } },
           }
         : {};
 
@@ -2327,7 +2335,13 @@ export class EventService {
     const ids = [...new Set(dto.eventIds)];
     const eventos = await this.prisma.event.findMany({
       where: { id: { in: ids } },
-      select: { id: true, name: true, churchId: true, status: true },
+      select: {
+        id: true,
+        name: true,
+        churchId: true,
+        status: true,
+        church: { select: SELECT_MODULOS },
+      },
     });
     const porId = new Map(eventos.map((evento) => [evento.id, evento]));
 
@@ -2351,6 +2365,12 @@ export class EventService {
           roles: [Role.ADMIN],
           message: 'Você não administra a igreja deste evento',
         });
+        if (
+          !isSuperAdmin(requester) &&
+          !modulosDa(evento.church).includes(ChurchModule.EVENTS)
+        ) {
+          throw new Error('O plano da igreja não inclui o módulo Eventos');
+        }
         permitidos.push(id);
       } catch (erro) {
         falhas.push({

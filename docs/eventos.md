@@ -50,6 +50,8 @@ eventos do painel.
   deixa passar, e quem confere a igreja de cada evento é o serviço.
 - **Por evento:** só admin da igreja dele, ou super admin (`assertChurchAccess`
   com `Role.ADMIN`, a mesma régua da edição). Tesouraria não muda status.
+  Evento de igreja sem Eventos no plano volta em `falhas` ("O plano da igreja
+  não inclui o módulo Eventos"); super admin e dev passam.
 - **Gravação:** um `updateMany` só, com os que passaram. Trocar o status é só
   gravar o campo; a edição completa não faz nada além disso com ele.
 - **Resposta:** `{ atualizados, falhas: [{ eventId, nome, motivo }] }`. Evento

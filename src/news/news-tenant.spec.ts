@@ -85,7 +85,10 @@ describe('NewsService — destinos e público da igreja da notícia', () => {
 describe('NewsService — recorte das telas por igreja', () => {
   it('a igreja do seletor precisa ser uma que a pessoa administra', () => {
     const { service } = montar();
-    expect(service.recorteDaIgreja(adminDeAeB, 'B')).toEqual({ churchId: 'B' });
+    expect(service.recorteDaIgreja(adminDeAeB, 'B')).toEqual({
+      churchId: 'B',
+      church: { plan: { modules: { has: 'NEWS' } } },
+    });
     expect(() => service.recorteDaIgreja(adminDeAeB, 'C')).toThrow(
       ForbiddenException,
     );

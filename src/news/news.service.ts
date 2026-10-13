@@ -36,7 +36,7 @@ import {
   TOLERANCIA_DE_ATRASO_MS,
   validarAgendamento,
 } from './agendamento';
-import { exigirModulo } from 'src/planos/modulos';
+import { exigirModulo, modulosDa, SELECT_MODULOS } from 'src/planos/modulos';
 
 /**
  * Tamanho máximo da mensagem.
@@ -545,7 +545,15 @@ export class NewsService {
     const vencidos = await this.prisma.newsSchedule.findMany({
       where: { nextRunAt: { lte: agora } },
       include: {
-        news: { select: { id: true, isPublished: true, publishedAt: true } },
+        news: {
+          select: {
+            id: true,
+            isPublished: true,
+            publishedAt: true,
+            churchId: true,
+            church: { select: SELECT_MODULOS },
+          },
+        },
       },
     });
 
@@ -578,6 +586,15 @@ export class NewsService {
       // rascunho fica parado: o horário passa e segue para o próximo, sem
       // publicar nem enviar nada
       if (!news.isPublished) continue;
+
+      // igreja fora do plano de Notícias: o horário passa, sem disparar (a do
+      // sistema, sem igreja, não tem plano)
+      if (
+        news.churchId &&
+        !modulosDa(news.church).includes(ChurchModule.NEWS)
+      ) {
+        continue;
+      }
 
       if (disparadas.has(news.id)) continue;
       disparadas.add(news.id);
@@ -915,11 +932,20 @@ export class NewsService {
         roles: [Role.ADMIN],
         message: 'Você não administra esta igreja',
       });
-      return { churchId };
+      return { churchId, ...this.doPlano(requester) };
     }
 
     const churchIds = tenantChurchIds(requester, [Role.ADMIN]);
-    return churchIds ? { churchId: { in: churchIds } } : {};
+    return churchIds
+      ? { churchId: { in: churchIds }, ...this.doPlano(requester) }
+      : {};
+  }
+
+  /** Igreja fora do plano de Notícias some das listas; os dados ficam */
+  private doPlano(requester: Parameters<typeof isSuperAdmin>[0]) {
+    return isSuperAdmin(requester)
+      ? {}
+      : { church: { plan: { modules: { has: ChurchModule.NEWS } } } };
   }
 
   private async getRequester(requesterId: string) {

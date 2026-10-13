@@ -2,6 +2,7 @@ import { SetMetadata } from '@nestjs/common';
 import { EventTreasurerKind } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { VINCULO_VALE } from './tenant';
+import { SELECT_MODULOS } from '../planos/modulos';
 
 /**
  * Tesoureiro(a) de evento: quem cuida da tesouraria de um evento sem ser admin
@@ -77,7 +78,7 @@ export async function eventosDoTesoureiro(
           id: true,
           name: true,
           churchId: true,
-          church: { select: { name: true } },
+          church: { select: { name: true, ...SELECT_MODULOS } },
         },
       },
     },

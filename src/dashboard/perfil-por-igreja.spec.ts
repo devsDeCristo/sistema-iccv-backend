@@ -14,11 +14,20 @@ const misto = {
   ],
 };
 
-function montar() {
+const TUDO = ['EVENTS', 'NEWS'];
+
+function montar(planos: Record<string, string[]> = { A: TUDO, B: TUDO }) {
   const prisma = {
     user: { findUnique: () => Promise.resolve(misto) },
     church: {
       findUnique: ({ where }: any) => Promise.resolve({ id: where.id }),
+      findMany: ({ where }: any) =>
+        Promise.resolve(
+          where.id.in.map((id: string) => ({
+            id,
+            plan: { modules: planos[id] ?? [] },
+          })),
+        ),
     },
   };
   const service = new DashboardService(prisma as any) as any;
@@ -66,5 +75,24 @@ describe('DashboardService — perfil por igreja', () => {
 
     expect(inscricoes).toHaveBeenCalledWith({ churchId: { in: ['A'] } });
     expect(mural).toHaveBeenCalledWith(['A']);
+  });
+
+  it('plano sem Notícias: sem mural; sem Eventos: sem eventos, inscrições nem caixa', async () => {
+    const soEventos = montar({ A: ['EVENTS'], B: ['EVENTS'] });
+    const home = await soEventos.service.overview('u', 'A');
+    expect(soEventos.mural).not.toHaveBeenCalled();
+    expect(home.news).toBeNull();
+    expect(home.events).toEqual([]);
+
+    const soNoticias = montar({ A: ['NEWS'], B: [] });
+    const daA = await soNoticias.service.overview('u', 'A');
+    expect(daA.events).toBeNull();
+    expect(daA.recentRegistrations).toBeNull();
+    expect(soNoticias.inscricoes).not.toHaveBeenCalled();
+    expect(soNoticias.mural).toHaveBeenCalledWith(['A']);
+
+    const daB = await soNoticias.service.overview('u', 'B');
+    expect(daB.treasury).toBeNull();
+    expect(soNoticias.tesouraria).not.toHaveBeenCalled();
   });
 });

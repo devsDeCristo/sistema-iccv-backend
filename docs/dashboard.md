@@ -54,6 +54,10 @@ e a tesouraria da B via a B como admin: inscrições recentes e mural.
 | `panorama` | super admin sem `churchId` | base de usuários do sistema (ver "Panorama do super admin") |
 | `insights` | dev sem `churchId` | indicadores de funcionamento do sistema (ver "Indicadores do dev") |
 
+### O plano da igreja
+
+Para quem não é dev nem super admin, os blocos seguem o plano de cada igreja do recorte (`docs/planos.md`): `events`, `recentRegistrations` e `treasury` só com as igrejas que têm **Eventos**, e `news` só com as que têm **Notícias**. Sem nenhuma igreja do recorte com Eventos, os três vêm `null` (e não vazios), para a tela nem montar o bloco.
+
 ### Quais eventos aparecem em `events`
 
 - **Administração comum (admin, super admin, dev com recorte):** os eventos com `status` em `ACTIVE` ou `TEST` (`eventosAbertos`). Sem nenhum aberto, a lista não fica vazia — entra o último evento encerrado (`ultimoEncerrado`), para a tela não abrir em branco no dia seguinte ao evento. **A data de término não filtra este conjunto**: um evento marcado `ACTIVE` continua aparecendo mesmo depois de terminar, porque o dinheiro dele (comprovantes a conferir) não desaparece com o fim do evento.

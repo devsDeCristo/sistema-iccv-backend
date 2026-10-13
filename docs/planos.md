@@ -48,7 +48,13 @@ Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e 
 - **Cobrança online** não é acesso de ninguém: é se a igreja cobra. Sem Eventos no plano ela não cobra, quem quer que abra o checkout.
 - **A igreja sai da rota:** `:churchId`; o evento (`:idEvent`, `:eventId`, ou `:id` nas rotas de Eventos); o pagamento (`:paymentId` → evento); a notícia (`:id` nas rotas de Notícias); ou o `churchId` do corpo. Sem nada disso (listas de várias igrejas, criação sem igreja escolhida), passa.
 - **Criação:** criar evento e criar notícia (e trocar a notícia de igreja) conferem no service, depois de saber a igreja — quem administra uma igreja só nem manda o `churchId`. Dev e super admin passam aqui também.
-- **Limite conhecido:** listas que juntam várias igrejas (`GET /events`, `GET /news/admin` sem igreja escolhida, insights) não filtram pelo plano; a tela esconde o módulo, e qualquer ação sobre um item volta 403.
+- **Listas e ações de várias igrejas** (sem igreja na rota) filtram no service, para quem não é dev nem super admin:
+  - `GET /events` do painel: só eventos de igreja com Eventos (vale também para o tesoureiro(a) de evento);
+  - `GET /news/admin` e o calendário de disparos: só notícias de igreja com Notícias;
+  - home (`GET /dashboard`, ver `docs/dashboard.md`): eventos, inscrições recentes e caixa só das igrejas com Eventos; mural só das com Notícias;
+  - status em massa (`PUT /events/status`): evento de igreja sem Eventos volta em `falhas`.
+- **Cron de notícias:** agendamento de notícia de igreja sem Notícias não dispara (o horário passa e segue para o próximo). Notícia do sistema (sem igreja) dispara.
+- **Fora do recorte, de propósito:** os indicadores do dev (o plano não vale para ele) e o público (`GET /events` sem painel, o feed de notícias) — o publicado segue aberto ao público.
 
 ## Cobrança online (parte de Eventos)
 
@@ -56,7 +62,7 @@ Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e 
 
 ## Sessão
 
-`/auth/validate` e `/auth/admin/validate` devolvem em cada vínculo `church.modulos` (os módulos do plano da igreja). A tela renova a sessão a cada navegação no painel: trocar o plano vale na navegação seguinte de quem já está logado.
+`/auth/validate` e `/auth/admin/validate` devolvem em cada vínculo `church.modulos` (os módulos do plano da igreja), e em cada `eventTreasurers` os `modulos` da igreja do evento — o menu do tesoureiro(a) de evento segue o plano dela. A tela renova a sessão a cada navegação no painel: trocar o plano vale na navegação seguinte de quem já está logado.
 
 ## Migration
 

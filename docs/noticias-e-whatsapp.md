@@ -144,6 +144,8 @@ Regras:
   - **Sem disparo duplo:** o agendamento só dispara se a rodada conseguir
     trocar o `nextRunAt` que leu (`updateMany` condicional).
   - **Mesma notícia, mesmo minuto:** dois agendamentos dela disparam uma vez só.
+  - **Igreja sem Notícias no plano:** o horário passa, sem publicar nem
+    enviar (como o rascunho). Notícia sem igreja dispara.
   - **Servidor fora do ar:** atraso de mais de 1 hora pula aquele disparo e
     segue para o próximo, porque "terça às 12h" chegando na quinta confunde.
   - **Uma réplica:** a reserva protege contra rodadas sobrepostas no mesmo

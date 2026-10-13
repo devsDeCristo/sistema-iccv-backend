@@ -6,15 +6,29 @@ import { Role } from 'src/auth/roles';
  * Status em massa: cada evento é conferido contra a igreja de quem pede; os
  * que passam mudam num `updateMany` só, os outros voltam em `falhas`.
  */
-function montar(requester: object) {
+function montar(requester: object, modulosDaC1 = ['EVENTS']) {
+  const church = { plan: { modules: modulosDaC1 } };
   const eventos = [
-    { id: 'e1', name: 'Retiro', churchId: 'c1', status: EventStatus.ACTIVE },
-    { id: 'e2', name: 'Cursilho', churchId: 'c1', status: EventStatus.TEST },
+    {
+      id: 'e1',
+      name: 'Retiro',
+      churchId: 'c1',
+      status: EventStatus.ACTIVE,
+      church,
+    },
+    {
+      id: 'e2',
+      name: 'Cursilho',
+      churchId: 'c1',
+      status: EventStatus.TEST,
+      church,
+    },
     {
       id: 'e3',
       name: 'Da vizinha',
       churchId: 'c2',
       status: EventStatus.ACTIVE,
+      church: { plan: null },
     },
   ];
   const prisma = {
@@ -58,6 +72,24 @@ describe('EventService.atualizarStatusEmMassa', () => {
         motivo: 'Você não administra a igreja deste evento',
       },
       { eventId: 'sumiu', nome: null, motivo: 'Evento não encontrado' },
+    ]);
+  });
+
+  it('igreja sem Eventos no plano: volta como falha', async () => {
+    const { servico, prisma } = montar(adminDaC1, ['NEWS']);
+
+    const resultado = await servico.atualizarStatusEmMassa('eu', {
+      eventIds: ['e1'],
+      status: EventStatus.INACTIVE,
+    });
+
+    expect(prisma.event.updateMany).not.toHaveBeenCalled();
+    expect(resultado.falhas).toEqual([
+      {
+        eventId: 'e1',
+        nome: 'Retiro',
+        motivo: 'O plano da igreja não inclui o módulo Eventos',
+      },
     ]);
   });
 

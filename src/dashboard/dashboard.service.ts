@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   CheckinStatus,
+  ChurchModule,
   EventStatus,
   PaymentStatus,
   Prisma,
@@ -16,6 +17,7 @@ import {
   TenantRequester,
   tenantChurchIds,
 } from 'src/auth/tenant';
+import { modulosDa, SELECT_MODULOS } from 'src/planos/modulos';
 
 /** Estados de pagamento que ainda contam como dinheiro do evento. */
 const ESTADOS_VIVOS = [
@@ -178,16 +180,42 @@ export class DashboardService {
             isSuperAdmin(requester) ||
             perfilNaIgreja(requester, id) === Role.ADMIN,
         );
+
+    /**
+     * O plano de cada igreja recorta os blocos: eventos, inscrições e caixa
+     * são do módulo Eventos; o mural, do Notícias. Super admin e dev veem
+     * tudo, como no resto do sistema.
+     */
+    const planos =
+      todasAsIgrejas || isSuperAdmin(requester)
+        ? null
+        : await this.prisma.church.findMany({
+            where: { id: { in: churchIds } },
+            select: { id: true, ...SELECT_MODULOS },
+          });
+    const comModulo = (ids: string[], modulo: ChurchModule) =>
+      planos
+        ? ids.filter((id) =>
+            modulosDa(planos.find((p) => p.id === id)).includes(modulo),
+          )
+        : ids;
+
     const doRecorteDeAdmin: Prisma.EventWhereInput = igrejasDeAdmin
-      ? { churchId: { in: igrejasDeAdmin } }
+      ? { churchId: { in: comModulo(igrejasDeAdmin, ChurchModule.EVENTS) } }
       : {};
 
     const doRecorte: Prisma.EventWhereInput = todasAsIgrejas
       ? {}
-      : { churchId: { in: churchIds } };
+      : { churchId: { in: comModulo(churchIds, ChurchModule.EVENTS) } };
 
     /** Publicar notícia é do admin: a tesouraria não entra no mural */
-    const veMural = !!igrejasDeAdmin?.length;
+    const igrejasDoMural = igrejasDeAdmin
+      ? comModulo(igrejasDeAdmin, ChurchModule.NEWS)
+      : [];
+    const veMural = igrejasDoMural.length > 0;
+    /** Nenhuma igreja do recorte com Eventos: os blocos dele nem vão à tela */
+    const semEventos =
+      !!planos && !comModulo(churchIds ?? [], ChurchModule.EVENTS).length;
 
     const ehDev = perfil === Role.DEV;
     const ehTesouraria = perfil === Role.TESOURARIA;
@@ -199,11 +227,14 @@ export class DashboardService {
        * A tesouraria não recebe a lista de quem entrou: para ela o que importa
        * não é quem se inscreveu, e sim quem ainda não pagou.
        */
-      ehTesouraria ? null : this.inscricoesRecentes(doRecorteDeAdmin),
-      veMural ? this.mural(igrejasDeAdmin) : null,
+      ehTesouraria || semEventos
+        ? null
+        : this.inscricoesRecentes(doRecorteDeAdmin),
+      veMural ? this.mural(igrejasDoMural) : null,
     ]);
 
-    const treasury = ehTesouraria ? await this.tesouraria(doRecorte) : null;
+    const treasury =
+      ehTesouraria && !semEventos ? await this.tesouraria(doRecorte) : null;
 
     /**
      * Os indicadores do sistema são do dev: é o perfil que cuida da operação
@@ -270,7 +301,7 @@ export class DashboardService {
        *
        * `outros` continua sendo calculado acima: as pendências saem dele.
        */
-      events: todasAsIgrejas ? null : daIgreja,
+      events: todasAsIgrejas || semEventos ? null : daIgreja,
       recentRegistrations: todasAsIgrejas ? null : recentRegistrations,
       treasury,
       news,

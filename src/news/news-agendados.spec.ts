@@ -68,6 +68,25 @@ describe('NewsService — disparos agendados', () => {
     });
   });
 
+  it('igreja sem Notícias no plano: o horário passa, sem disparar', async () => {
+    const base = semanal('a1', 'n1', brt('2026-10-06T12:00'));
+    const daIgreja = {
+      ...base,
+      news: { ...base.news, churchId: 'A', church: { plan: null } },
+    };
+    const { service, prisma, dispara } = montar([daIgreja]);
+
+    await service.dispararVencidos(AGORA);
+
+    expect(dispara).not.toHaveBeenCalled();
+    expect(prisma.news.update).not.toHaveBeenCalled();
+    expect(prisma.newsSchedule.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ nextRunAt: brt('2026-10-13T12:00') }),
+      }),
+    );
+  });
+
   it('rodada concorrente que já reservou: não dispara de novo', async () => {
     const { service, dispara } = montar(
       [semanal('a1', 'n1', brt('2026-10-06T12:00'))],

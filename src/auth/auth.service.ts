@@ -279,6 +279,8 @@ export class AuthService {
         churchId: event.churchId,
         // o seletor de igreja das telas que ele só consulta (Membros)
         churchName: event.church.name,
+        // o menu do tesoureiro(a) segue o plano da igreja do evento
+        modulos: modulosDa(event.church),
         kind,
       }),
     );
