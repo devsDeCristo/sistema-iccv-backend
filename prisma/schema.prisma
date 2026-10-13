@@ -446,7 +446,7 @@ model EventOnUsers {
   @@index([eventId])
 }
 
-/// Liberação de participante menor de 16 anos para um evento. Ver
+/// Liberação de participante menor da idade do evento (16 ou 18, `data.minorAgeLimit`). Ver
 /// `EventOnUsers.minorApprovalStatus`.
 enum MinorApprovalStatus {
   /// Maior de idade na data do evento — não precisa de termo

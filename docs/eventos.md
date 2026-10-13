@@ -110,11 +110,12 @@ configuração nova. Campos conhecidos:
 | `registrationTerm` | `string` (HTML) | termo de inscrição exigido na hora de se inscrever. Vazio de verdade (inclusive `<p><br></p>` do editor) conta como "sem termo" — ver `termoDeInscricao`/`exigeAceiteDeTermo`. |
 | `coverUrl`, `logoUrl`, `logoUrlInverted` | `string` (URL Firebase) | gravados pelo serviço depois do upload, não vêm do corpo. |
 | `minorTermUrl` | `string` (data URI base64) | termo de autorização para menores, salvo direto no banco. |
+| `minorAgeLimit` | `16 \| 18` | até que idade (no primeiro dia do evento) o termo de autorização é exigido. Normalizado por `idadeDoTermo`: só `18` vale 18, o resto é 16. Ausente na edição mantém o atual; mudar com inscritos reclassifica — ver `docs/inscricoes.md`. |
 | `logoBase64`, `coverBase64` | `string` (data URI) | só aparecem na resposta quando `embedImages=true` é pedido; nunca gravados. |
 
 Na edição (`update`), `data` é gravado por inteiro — o que não vem no corpo
 some. Para não apagar configuração por omissão, o serviço preserva
-explicitamente `modules`, `colors`, `showQuadrante` e `publicStore` quando
+explicitamente `modules`, `colors`, `showQuadrante`, `publicStore` e `minorAgeLimit` quando
 ausentes no corpo (herdam o valor atual do evento). Os demais campos de
 `data` seguem a regra geral: ausente é apagado.
 

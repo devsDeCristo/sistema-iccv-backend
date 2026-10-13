@@ -246,7 +246,7 @@ export class UserDTO {
   @ApiProperty({
     example: 'Maria Souza',
     description:
-      'Nome do responsável, preenchido quando a pessoa é menor de 16 anos. ' +
+      'Nome do responsável, preenchido quando a pessoa é menor de 18 anos. ' +
       'O telefone do responsável usa o campo emergencyContact.',
   })
   @IsString()

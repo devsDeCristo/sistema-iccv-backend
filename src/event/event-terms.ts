@@ -35,3 +35,17 @@ export function exigeAceiteDeTermo(
       .trim().length > 0
   );
 }
+
+/**
+ * Até que idade o evento exige o termo de autorização dos pais: 16 ou 18, um
+ * switch no cadastro do evento (`data.minorAgeLimit`). Ausente é 16, a regra
+ * de antes do switch — os eventos que já existem não mudam. A idade é a que a
+ * pessoa terá no primeiro dia do evento.
+ */
+export function idadeDoTermo(
+  data: Prisma.JsonValue | null | undefined,
+): 16 | 18 {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 16;
+
+  return (data as Prisma.JsonObject)['minorAgeLimit'] === 18 ? 18 : 16;
+}

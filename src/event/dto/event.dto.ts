@@ -385,7 +385,7 @@ export class EventDto {
 
   @ApiProperty({
     description:
-      'Termo de autorização em branco, para pais/responsáveis de menores de 16 anos baixarem, assinarem e reenviarem',
+      'Termo de autorização em branco, para pais/responsáveis de menores da idade do evento (`data.minorAgeLimit`, 16 ou 18) baixarem, assinarem e reenviarem',
     type: 'string',
     format: 'binary',
     required: false,

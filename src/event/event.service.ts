@@ -69,7 +69,7 @@ import {
   filtroDeEventoEmTeste,
   podeVerEventoEmTeste,
 } from './event-visibility';
-import { exigeAceiteDeTermo } from './event-terms';
+import { exigeAceiteDeTermo, idadeDoTermo } from './event-terms';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
@@ -539,6 +539,63 @@ export class EventService {
     return ingressos[0] ?? null;
   }
 
+  /**
+   * O limite do termo mudou com o evento já tendo inscritos: quem passou a
+   * precisar do termo (17 anos, ao subir de 16 para 18) volta a pendente, e
+   * quem deixou de precisar fica liberado. Sem isso a regra só valia para as
+   * inscrições feitas depois do switch. Quem não muda de lado fica como está,
+   * com o termo e a revisão que já tinha.
+   */
+  private async reclassificarMenores(
+    eventId: string,
+    inicioDoEvento: Date,
+    limite: number,
+  ): Promise<Prisma.PrismaPromise<any>[]> {
+    const inscricoes = await this.prisma.eventOnUsers.findMany({
+      where: { eventId },
+      select: {
+        userId: true,
+        minorApprovalStatus: true,
+        user: { select: { birthday: true } },
+      },
+    });
+
+    const passamAExigir: string[] = [];
+    const deixamDeExigir: string[] = [];
+    for (const inscricao of inscricoes) {
+      const menor =
+        calculateAge(inscricao.user.birthday, inicioDoEvento) < limite;
+      const exige =
+        inscricao.minorApprovalStatus !== MinorApprovalStatus.NOT_REQUIRED;
+      if (menor && !exige) passamAExigir.push(inscricao.userId);
+      if (!menor && exige) deixamDeExigir.push(inscricao.userId);
+    }
+
+    return [
+      ...(passamAExigir.length
+        ? [
+            this.prisma.eventOnUsers.updateMany({
+              where: { eventId, userId: { in: passamAExigir } },
+              data: { minorApprovalStatus: MinorApprovalStatus.PENDING },
+            }),
+          ]
+        : []),
+      ...(deixamDeExigir.length
+        ? [
+            this.prisma.eventOnUsers.updateMany({
+              where: { eventId, userId: { in: deixamDeExigir } },
+              data: {
+                minorApprovalStatus: MinorApprovalStatus.NOT_REQUIRED,
+                minorApprovalReviewedById: null,
+                minorApprovalReviewedAt: null,
+                minorApprovalRejectionReason: null,
+              },
+            }),
+          ]
+        : []),
+    ];
+  }
+
   private async _registerUserInEventTx(
     tx: PrismaService | Prisma.TransactionClient,
     userId: string,
@@ -577,7 +634,7 @@ export class EventService {
     // terá na data do evento, não na data em que se inscreve — quem se
     // inscreve meses antes já sabe se vai precisar do termo.
     const minorApprovalStatus: MinorApprovalStatus =
-      calculateAge(user.birthday, event.startDate) < 16
+      calculateAge(user.birthday, event.startDate) < idadeDoTermo(event.data)
         ? MinorApprovalStatus.PENDING
         : MinorApprovalStatus.NOT_REQUIRED;
 
@@ -1859,6 +1916,7 @@ export class EventService {
           ? { modules: normalizarModulos(dataDoEvento.modules) }
           : {}),
         showQuadrante: normalizarMostrarQuadrante(dataDoEvento.showQuadrante),
+        minorAgeLimit: idadeDoTermo(dataDoEvento),
         coverUrl,
         logoUrl,
         minorTermUrl,
@@ -2642,6 +2700,12 @@ export class EventService {
     }
     safeData.showQuadrante = normalizarMostrarQuadrante(safeData.showQuadrante);
 
+    // ausente é "não mexi": o limite do termo continua o que estava
+    if (safeData.minorAgeLimit === undefined) {
+      safeData.minorAgeLimit = dataAtual.minorAgeLimit;
+    }
+    safeData.minorAgeLimit = idadeDoTermo(safeData);
+
     // só as três chaves conhecidas, só booleano — o resto do objeto que vier
     // no corpo da requisição não vira módulo
     if (safeData.modules !== undefined) {
@@ -2662,6 +2726,16 @@ export class EventService {
 
     // ================= TRANSACTION SOMENTE PARA BANCO =================
     const ops: Prisma.PrismaPromise<any>[] = [];
+
+    if (safeData.minorAgeLimit !== idadeDoTermo(dataAtual)) {
+      ops.push(
+        ...(await this.reclassificarMenores(
+          id,
+          startDate,
+          safeData.minorAgeLimit,
+        )),
+      );
+    }
 
     // Atualiza o evento
     ops.push(

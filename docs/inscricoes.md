@@ -99,8 +99,18 @@ Arquivo: `src/event/event-terms.ts` (`termoDeInscricao`,
 Elegibilidade decidida na hora da inscrição, com a idade **na data de
 início do evento** (`event.startDate`), não na data da inscrição.
 
-- **Corte:** `calculateAge(user.birthday, event.startDate) < 16` →
-  `MinorApprovalStatus.PENDING`; caso contrário, `NOT_REQUIRED`.
+- **Corte:** `calculateAge(user.birthday, event.startDate) < idadeDoTermo(event.data)`
+  → `MinorApprovalStatus.PENDING`; caso contrário, `NOT_REQUIRED`.
+- **Idade do corte por evento** (`idadeDoTermo`, `src/event/event-terms.ts`):
+  16 ou 18, do switch "Exigir até os 18 anos" no cadastro do evento
+  (`data.minorAgeLimit`). Ausente ou qualquer outro valor é 16 — a regra de
+  antes do switch, então eventos antigos não mudam.
+- **Troca do corte com inscritos:** ao salvar o evento com outro limite,
+  `reclassificarMenores` revê as inscrições na mesma transação. Quem passou a
+  precisar do termo (ex.: 17 anos, de 16 para 18) vira `PENDING`; quem deixou
+  de precisar vira `NOT_REQUIRED` (revisão e motivo limpos; o termo enviado
+  fica). Quem não muda de lado fica como está. Mudar só a data de início não
+  reclassifica ninguém (comportamento de antes).
 - **`calculateAge`** (`src/utils/age.ts`): idade completa em anos numa data
   de referência qualquer.
 

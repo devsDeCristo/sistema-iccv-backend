@@ -1,4 +1,8 @@
-import { exigeAceiteDeTermo, termoDeInscricao } from './event-terms';
+import {
+  exigeAceiteDeTermo,
+  idadeDoTermo,
+  termoDeInscricao,
+} from './event-terms';
 
 describe('exigeAceiteDeTermo', () => {
   it('exige aceite quando o admin escreveu um termo', () => {
@@ -40,5 +44,23 @@ describe('termoDeInscricao', () => {
     expect(termoDeInscricao({ registrationTerm: 42 })).toBe('');
     expect(termoDeInscricao(['nada disso'])).toBe('');
     expect(termoDeInscricao(undefined)).toBe('');
+  });
+});
+
+describe('idadeDoTermo', () => {
+  it('é 16 no evento anterior ao switch, que não tem a chave', () => {
+    expect(idadeDoTermo({ registrationTerm: '<p>x</p>' })).toBe(16);
+    expect(idadeDoTermo(null)).toBe(16);
+  });
+
+  it('é 18 só quando o evento pediu 18', () => {
+    expect(idadeDoTermo({ minorAgeLimit: 18 })).toBe(18);
+    expect(idadeDoTermo({ minorAgeLimit: 16 })).toBe(16);
+  });
+
+  it('ignora qualquer outro valor que venha no corpo', () => {
+    expect(idadeDoTermo({ minorAgeLimit: '18' })).toBe(16);
+    expect(idadeDoTermo({ minorAgeLimit: 21 })).toBe(16);
+    expect(idadeDoTermo({ minorAgeLimit: 0 })).toBe(16);
   });
 });

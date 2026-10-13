@@ -81,7 +81,7 @@ rota para ler ou editar outra pessoa por aqui.
 | `street`, `number`, `zipCode` | opcionais | endereço; nasceram depois de cadastros já em produção |
 | `congregation` | opcional, texto livre | igreja que a pessoa frequenta — **não** é uma `Church` cadastrada no sistema |
 | `pastorName` | opcional, texto livre | pastor da congregação da pessoa |
-| `guardianName` | opcional | nome do responsável, para menor de 16 anos; o telefone do responsável usa o mesmo campo `emergencyContact` |
+| `guardianName` | opcional | nome do responsável, para menor de 18 anos; o telefone do responsável usa o mesmo campo `emergencyContact` |
 | `emergencyContact` | opcional | contato de emergência (ou telefone do responsável, se menor) |
 | `leadershipPosition`, `indicatedBy`, `badgeName`, `notes` | opcionais | — |
 | `religion`, `diabetes`, `hypertensive` | opcionais, **sensíveis** | ver seção abaixo |
