@@ -177,8 +177,9 @@ export class UserService {
     requesterRole?: number | null,
   ) {
     if (isDevRole(targetRole) && !isDevRole(requesterRole)) {
+      // a mensagem não conta o perfil de quem está do outro lado
       throw new ForbiddenException(
-        'Somente o perfil Dev pode alterar uma conta Dev',
+        'Você não tem permissão para alterar o cadastro desta pessoa',
       );
     }
   }
@@ -722,7 +723,7 @@ export class UserService {
         });
         if (deIgreja || SUPER_ADMIN_ROLES.includes(userExists.role as Role)) {
           throw new ForbiddenException(
-            'Quem tem perfil de painel só é editado pelo admin da igreja',
+            'Você não tem permissão para alterar o cadastro desta pessoa',
           );
         }
         if (mudaAcesso(data, userExists)) {
@@ -762,7 +763,7 @@ export class UserService {
           // linha um admin rebaixaria o dono do sistema
           if (userExists.role === Role.SUPER_ADMIN) {
             throw new ForbiddenException(
-              'Somente o super admin edita outro super admin',
+              'Você não tem permissão para alterar o cadastro desta pessoa',
             );
           }
 
@@ -976,7 +977,8 @@ export class UserService {
       }
       // super admin e dev não são de igreja: vínculo não muda o acesso deles
       if (pessoa.role === Role.SUPER_ADMIN || pessoa.role === Role.DEV) {
-        falhou('Super admin e dev não têm perfil por igreja');
+        // sem dizer por quê: o motivo contaria o perfil da pessoa
+        falhou('Não é possível mudar a permissão desta pessoa');
         continue;
       }
 

@@ -187,6 +187,10 @@ Quem é admin de um evento (`EventAdmin`, ver `docs/eventos.md`) alcança as pes
 - `GET /users/:id` e `GET /users/:id/groups` (os grupos, só dos eventos das igrejas dele), com os dados sensíveis;
 - `PUT /users/:id`: edita **o perfil**. Permissão (`role`, `churchRoles`) é descartada como para qualquer não admin; e-mail e CPF diferentes do atual voltam 403 (com o e-mail trocado, o "esqueci a senha" daria a conta a ele); quem tem perfil de painel em alguma igreja, ou é super admin/dev, volta 403 — é assunto do admin da igreja.
 
+### Mensagens de recusa não contam o perfil de ninguém
+
+Quando a recusa é por causa de quem está **do outro lado** (conta Dev, super admin, alguém com perfil de painel), a mensagem é genérica: "Você não tem permissão para alterar o cadastro desta pessoa" — e, na permissão em massa, "Não é possível mudar a permissão desta pessoa". Até 13/10/2026 elas diziam o perfil ("Somente o perfil Dev pode alterar uma conta Dev", "Somente o super admin edita outro super admin", "Super admin e dev não têm perfil por igreja"), e qualquer admin descobria assim quem é dev ou super admin. Mensagem que fala do **próprio** pedido (conceder super admin, conceder Dev) continua dizendo o perfil: aí não há terceiro exposto.
+
 ## Permissão em massa (`PUT /users/permissions`)
 
 O mesmo perfil, numa igreja, para várias pessoas de uma vez — a barra de

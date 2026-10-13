@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -16,7 +15,6 @@ import { ChurchModule, EventTreasurerKind } from '@prisma/client';
 import { IsEnum } from 'class-validator';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { ADMIN_AREA_ROLES, ADMIN_ROLES } from 'src/auth/roles';
-import { perfilNaIgreja, SELECT_TENANT } from 'src/auth/tenant';
 import { EventTenantGuard } from 'src/decorators/event-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from 'src/decorators/roles.guard';
@@ -83,25 +81,13 @@ export class TesoureirosController {
     @Body() { kind }: SalvarTesoureiroDto,
     @Req() req: any,
   ) {
-    const [pessoa, evento] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { id: userId },
-        select: SELECT_TENANT,
-      }),
-      this.prisma.event.findUnique({
-        where: { id: eventId },
-        select: { churchId: true },
-      }),
-    ]);
-    if (!pessoa || !evento)
-      throw new NotFoundException('Pessoa não encontrada');
-
-    // admin e tesouraria da igreja já veem a tesouraria de todos os eventos dela
-    if (perfilNaIgreja(pessoa, evento.churchId)) {
-      throw new BadRequestException(
-        'Esta pessoa já é admin ou tesouraria da igreja do evento',
-      );
-    }
+    // qualquer perfil entra: o vínculo só soma, e vale o maior. E a recusa
+    // não diria o perfil de ninguém
+    const pessoa = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!pessoa) throw new NotFoundException('Pessoa não encontrada');
 
     const antes = await this.prisma.eventTreasurer.findUnique({
       where: { eventId_userId: { eventId, userId } },

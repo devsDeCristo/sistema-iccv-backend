@@ -1749,7 +1749,7 @@ export class EventService {
     // evento pela metade, nem subir como erro 500 lá de dentro da transação
     validarProdutos(data.products ?? []);
     (data.products ?? []).forEach((produto) => validarFotos(produto.images));
-    await this.validarEquipe(churchId, data);
+    await this.validarEquipe(data);
 
     try {
       data.endDate = new Date(data.endDate);
@@ -2538,9 +2538,8 @@ export class EventService {
       }
     }
 
-    // a equipe é conferida antes de qualquer escrita, uploads inclusive (na
-    // igreja de destino, se o super admin moveu o evento)
-    await this.validarEquipe(novaIgreja ?? event.churchId, updateEvent);
+    // a equipe é conferida antes de qualquer escrita, uploads inclusive
+    await this.validarEquipe(updateEvent);
 
     const name = updateEvent.name?.trim();
 
@@ -2819,12 +2818,11 @@ export class EventService {
   /**
    * A equipe do evento — admins e tesoureiros(as) — vem no cadastro e na
    * edição dele. Pode ser qualquer usuário do sistema, membro da igreja ou
-   * não; só não entra quem já vê o evento todo pelo perfil (super admin, admin
-   * da igreja e, como tesoureiro, a tesouraria da igreja). Recusa com o nome de
-   * quem, antes de qualquer escrita.
+   * não, e de qualquer perfil: o vínculo só soma, e vale o maior. A recusa
+   * nunca conta o perfil de ninguém — só quem não existe e quem se repete.
+   * Antes de qualquer escrita.
    */
   private async validarEquipe(
-    churchId: string,
     equipe: Pick<EventDto, 'adminIds' | 'tesoureiros'>,
   ) {
     const adminIds = equipe.adminIds ?? [];
@@ -2839,35 +2837,14 @@ export class EventService {
     const ids = [...new Set([...adminIds, ...tesoureiros])];
     if (!ids.length) return;
 
-    const pessoas = await this.prisma.user.findMany({
+    const existem = await this.prisma.user.count({
       where: { id: { in: ids } },
-      select: { id: true, fullName: true, ...SELECT_TENANT },
     });
-    const porId = new Map(pessoas.map((p) => [p.id, p]));
-    if (porId.size !== ids.length) {
+    if (existem !== ids.length) {
       throw new BadRequestException(
         'Pessoa da equipe do evento não encontrada',
       );
     }
-
-    const recusa = (id: string, comoTesoureiro: boolean) => {
-      const pessoa = porId.get(id)!;
-      if (isSuperAdmin(pessoa)) {
-        return `${pessoa.fullName} é super admin e já vê todos os eventos`;
-      }
-      const naIgreja = perfilNaIgreja(pessoa, churchId);
-      if (naIgreja === Role.ADMIN) {
-        return `${pessoa.fullName} já é admin da igreja do evento`;
-      }
-      if (comoTesoureiro && naIgreja === Role.TESOURARIA) {
-        return `${pessoa.fullName} já é tesouraria da igreja do evento`;
-      }
-      return null;
-    };
-    const motivo =
-      adminIds.map((id) => recusa(id, false)).find(Boolean) ??
-      tesoureiros.map((id) => recusa(id, true)).find(Boolean);
-    if (motivo) throw new BadRequestException(motivo);
   }
 
   /**
