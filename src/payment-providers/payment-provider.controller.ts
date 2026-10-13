@@ -17,7 +17,8 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { ChurchTenantGuard } from 'src/decorators/church-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_ROLES, SUPER_ADMIN_ROLES } from 'src/auth/roles';
+import { IsBoolean } from 'class-validator';
 import { PaymentProviderService } from './payment-provider.service';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
 import { ProviderSlugPipe } from './provider-slug.pipe';
@@ -37,6 +38,11 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
  *   outra, mesmo trocando o `:churchId` da URL na mão.
  * - Nenhuma resposta devolve credencial. Nem a cifrada.
  */
+class DefinirCobrancaDto {
+  @IsBoolean()
+  enabled: boolean;
+}
+
 @ApiTags('payment-providers')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
@@ -65,6 +71,26 @@ export class PaymentProviderController {
   @Get('churches/:churchId/payment-providers')
   listar(@Param('churchId') churchId: string) {
     return this.service.listar(churchId);
+  }
+
+  /**
+   * Liga ou desliga a cobrança online da igreja (dentro do módulo Eventos).
+   *
+   * `@Roles(...SUPER_ADMIN_ROLES)` sobrescreve o `ADMIN_ROLES` da classe: é
+   * decisão de plataforma. Deixar o admin da igreja desligar daria a ele um
+   * jeito de parar a reconciliação das cobranças que ele mesmo abriu.
+   *
+   * `module` é um segmento e `:provider/default` são dois: uma rota não casa no
+   * lugar da outra.
+   */
+  @ApiOperation({ summary: 'Ligar ou desligar a cobrança online da igreja' })
+  @Roles(...SUPER_ADMIN_ROLES)
+  @Patch('churches/:churchId/payment-providers/module')
+  definirModulo(
+    @Param('churchId') churchId: string,
+    @Body() dto: DefinirCobrancaDto,
+  ) {
+    return this.service.definirModulo(churchId, dto.enabled);
   }
 
   @ApiOperation({

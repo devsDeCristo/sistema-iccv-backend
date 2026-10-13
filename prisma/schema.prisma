@@ -39,13 +39,20 @@ model Church {
   /// tem módulo nenhum — só o painel básico (Início, Usuários e Membros, que toda
   /// igreja tem).
   ///
-  /// A cobrança online, que antes era o `modulePayment` daqui, é parte do
-  /// módulo Eventos do plano.
+  /// A cobrança online é parte do módulo Eventos do plano — e, dentro dele,
+  /// pode ser desligada por igreja (`modulePayment`).
   ///
   /// `Restrict`: um plano em uso não se apaga — tiraria os módulos das igrejas
   /// dele sem ninguém escolher.
   planId String?
   plan   Plan?   @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  /// A cobrança online desta igreja, ligada ou desligada pelo dev/super admin
+  /// (Configurações › Pagamentos). Só vale com Eventos no plano: a igreja
+  /// cobra pelo site quando tem os dois (`cobraOnline`). Desligar pausa — as
+  /// credenciais ficam, e religar devolve tudo. Padrão ligado, para a volta do
+  /// campo não tirar a cobrança de quem já cobra.
+  modulePayment Boolean @default(true)
 
   /// Quem responde pela igreja. É o nome que assina o e-mail de confirmação
   /// dos eventos dela — a assinatura era uma só, fixa no template, e saía com

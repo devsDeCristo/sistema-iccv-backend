@@ -8,8 +8,14 @@ export const ROTULO_DO_MODULO: Record<ChurchModule, string> = {
   TREASURY: 'Tesouraria',
 };
 
-/** O que ler da igreja para saber os módulos dela */
-export const SELECT_MODULOS = { plan: { select: { modules: true } } } as const;
+/**
+ * O que ler da igreja para saber os módulos dela (e se a cobrança online, que
+ * é parte de Eventos, está ligada nela)
+ */
+export const SELECT_MODULOS = {
+  plan: { select: { modules: true } },
+  modulePayment: true,
+} as const;
 
 /** Os módulos da igreja: os do plano dela; sem plano, nenhum */
 export const modulosDa = (
@@ -17,22 +23,29 @@ export const modulosDa = (
 ): ChurchModule[] => igreja?.plan?.modules ?? [];
 
 /**
- * A igreja cobra online? É o módulo Eventos do plano dela: dar às igrejas o
- * suporte a pagamentos é parte do que o módulo de eventos é. (Já foi o
- * `Church.modulePayment`, e depois um módulo próprio, `ONLINE_PAYMENTS`.)
+ * A igreja cobra online? Precisa do módulo Eventos no plano — dar às igrejas o
+ * suporte a pagamentos é parte do que o módulo de eventos é — **e** da cobrança
+ * ligada nela (`Church.modulePayment`, que o dev/super admin desliga por
+ * igreja). Ausente conta como ligada.
  */
 export const cobraOnline = (
-  igreja: { plan?: { modules: ChurchModule[] } | null } | null | undefined,
-) => modulosDa(igreja).includes(ChurchModule.EVENTS);
+  igreja:
+    | { plan?: { modules: ChurchModule[] } | null; modulePayment?: boolean }
+    | null
+    | undefined,
+) =>
+  modulosDa(igreja).includes(ChurchModule.EVENTS) &&
+  igreja?.modulePayment !== false;
 
 /**
- * Igreja que não cobra online: sem plano, ou com um plano sem Eventos. Para o
- * `where` das consultas que antes liam `modulePayment: false`.
+ * Igreja que não cobra online: sem plano, com um plano sem Eventos, ou com a
+ * cobrança desligada. Para o `where` das consultas (reconciliação, cron).
  */
 export const SEM_COBRANCA_ONLINE = {
   OR: [
     { planId: null },
     { plan: { NOT: { modules: { has: ChurchModule.EVENTS } } } },
+    { modulePayment: false },
   ],
 };
 

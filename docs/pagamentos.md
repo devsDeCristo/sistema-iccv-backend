@@ -215,7 +215,7 @@ R$ 300 vira `IN_ANALYSIS`.
 
 ## 7. Cobrança online por igreja
 
-Substituiu as duas variáveis globais. Foi `Church.modulePayment`; hoje vem com o módulo **Eventos** do plano da igreja (ver `docs/planos.md`) — as respostas seguem com o nome `modulePayment`, calculado pelo plano. Sem o módulo:
+Substituiu as duas variáveis globais. A igreja cobra com o módulo **Eventos** no plano **e** a cobrança ligada nela (`Church.modulePayment`, que o dev/super admin alterna em `PATCH /churches/:churchId/payment-providers/module`) — ver `docs/planos.md`. As respostas seguem com o nome `modulePayment`, já calculado. Sem cobrança:
 
 - `createCheckout` recusa com **503** antes de qualquer escrita;
 - a reconciliação **pula** as cobranças daquela igreja;

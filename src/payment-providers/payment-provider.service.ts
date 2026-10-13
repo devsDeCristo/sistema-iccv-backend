@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import {
+  ChurchModule,
   PaymentProvider,
   PaymentProviderConfig,
   PaymentProviderMode,
@@ -23,7 +24,7 @@ import { CredentialField } from 'src/gateways/core/gateway.types';
 import { montarUrlDeWebhook } from 'src/gateways/core/webhook-url';
 import { Role } from 'src/auth/roles';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
-import { SELECT_MODULOS, cobraOnline } from 'src/planos/modulos';
+import { SELECT_MODULOS, cobraOnline, modulosDa } from 'src/planos/modulos';
 
 /** Teto por campo. Nenhuma credencial de gateway chega perto disso. */
 const TAMANHO_MAXIMO = 2000;
@@ -92,10 +93,35 @@ export class PaymentProviderService {
 
     return {
       cofreDisponivel: this.crypto.disponivel,
-      // Acima de tudo o que vem depois: sem cobrança online no plano a igreja
-      // não cobra, mesmo com casa cadastrada e certa. Quem muda é o plano.
+      // Acima de tudo o que vem depois: sem Eventos no plano, ou com a cobrança
+      // desligada, a igreja não cobra, mesmo com casa cadastrada e certa
       modulePayment: cobraOnline(igreja),
+      // as duas metades, para a tela dizer qual falta
+      eventosNoPlano: modulosDa(igreja).includes(ChurchModule.EVENTS),
+      cobrancaLigada: igreja?.modulePayment !== false,
       integracoes,
+    };
+  }
+
+  /**
+   * Liga ou desliga a cobrança online de uma igreja (dentro do módulo Eventos
+   * do plano). Desligar não apaga credencial nem cobrança: a igreja para de
+   * cobrar pelo site e a reconciliação para de olhar as cobranças dela;
+   * religar devolve tudo do jeito que estava — o caso comum é pausar uma
+   * igreja por um tempo.
+   */
+  async definirModulo(churchId: string, ativo: boolean) {
+    const igreja = await this.prisma.church.update({
+      where: { id: churchId },
+      data: { modulePayment: ativo },
+      select: { name: true, modulePayment: true },
+    });
+
+    return {
+      modulePayment: igreja.modulePayment,
+      message: igreja.modulePayment
+        ? `Cobrança online ligada para ${igreja.name}.`
+        : `Cobrança online desligada para ${igreja.name}.`,
     };
   }
 

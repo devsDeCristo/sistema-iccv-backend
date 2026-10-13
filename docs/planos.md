@@ -58,7 +58,11 @@ Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e 
 
 ## Cobrança online (parte de Eventos)
 
-**Quem tem Eventos no plano cobra pelo site** (se tiver gateway configurado): dar às igrejas o suporte a pagamentos é parte do que o módulo de eventos é. Já foi um módulo próprio (`ONLINE_PAYMENTS`), que saiu na migration `20261012150000`. Substituiu `Church.modulePayment` (a coluna saiu na migração; a rota `PATCH /churches/:churchId/payment-providers/module` também). Quem lia o campo agora usa `cobraOnline(igreja)` / `SELECT_MODULOS` / `SEM_COBRANCA_ONLINE` (`src/planos/modulos.ts`): checkout (503 sem o módulo), reconciliação e cron (pulam a igreja), `igrejaCobraOnline`. Para não mudar a tela, as respostas seguem com o nome `modulePayment` (evento, minhas inscrições, configuração de gateways) — agora calculado pelo plano.
+**A igreja cobra pelo site com Eventos no plano _e_ a cobrança ligada nela** (e um gateway configurado): dar às igrejas o suporte a pagamentos é parte do que o módulo de eventos é, e dentro dele a cobrança liga e desliga por igreja.
+
+- **`Church.modulePayment`** (padrão ligado): o dev ou o super admin desliga a cobrança de uma igreja sem mexer no plano — o caso comum é pausar uma igreja por um tempo. Rota `PATCH /churches/:churchId/payment-providers/module` (`{ enabled }`, `SUPER_ADMIN_ROLES`). Desligar não apaga credencial nem cobrança; religar devolve tudo.
+- **`cobraOnline(igreja)`** = Eventos no plano **e** `modulePayment` diferente de `false`; `SELECT_MODULOS` traz os dois; `SEM_COBRANCA_ONLINE` inclui `modulePayment: false`. Quem usa: checkout (503 sem cobrança), reconciliação e cron (pulam a igreja), `igrejaCobraOnline`. As respostas seguem com o nome `modulePayment` (evento, minhas inscrições, configuração de gateways), já calculado. A configuração de gateways traz também `eventosNoPlano` e `cobrancaLigada`, para a tela dizer qual das duas falta.
+- **Histórico:** foi `Church.modulePayment` sozinho; com os planos virou um módulo próprio (`ONLINE_PAYMENTS`) e depois parte de Eventos, e o interruptor saiu. Voltou em 13/10/2026 (migration `20261013130000_cobranca_online_por_igreja`, coluna com padrão `true`, para ninguém deixar de cobrar com a migração). Teste: `src/planos/cobranca-online.spec.ts`.
 
 ## Sessão
 
