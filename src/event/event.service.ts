@@ -64,6 +64,7 @@ import {
   tesoureiroDoEvento,
 } from 'src/auth/tesoureiro-do-evento';
 import { adminDoEvento, eventosDoAdmin } from 'src/auth/admin-do-evento';
+import { AvisoDeAcesso, avisarAcessoAoEvento } from './aviso-de-acesso';
 import {
   filtroDeEventoEmTeste,
   podeVerEventoEmTeste,
@@ -1754,6 +1755,9 @@ export class EventService {
       data.endDate = new Date(data.endDate);
       data.startDate = new Date(data.startDate);
 
+      // quem entrar na equipe é avisado depois que o evento existir
+      let avisosDaEquipe: AvisoDeAcesso[] = [];
+
       // 1. Cria o evento primeiro (sem upload).
       // A verificação de nome duplicado roda dentro da transaction em modo
       // Serializable para que dois cliques seguidos não criem eventos repetidos.
@@ -1801,7 +1805,12 @@ export class EventService {
               status: data.status ?? EventStatus.ACTIVE,
             },
           });
-          await this.gravarEquipe(tx, criado.id, data, requesterId);
+          avisosDaEquipe = await this.gravarEquipe(
+            tx,
+            criado.id,
+            data,
+            requesterId,
+          );
           return criado;
         },
         { isolationLevel: 'Serializable' },
@@ -1862,6 +1871,8 @@ export class EventService {
           data: jsonData,
         },
       });
+
+      this.avisarEquipe(event.id, avisosDaEquipe);
 
       return updatedEvent;
     } catch (error) {
@@ -2787,11 +2798,22 @@ export class EventService {
 
     // interativa, e não no array acima: `deleteMany` seguido de escrita na
     // forma em array perde as escritas no middleware de auditoria
-    await this.prisma.$transaction((tx) =>
+    const avisosDaEquipe = await this.prisma.$transaction((tx) =>
       this.gravarEquipe(tx, id, updateEvent, requesterId),
     );
+    this.avisarEquipe(id, avisosDaEquipe);
 
     return this.findOneClear(id);
+  }
+
+  /** O e-mail de quem entrou na equipe: sem esperar, e sem derrubar nada */
+  private avisarEquipe(eventId: string, avisos: AvisoDeAcesso[]) {
+    avisarAcessoAoEvento(this.prisma, this.emailService, eventId, avisos).catch(
+      (erro) =>
+        this.logger.error(
+          `Avisos da equipe do evento ${eventId}: ${(erro as Error).message}`,
+        ),
+    );
   }
 
   /**
@@ -2848,14 +2870,32 @@ export class EventService {
     if (motivo) throw new BadRequestException(motivo);
   }
 
-  /** Grava a equipe que veio: lista enviada substitui; omitida, nada muda */
+  /**
+   * Grava a equipe que veio: lista enviada substitui; omitida, nada muda.
+   * Devolve quem avisar por e-mail — quem entrou agora, e o tesoureiro que
+   * trocou de tipo —, para avisar depois que a transação gravar.
+   */
   private async gravarEquipe(
     tx: Prisma.TransactionClient,
     eventId: string,
     equipe: Pick<EventDto, 'adminIds' | 'tesoureiros'>,
     createdById?: string,
-  ) {
+  ): Promise<AvisoDeAcesso[]> {
+    const avisos: AvisoDeAcesso[] = [];
     if (equipe.adminIds !== undefined) {
+      const antes = new Set(
+        (
+          await tx.eventAdmin.findMany({
+            where: { eventId },
+            select: { userId: true },
+          })
+        ).map((a) => a.userId),
+      );
+      avisos.push(
+        ...equipe.adminIds
+          .filter((userId) => !antes.has(userId))
+          .map((userId) => ({ userId, papel: 'ADMIN' as const, mudou: false })),
+      );
       await tx.eventAdmin.deleteMany({
         where: { eventId, userId: { notIn: equipe.adminIds } },
       });
@@ -2868,6 +2908,20 @@ export class EventService {
       }
     }
     if (equipe.tesoureiros !== undefined) {
+      const antes = new Map(
+        (
+          await tx.eventTreasurer.findMany({
+            where: { eventId },
+            select: { userId: true, kind: true },
+          })
+        ).map((t) => [t.userId, t.kind]),
+      );
+      for (const { userId, kind } of equipe.tesoureiros) {
+        const tinha = antes.get(userId);
+        if (tinha !== kind) {
+          avisos.push({ userId, papel: kind, mudou: tinha !== undefined });
+        }
+      }
       await tx.eventTreasurer.deleteMany({
         where: {
           eventId,
@@ -2882,6 +2936,7 @@ export class EventService {
         });
       }
     }
+    return avisos;
   }
 
   async removeUserFromEvent(

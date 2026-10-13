@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Put,
@@ -22,6 +23,8 @@ import { RolesGuard } from 'src/decorators/roles.guard';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
 import { PrismaService } from 'src/prisma';
+import { MailService } from 'src/mail/mail.service';
+import { avisarAcessoAoEvento } from './aviso-de-acesso';
 
 class SalvarTesoureiroDto {
   @IsEnum(EventTreasurerKind)
@@ -40,7 +43,12 @@ class SalvarTesoureiroDto {
 @Modulo(ChurchModule.EVENTS)
 @Controller('events/:idEvent/tesoureiros')
 export class TesoureirosController {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(TesoureirosController.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+  ) {}
 
   @ApiOperation({ summary: 'Tesoureiros(as) do evento' })
   @Roles(...ADMIN_AREA_ROLES)
@@ -95,11 +103,24 @@ export class TesoureirosController {
       );
     }
 
+    const antes = await this.prisma.eventTreasurer.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+      select: { kind: true },
+    });
     await this.prisma.eventTreasurer.upsert({
       where: { eventId_userId: { eventId, userId } },
       create: { eventId, userId, kind, createdById: req.user?.userId },
       update: { kind },
     });
+
+    // e-mail para quem entrou agora, ou trocou de tipo — sem esperar
+    if (antes?.kind !== kind) {
+      avisarAcessoAoEvento(this.prisma, this.mail, eventId, [
+        { userId, papel: kind, mudou: !!antes },
+      ]).catch((erro) =>
+        this.logger.error(`Aviso ao tesoureiro: ${(erro as Error).message}`),
+      );
+    }
     return this.listar(eventId);
   }
 

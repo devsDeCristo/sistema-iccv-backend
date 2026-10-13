@@ -60,6 +60,7 @@ Arquivos: `src/mail/mail.service.ts`, `src/mail/templates/*.html`.
 | `password-changed.html` | aviso de senha alterada | `userName` |
 | `email-changed.html` | aviso ao e-mail **antigo** quando outra pessoa troca o e-mail da conta (`UserService.update`) | `userName`, `novoEmail` (mascarado), `quem` |
 | `google-account.html` | código para vincular uma conta Google pelo perfil, e aviso de conta Google vinculada ou desvinculada, para o e-mail do cadastro (`GoogleService`) | `titulo`, `userName`, `contaGoogle`, `mensagem` (HTML, só texto fixo do serviço) |
+| `acesso-ao-evento.html` | aviso a quem ganha um papel num evento — admin do evento ou tesoureiro(a) —, ou troca de tipo de tesoureiro (`avisarAcessoAoEvento`) | `titulo`, `userName`, `mensagem`, `papel`, `eventName`, `churchName`, `oQuePode` (HTML, só texto fixo do serviço), `link` |
 | `waiting-list-notice.html` | — | não está referenciado por nenhum serviço no código atual; o template existe mas o disparo não foi encontrado |
 
 ### Confirmação de inscrição
@@ -93,6 +94,25 @@ O logo inline (`cid:logo`) dos avisos de conta vem de `LOGO_DO_EMAIL`
 (`src/mail/logo.ts`), usado pela redefinição de senha e pelo aviso de troca de
 e-mail.
 
+### Acesso ao evento
+
+Disparado por `avisarAcessoAoEvento` (`src/event/aviso-de-acesso.ts`) quando
+alguém **ganha** um papel num evento — admin do evento ou tesoureiro(a) — ou
+quando o tipo de tesoureiro muda (básico ↔ completo). Vale para os dois
+caminhos que dão o papel: o cadastro e a edição do evento (passo/aba Equipe,
+`EventService.gravarEquipe`, que devolve quem é novo) e o modal da Tesouraria
+(`PUT /events/:idEvent/tesoureiros/:userId`). Quem perde o papel, e quem já
+tinha o mesmo, não recebe nada.
+
+- Assunto `Você é <papel> do evento <nome>`; o corpo diz o papel, o evento e a
+  igreja, o que o papel dá (texto fixo por papel) e um botão para
+  `URL_FRONTEND/admin/eventos`.
+- Sai **depois** de gravar e **sem esperar**: a resposta da tela não aguarda o
+  e-mail, e falha de envio (uma por pessoa) só vai para o log.
+- Nome, evento e igreja passam por `escapeHtml`. Logo por `LOGO_DO_EMAIL`.
+
 ## Testes
 
-Não há `*.spec.ts` em `src/mail`.
+Não há `*.spec.ts` em `src/mail`. O aviso de acesso ao evento tem
+`src/event/aviso-de-acesso.spec.ts`, com o `MailService` de dublê (nenhum
+e-mail sai do teste).

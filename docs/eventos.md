@@ -67,6 +67,7 @@ Quem cuida de um evento sem ser admin da igreja. **Pode ser qualquer usuário do
 - **Onde se define:** no cadastro e na edição do evento (`POST /events` e `PUT /events/:idEvent`), pelos campos `adminIds: string[]` e `tesoureiros: { userId, kind }[]` (no multipart, JSON em texto). Omitido, nada muda; enviado, **vira a lista** (quem saiu perde o vínculo). Os tesoureiros também se alocam pela Tesouraria (`events/:idEvent/tesoureiros`, ver `docs/tesouraria.md`). Membros **não** mexe aqui: lá é só o perfil na igreja.
 - **Quem define:** o admin da igreja do evento (e dev/super admin). O admin de evento edita o resto do evento, mas mandar `adminIds`/`tesoureiros` volta 403 — senão ele se daria tesoureiro(a) completo e chegaria à Tesouraria.
 - **Recusa (400, com o nome):** quem não existe, a mesma pessoa duas vezes na lista, super admin/dev, o admin da igreja do evento (já administra todos), e — só como tesoureiro — a tesouraria da igreja. Tudo é conferido antes de qualquer escrita (`validarEquipe`); na edição a gravação é numa transação interativa à parte (`gravarEquipe`), porque `deleteMany` + escrita na forma em array perde as escritas no middleware de auditoria.
+- **E-mail:** quem ganha o papel (ou troca de tipo de tesoureiro) recebe um aviso depois de gravar, sem a tela esperar por ele — ver "Acesso ao evento" em `docs/email.md`.
 - **No detalhe:** `GET /events/:id?painel=true` devolve `admins: [{ user }]` e `treasurers: [{ kind, user }]` (id, nome, e-mail, foto), para o formulário vir preenchido. O catálogo não traz.
 
 ### Admin de evento (`EventAdmin`)
