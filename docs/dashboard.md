@@ -22,8 +22,8 @@ Guardas: `JwtAuthGuard`, `RolesGuard`. Sem `EventTenantGuard` — o recorte por 
 
 O campo `scope` da resposta diz qual dos dois formatos veio:
 
-- **`church`:** quando há recorte por igreja — seja porque `churchId` foi passado, seja porque quem pediu (admin/tesouraria) só alcança as suas. Vem com `events`, `recentRegistrations`, `treasury` (se tesouraria) e `news` (mural).
-- **`system`:** quando quem pediu é super admin ou dev **sem** `churchId` (`tenantChurchIds` devolve `null`, ou seja, nenhum recorte). Vem com `byChurch` (leitura por igreja), e, dependendo do perfil, `panorama` (super admin) ou `insights` (dev). `events`, `recentRegistrations` e `news` saem `null` nesse modo.
+- **`church`:** quando há recorte por igreja — seja porque `churchId` foi passado, seja porque quem pediu (admin/tesouraria) só alcança as suas. Vem com `events`, `treasury` (se tesouraria), `news` (mural) e `resumo`.
+- **`system`:** quando quem pediu é super admin ou dev **sem** `churchId` (`tenantChurchIds` devolve `null`, ou seja, nenhum recorte). Vem com `byChurch` (leitura por igreja), e, dependendo do perfil, `panorama` (super admin) ou `insights` (dev). `events`, `news` e `resumo` saem `null` nesse modo.
 
 ## Perfil por igreja (multitenant)
 
@@ -31,8 +31,7 @@ O perfil que decide o formato da home é o da pessoa **na igreja vista**:
 
 - **com `churchId`** (e quem pede não é super admin/dev): vale
   `perfilNaIgreja`. Quem é admin na A e tesouraria na B, ao abrir a B,
-  recebe a home da tesouraria (`treasury`, sem `recentRegistrations` nem
-  `news`);
+  recebe a home da tesouraria (`treasury`, sem `news`);
 - **sem `churchId`:** vale o perfil efetivo (`perfilEfetivo`), e as
   inscrições recentes e o mural, que são blocos de admin, só incluem as
   igrejas onde a pessoa é admin.
@@ -47,7 +46,6 @@ e a tesouraria da B via a B como admin: inscrições recentes e mural.
 | `churches` | quem tem recorte (`scope: church`) | igrejas da pessoa, cada uma com o perfil que ela tem lá (pode ser admin de uma e tesouraria de outra) |
 | `events` | quem tem recorte, exceto tesouraria na leitura de "abertos" (tesouraria recebe `eventosComSaldo`, ver abaixo) | eventos da igreja, todos do mesmo tamanho na tela |
 | `pending` | todos com recorte, exceto lista de espera para tesouraria | pendências acionáveis: comprovantes em análise e lista de espera com vaga livre |
-| `recentRegistrations` | quem tem recorte, exceto tesouraria | últimas 6 inscrições, com pessoa e evento |
 | `treasury` | só tesouraria | resumo de cobrança em aberto (ver "Métricas financeiras") |
 | `news` | quem tem recorte e não é tesouraria | mural: últimas 3 notícias publicadas + contagem de rascunhos |
 | `resumo` | quem tem recorte (`scope: church`) | um número por módulo, para os cards do topo (ver "Resumo dos módulos") |
@@ -55,20 +53,13 @@ e a tesouraria da B via a B como admin: inscrições recentes e mural.
 | `panorama` | super admin sem `churchId` | base de usuários do sistema (ver "Panorama do super admin") |
 | `insights` | dev sem `churchId` | indicadores de funcionamento do sistema (ver "Indicadores do dev") |
 
-### Resumo dos módulos (`resumo`)
+### Módulos (`resumo`)
 
-Os cards do topo da home da igreja (`resumoDasIgrejas`). Traz `modulos`, os do plano das igrejas do recorte (de qualquer uma delas) — o plano de verdade, também para super admin e dev, e é por ele que a tela acende ou apaga cada card. Cada bloco conta só as igrejas do recorte em que vale — módulo no plano e perfil que alcança —, e lista vazia vira `null` (o card sai sem número):
-
-- `membros` (toda igreja): `total` (membros), `familias`, `pedidos` — os pedidos de entrada só das igrejas de que é **admin** (`null` para quem não é);
-- `eventos` (plano com Eventos): `ativos` (status `ACTIVE`/`TEST`) e `inscricoes30d` (inscrições criadas nos últimos 30 dias);
-- `noticias` (plano com Notícias, e só as igrejas de que é admin): `publicadas30d` e `rascunhos`;
-- `tesouraria` (plano com Tesouraria; admin e tesouraria): `entradasNoMes` e `saidasNoMes`, a soma dos lançamentos (`FinancialEntry`, todas as contas) do mês corrente no fuso do servidor.
-
-Teste do recorte em `perfil-por-igreja.spec.ts`.
+`{ modulos }`: os módulos do plano das igrejas do recorte (de qualquer uma delas) — o plano de verdade, também para super admin e dev. É por eles que a tela acende ou apaga os cards de apresentação dos módulos. Sem números: até 13/10/2026 o resumo trazia um número por módulo (membros, eventos, notícias, caixa), e os cards viraram só a apresentação de cada módulo. Teste em `perfil-por-igreja.spec.ts`.
 
 ### O plano da igreja
 
-Os blocos seguem o plano de cada igreja do recorte — **para qualquer um que abra a home de uma igreja, super admin e dev inclusive**: ela é a home da igreja, e mostrá-la com módulos que o plano não tem a descrevia errado (até 13/10/2026 super admin e dev pulavam o plano aqui e viam tudo). O acesso deles aos módulos continua livre; só a home reflete a igreja. Na visão de sistema (sem igreja escolhida) não há plano a aplicar. Os blocos (`docs/planos.md`): `events`, `recentRegistrations` e `treasury` só com as igrejas que têm **Eventos**, e `news` só com as que têm **Notícias**. Sem nenhuma igreja do recorte com Eventos, os três vêm `null` (e não vazios), para a tela nem montar o bloco.
+Os blocos seguem o plano de cada igreja do recorte — **para qualquer um que abra a home de uma igreja, super admin e dev inclusive**: ela é a home da igreja, e mostrá-la com módulos que o plano não tem a descrevia errado (até 13/10/2026 super admin e dev pulavam o plano aqui e viam tudo). O acesso deles aos módulos continua livre; só a home reflete a igreja. Na visão de sistema (sem igreja escolhida) não há plano a aplicar. Os blocos (`docs/planos.md`): `events` e `treasury` só com as igrejas que têm **Eventos**, e `news` só com as que têm **Notícias**. Sem nenhuma igreja do recorte com Eventos, os dois vêm `null` (e não vazios), para a tela nem montar o bloco.
 
 ### Quais eventos aparecem em `events`
 

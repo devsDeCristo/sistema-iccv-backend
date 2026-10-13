@@ -204,10 +204,6 @@ export class DashboardService {
           )
         : ids;
 
-    const doRecorteDeAdmin: Prisma.EventWhereInput = igrejasDeAdmin
-      ? { churchId: { in: comModulo(igrejasDeAdmin, ChurchModule.EVENTS) } }
-      : {};
-
     const doRecorte: Prisma.EventWhereInput = todasAsIgrejas
       ? {}
       : { churchId: { in: comModulo(churchIds, ChurchModule.EVENTS) } };
@@ -224,16 +220,11 @@ export class DashboardService {
     const ehDev = perfil === Role.DEV;
     const ehTesouraria = perfil === Role.TESOURARIA;
 
-    const [abertos, churches, recentRegistrations, news] = await Promise.all([
+    // (as "últimas inscrições" saíram da home em 13/10/2026: a home não é
+    // só eventos, e os inscritos estão na lista de cada evento)
+    const [abertos, churches, news] = await Promise.all([
       this.eventosAbertos(doRecorte),
       todasAsIgrejas ? null : this.minhasIgrejas(requester, churchIds),
-      /**
-       * A tesouraria não recebe a lista de quem entrou: para ela o que importa
-       * não é quem se inscreveu, e sim quem ainda não pagou.
-       */
-      ehTesouraria || semEventos
-        ? null
-        : this.inscricoesRecentes(doRecorteDeAdmin),
       veMural ? this.mural(igrejasDoMural) : null,
     ]);
 
@@ -241,19 +232,13 @@ export class DashboardService {
       ehTesouraria && !semEventos ? await this.tesouraria(doRecorte) : null;
 
     /**
-     * Um número por módulo, para os cards do topo: cada um só com as igrejas
-     * do recorte que têm o módulo no plano (e, Notícias e os pedidos de
-     * membro, só as de que é admin).
+     * Os módulos do plano das igrejas do recorte (de qualquer uma delas), para
+     * os cards de apresentação do topo: aceso ou apagado, para quem quer que
+     * olhe.
      */
     const resumo = todasAsIgrejas
       ? null
-      : await this.resumoDasIgrejas(planos ?? [], {
-          membros: churchIds,
-          pedidos: igrejasDeAdmin ?? [],
-          eventos: comModulo(churchIds, ChurchModule.EVENTS),
-          noticias: igrejasDoMural,
-          tesouraria: comModulo(churchIds, ChurchModule.TREASURY),
-        });
+      : { modulos: [...new Set((planos ?? []).flatMap((p) => modulosDa(p)))] };
 
     /**
      * Os indicadores do sistema são do dev: é o perfil que cuida da operação
@@ -321,7 +306,6 @@ export class DashboardService {
        * `outros` continua sendo calculado acima: as pendências saem dele.
        */
       events: todasAsIgrejas || semEventos ? null : daIgreja,
-      recentRegistrations: todasAsIgrejas ? null : recentRegistrations,
       treasury,
       news,
       resumo,
@@ -717,113 +701,6 @@ export class DashboardService {
   }
 
   /**
-   * O resumo dos cards de módulo da home da igreja. Cada bloco recebe as
-   * igrejas em que vale (módulo no plano e perfil que alcança); lista vazia é
-   * `null` — o card sai sem número.
-   *
-   * "No mês" é o mês corrente no fuso do servidor; "30 dias", a janela móvel.
-   */
-  private async resumoDasIgrejas(
-    planos: { plan?: { modules: ChurchModule[] } | null }[],
-    igrejas: {
-      membros: string[];
-      pedidos: string[];
-      eventos: string[];
-      noticias: string[];
-      tesouraria: string[];
-    },
-  ) {
-    const agora = new Date();
-    const trintaDias = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000);
-    // `FinancialEntry.date` é só data: o mês vai em datas UTC à meia-noite
-    const [ano, mes] = new Intl.DateTimeFormat('en-CA', {
-      timeZone: FUSO,
-      year: 'numeric',
-      month: '2-digit',
-    })
-      .format(agora)
-      .split('-')
-      .map(Number);
-    const inicioDoMes = new Date(Date.UTC(ano, mes - 1, 1));
-    const inicioDoProximo = new Date(Date.UTC(ano, mes, 1));
-
-    const em = (ids: string[]) => ({ in: ids });
-    const soma = (tipo: 'INCOME' | 'EXPENSE') =>
-      this.prisma.financialEntry
-        .aggregate({
-          where: {
-            churchId: em(igrejas.tesouraria),
-            type: tipo,
-            date: { gte: inicioDoMes, lt: inicioDoProximo },
-          },
-          _sum: { amount: true },
-        })
-        .then((r) => Number(r._sum.amount ?? 0));
-
-    const [
-      membros,
-      familias,
-      pedidos,
-      eventosAtivos,
-      inscricoes,
-      publicadas,
-      rascunhos,
-      entradas,
-      saidas,
-    ] = await Promise.all([
-      this.prisma.user.count({
-        where: { memberChurchId: em(igrejas.membros) },
-      }),
-      this.prisma.family.count({ where: { churchId: em(igrejas.membros) } }),
-      igrejas.pedidos.length
-        ? this.prisma.user.count({
-            where: { requestedChurchId: em(igrejas.pedidos) },
-          })
-        : null,
-      this.prisma.event.count({
-        where: {
-          churchId: em(igrejas.eventos),
-          status: { in: ABERTOS },
-        },
-      }),
-      this.prisma.eventOnUsers.count({
-        where: {
-          event: { churchId: em(igrejas.eventos) },
-          createdAt: { gte: trintaDias },
-        },
-      }),
-      this.prisma.news.count({
-        where: {
-          churchId: em(igrejas.noticias),
-          isPublished: true,
-          publishedAt: { gte: trintaDias },
-        },
-      }),
-      this.prisma.news.count({
-        where: { churchId: em(igrejas.noticias), isPublished: false },
-      }),
-      igrejas.tesouraria.length ? soma('INCOME') : 0,
-      igrejas.tesouraria.length ? soma('EXPENSE') : 0,
-    ]);
-
-    return {
-      // os módulos do plano das igrejas do recorte (de qualquer uma delas):
-      // é por eles que o card fica aceso ou apagado, para quem quer que olhe
-      modulos: [...new Set(planos.flatMap((p) => modulosDa(p)))],
-      membros: { total: membros, familias, pedidos },
-      eventos: igrejas.eventos.length
-        ? { ativos: eventosAtivos, inscricoes30d: inscricoes }
-        : null,
-      noticias: igrejas.noticias.length
-        ? { publicadas30d: publicadas, rascunhos }
-        : null,
-      tesouraria: igrejas.tesouraria.length
-        ? { entradasNoMes: entradas, saidasNoMes: saidas }
-        : null,
-    };
-  }
-
-  /**
    * As igrejas da pessoa, com o perfil que ela tem em cada uma — quem é admin
    * de uma e tesouraria de outra precisa ver os dois chapéus, e não só o mais
    * alto que ficou em `User.role`.
@@ -922,35 +799,6 @@ export class DashboardService {
           : null,
       };
     });
-  }
-
-  /**
-   * Quem entrou por último, com o evento em que entrou.
-   *
-   * É o pulso da tela: o contador de inscritos diz onde o evento chegou, e
-   * esta lista diz se ele ainda se move. Uma sem a outra deixa o admin sem
-   * saber se os números de hoje são os mesmos de ontem.
-   */
-  private async inscricoesRecentes(recorte: Prisma.EventWhereInput) {
-    const inscricoes = await this.prisma.eventOnUsers.findMany({
-      where: { event: recorte },
-      orderBy: { createdAt: 'desc' },
-      take: 6,
-      select: {
-        createdAt: true,
-        user: { select: { id: true, fullName: true, profilePhotoUrl: true } },
-        event: { select: { id: true, name: true } },
-      },
-    });
-
-    return inscricoes.map((inscricao) => ({
-      userId: inscricao.user.id,
-      name: inscricao.user.fullName,
-      photoUrl: inscricao.user.profilePhotoUrl,
-      eventId: inscricao.event.id,
-      eventName: inscricao.event.name,
-      createdAt: inscricao.createdAt,
-    }));
   }
 
   /**

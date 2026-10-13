@@ -38,28 +38,25 @@ function montar(
   const espiao = (nome: string, valor: unknown) =>
     jest.spyOn(service, nome).mockResolvedValue(valor as never);
 
-  const inscricoes = espiao('inscricoesRecentes', []);
   const mural = espiao('mural', { items: [], drafts: 0 });
   const tesouraria = espiao('tesouraria', { total: 0 });
   espiao('eventosAbertos', []);
   espiao('minhasIgrejas', []);
   espiao('eventosComSaldo', []);
   espiao('ultimoEncerrado', null);
-  const resumo = espiao('resumoDasIgrejas', null);
   jest.spyOn(service, 'pendencias').mockReturnValue([] as never);
 
-  return { service, inscricoes, mural, tesouraria, resumo };
+  return { service, mural, tesouraria };
 }
 
 describe('DashboardService — perfil por igreja', () => {
-  it('abrindo a B, onde é tesouraria: home da tesouraria, sem mural nem inscrições', async () => {
-    const { service, inscricoes, mural, tesouraria } = montar();
+  it('abrindo a B, onde é tesouraria: home da tesouraria, sem mural', async () => {
+    const { service, mural, tesouraria } = montar();
 
     const home = await service.overview('u', 'B');
 
     expect(home.role).toBe(Role.TESOURARIA);
     expect(tesouraria).toHaveBeenCalled();
-    expect(inscricoes).not.toHaveBeenCalled();
     expect(mural).not.toHaveBeenCalled();
   });
 
@@ -72,16 +69,15 @@ describe('DashboardService — perfil por igreja', () => {
     expect(mural).toHaveBeenCalledWith(['A']);
   });
 
-  it('em todas: inscrições recentes e mural só das igrejas onde é admin', async () => {
-    const { service, inscricoes, mural } = montar();
+  it('em todas: mural só das igrejas onde é admin', async () => {
+    const { service, mural } = montar();
 
     await service.overview('u');
 
-    expect(inscricoes).toHaveBeenCalledWith({ churchId: { in: ['A'] } });
     expect(mural).toHaveBeenCalledWith(['A']);
   });
 
-  it('plano sem Notícias: sem mural; sem Eventos: sem eventos, inscrições nem caixa', async () => {
+  it('plano sem Notícias: sem mural; sem Eventos: sem eventos nem caixa', async () => {
     const soEventos = montar({ A: ['EVENTS'], B: ['EVENTS'] });
     const home = await soEventos.service.overview('u', 'A');
     expect(soEventos.mural).not.toHaveBeenCalled();
@@ -91,8 +87,6 @@ describe('DashboardService — perfil por igreja', () => {
     const soNoticias = montar({ A: ['NEWS'], B: [] });
     const daA = await soNoticias.service.overview('u', 'A');
     expect(daA.events).toBeNull();
-    expect(daA.recentRegistrations).toBeNull();
-    expect(soNoticias.inscricoes).not.toHaveBeenCalled();
     expect(soNoticias.mural).toHaveBeenCalledWith(['A']);
 
     const daB = await soNoticias.service.overview('u', 'B');
@@ -100,35 +94,26 @@ describe('DashboardService — perfil por igreja', () => {
     expect(soNoticias.tesouraria).not.toHaveBeenCalled();
   });
 
-  it('resumo dos cards: cada módulo com as igrejas do plano e do perfil', async () => {
-    const { service, resumo } = montar({
-      A: ['EVENTS', 'NEWS'],
-      B: ['TREASURY'],
-    });
+  it('cards de módulo: os módulos do plano de qualquer igreja do recorte', async () => {
+    const { service } = montar({ A: ['EVENTS', 'NEWS'], B: ['TREASURY'] });
 
-    await service.overview('u');
+    const home = await service.overview('u');
 
-    expect(resumo).toHaveBeenCalledWith(expect.any(Array), {
-      membros: ['A', 'B'],
-      // pedidos de membro e notícias são do admin: só a A
-      pedidos: ['A'],
-      eventos: ['A'],
-      noticias: ['A'],
-      tesouraria: ['B'],
-    });
+    expect([...home.resumo.modulos].sort()).toEqual([
+      'EVENTS',
+      'NEWS',
+      'TREASURY',
+    ]);
   });
 
   it('super admin abrindo a home de uma igreja vê o plano dela, e não tudo', async () => {
     const superAdmin = { role: Role.SUPER_ADMIN, churchRoles: [] };
-    const { service, mural, resumo } = montar({ B: ['EVENTS'] }, superAdmin);
+    const { service, mural } = montar({ B: ['EVENTS'] }, superAdmin);
 
     const home = await service.overview('u', 'B');
 
     expect(home.news).toBeNull();
     expect(mural).not.toHaveBeenCalled();
-    expect(resumo).toHaveBeenCalledWith(
-      [{ id: 'B', plan: { modules: ['EVENTS'] } }],
-      expect.objectContaining({ eventos: ['B'], noticias: [], tesouraria: [] }),
-    );
+    expect(home.resumo).toEqual({ modulos: ['EVENTS'] });
   });
 });
