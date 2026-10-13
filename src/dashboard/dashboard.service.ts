@@ -183,16 +183,20 @@ export class DashboardService {
 
     /**
      * O plano de cada igreja recorta os blocos: eventos, inscrições e caixa
-     * são do módulo Eventos; o mural, do Notícias. Super admin e dev veem
-     * tudo, como no resto do sistema.
+     * são do módulo Eventos; o mural, do Notícias.
+     *
+     * Vale também para super admin e dev quando abrem a home de **uma**
+     * igreja: ela é a home da igreja, a mesma que o admin dela vê, e mostrá-la
+     * com módulos que o plano não tem a descrevia errado. O acesso deles aos
+     * módulos continua livre; só a home reflete a igreja. (Sem igreja
+     * escolhida, a visão de sistema não tem plano.)
      */
-    const planos =
-      todasAsIgrejas || isSuperAdmin(requester)
-        ? null
-        : await this.prisma.church.findMany({
-            where: { id: { in: churchIds } },
-            select: { id: true, ...SELECT_MODULOS },
-          });
+    const planos = todasAsIgrejas
+      ? null
+      : await this.prisma.church.findMany({
+          where: { id: { in: churchIds } },
+          select: { id: true, ...SELECT_MODULOS },
+        });
     const comModulo = (ids: string[], modulo: ChurchModule) =>
       planos
         ? ids.filter((id) =>
@@ -235,6 +239,21 @@ export class DashboardService {
 
     const treasury =
       ehTesouraria && !semEventos ? await this.tesouraria(doRecorte) : null;
+
+    /**
+     * Um número por módulo, para os cards do topo: cada um só com as igrejas
+     * do recorte que têm o módulo no plano (e, Notícias e os pedidos de
+     * membro, só as de que é admin).
+     */
+    const resumo = todasAsIgrejas
+      ? null
+      : await this.resumoDasIgrejas(planos ?? [], {
+          membros: churchIds,
+          pedidos: igrejasDeAdmin ?? [],
+          eventos: comModulo(churchIds, ChurchModule.EVENTS),
+          noticias: igrejasDoMural,
+          tesouraria: comModulo(churchIds, ChurchModule.TREASURY),
+        });
 
     /**
      * Os indicadores do sistema são do dev: é o perfil que cuida da operação
@@ -305,6 +324,7 @@ export class DashboardService {
       recentRegistrations: todasAsIgrejas ? null : recentRegistrations,
       treasury,
       news,
+      resumo,
       byChurch: todasAsIgrejas ? await this.igrejasDoSistema() : null,
       panorama,
       insights,
@@ -694,6 +714,113 @@ export class DashboardService {
     }
 
     return lista;
+  }
+
+  /**
+   * O resumo dos cards de módulo da home da igreja. Cada bloco recebe as
+   * igrejas em que vale (módulo no plano e perfil que alcança); lista vazia é
+   * `null` — o card sai sem número.
+   *
+   * "No mês" é o mês corrente no fuso do servidor; "30 dias", a janela móvel.
+   */
+  private async resumoDasIgrejas(
+    planos: { plan?: { modules: ChurchModule[] } | null }[],
+    igrejas: {
+      membros: string[];
+      pedidos: string[];
+      eventos: string[];
+      noticias: string[];
+      tesouraria: string[];
+    },
+  ) {
+    const agora = new Date();
+    const trintaDias = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000);
+    // `FinancialEntry.date` é só data: o mês vai em datas UTC à meia-noite
+    const [ano, mes] = new Intl.DateTimeFormat('en-CA', {
+      timeZone: FUSO,
+      year: 'numeric',
+      month: '2-digit',
+    })
+      .format(agora)
+      .split('-')
+      .map(Number);
+    const inicioDoMes = new Date(Date.UTC(ano, mes - 1, 1));
+    const inicioDoProximo = new Date(Date.UTC(ano, mes, 1));
+
+    const em = (ids: string[]) => ({ in: ids });
+    const soma = (tipo: 'INCOME' | 'EXPENSE') =>
+      this.prisma.financialEntry
+        .aggregate({
+          where: {
+            churchId: em(igrejas.tesouraria),
+            type: tipo,
+            date: { gte: inicioDoMes, lt: inicioDoProximo },
+          },
+          _sum: { amount: true },
+        })
+        .then((r) => Number(r._sum.amount ?? 0));
+
+    const [
+      membros,
+      familias,
+      pedidos,
+      eventosAtivos,
+      inscricoes,
+      publicadas,
+      rascunhos,
+      entradas,
+      saidas,
+    ] = await Promise.all([
+      this.prisma.user.count({
+        where: { memberChurchId: em(igrejas.membros) },
+      }),
+      this.prisma.family.count({ where: { churchId: em(igrejas.membros) } }),
+      igrejas.pedidos.length
+        ? this.prisma.user.count({
+            where: { requestedChurchId: em(igrejas.pedidos) },
+          })
+        : null,
+      this.prisma.event.count({
+        where: {
+          churchId: em(igrejas.eventos),
+          status: { in: ABERTOS },
+        },
+      }),
+      this.prisma.eventOnUsers.count({
+        where: {
+          event: { churchId: em(igrejas.eventos) },
+          createdAt: { gte: trintaDias },
+        },
+      }),
+      this.prisma.news.count({
+        where: {
+          churchId: em(igrejas.noticias),
+          isPublished: true,
+          publishedAt: { gte: trintaDias },
+        },
+      }),
+      this.prisma.news.count({
+        where: { churchId: em(igrejas.noticias), isPublished: false },
+      }),
+      igrejas.tesouraria.length ? soma('INCOME') : 0,
+      igrejas.tesouraria.length ? soma('EXPENSE') : 0,
+    ]);
+
+    return {
+      // os módulos do plano das igrejas do recorte (de qualquer uma delas):
+      // é por eles que o card fica aceso ou apagado, para quem quer que olhe
+      modulos: [...new Set(planos.flatMap((p) => modulosDa(p)))],
+      membros: { total: membros, familias, pedidos },
+      eventos: igrejas.eventos.length
+        ? { ativos: eventosAtivos, inscricoes30d: inscricoes }
+        : null,
+      noticias: igrejas.noticias.length
+        ? { publicadas30d: publicadas, rascunhos }
+        : null,
+      tesouraria: igrejas.tesouraria.length
+        ? { entradasNoMes: entradas, saidasNoMes: saidas }
+        : null,
+    };
   }
 
   /**

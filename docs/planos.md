@@ -51,7 +51,7 @@ Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e 
 - **Listas e ações de várias igrejas** (sem igreja na rota) filtram no service, para quem não é dev nem super admin:
   - `GET /events` do painel: só eventos de igreja com Eventos (vale também para o tesoureiro(a) de evento);
   - `GET /news/admin` e o calendário de disparos: só notícias de igreja com Notícias;
-  - home (`GET /dashboard`, ver `docs/dashboard.md`): eventos, inscrições recentes e caixa só das igrejas com Eventos; mural só das com Notícias;
+  - home (`GET /dashboard`, ver `docs/dashboard.md`): eventos, inscrições recentes e caixa só das igrejas com Eventos; mural só das com Notícias. Aqui **vale também para dev e super admin** quando abrem a home de uma igreja: ela mostra a igreja como ela é;
   - status em massa (`PUT /events/status`): evento de igreja sem Eventos volta em `falhas`.
 - **Cron de notícias:** agendamento de notícia de igreja sem Notícias não dispara (o horário passa e segue para o próximo). Notícia do sistema (sem igreja) dispara.
 - **Fora do recorte, de propósito:** os indicadores do dev (o plano não vale para ele) e o público (`GET /events` sem painel, o feed de notícias) — o publicado segue aberto ao público.

@@ -16,9 +16,12 @@ const misto = {
 
 const TUDO = ['EVENTS', 'NEWS'];
 
-function montar(planos: Record<string, string[]> = { A: TUDO, B: TUDO }) {
+function montar(
+  planos: Record<string, string[]> = { A: TUDO, B: TUDO },
+  requester: object = misto,
+) {
   const prisma = {
-    user: { findUnique: () => Promise.resolve(misto) },
+    user: { findUnique: () => Promise.resolve(requester) },
     church: {
       findUnique: ({ where }: any) => Promise.resolve({ id: where.id }),
       findMany: ({ where }: any) =>
@@ -42,9 +45,10 @@ function montar(planos: Record<string, string[]> = { A: TUDO, B: TUDO }) {
   espiao('minhasIgrejas', []);
   espiao('eventosComSaldo', []);
   espiao('ultimoEncerrado', null);
+  const resumo = espiao('resumoDasIgrejas', null);
   jest.spyOn(service, 'pendencias').mockReturnValue([] as never);
 
-  return { service, inscricoes, mural, tesouraria };
+  return { service, inscricoes, mural, tesouraria, resumo };
 }
 
 describe('DashboardService — perfil por igreja', () => {
@@ -94,5 +98,37 @@ describe('DashboardService — perfil por igreja', () => {
     const daB = await soNoticias.service.overview('u', 'B');
     expect(daB.treasury).toBeNull();
     expect(soNoticias.tesouraria).not.toHaveBeenCalled();
+  });
+
+  it('resumo dos cards: cada módulo com as igrejas do plano e do perfil', async () => {
+    const { service, resumo } = montar({
+      A: ['EVENTS', 'NEWS'],
+      B: ['TREASURY'],
+    });
+
+    await service.overview('u');
+
+    expect(resumo).toHaveBeenCalledWith(expect.any(Array), {
+      membros: ['A', 'B'],
+      // pedidos de membro e notícias são do admin: só a A
+      pedidos: ['A'],
+      eventos: ['A'],
+      noticias: ['A'],
+      tesouraria: ['B'],
+    });
+  });
+
+  it('super admin abrindo a home de uma igreja vê o plano dela, e não tudo', async () => {
+    const superAdmin = { role: Role.SUPER_ADMIN, churchRoles: [] };
+    const { service, mural, resumo } = montar({ B: ['EVENTS'] }, superAdmin);
+
+    const home = await service.overview('u', 'B');
+
+    expect(home.news).toBeNull();
+    expect(mural).not.toHaveBeenCalled();
+    expect(resumo).toHaveBeenCalledWith(
+      [{ id: 'B', plan: { modules: ['EVENTS'] } }],
+      expect.objectContaining({ eventos: ['B'], noticias: [], tesouraria: [] }),
+    );
   });
 });
