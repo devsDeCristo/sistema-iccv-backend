@@ -19,6 +19,7 @@ import { CompleteCheckinDto, SearchCheckinDto } from './dto/checkin.dto';
 import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 @ApiTags('checkin')
 @ApiBearerAuth()
@@ -26,6 +27,8 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
 @Roles(...ADMIN_ROLES)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
 @Modulo(ChurchModule.EVENTS)
+// o admin deste evento vale como admin da igreja aqui
+@AceitaAdminDoEvento()
 @Controller('events/:eventId/checkin')
 export class CheckinController {
   constructor(private readonly checkinService: CheckinService) {}

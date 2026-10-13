@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { EventStatus, EventType, MinorApprovalStatus } from '@prisma/client';
+import {
+  EventStatus,
+  EventTreasurerKind,
+  EventType,
+  MinorApprovalStatus,
+} from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -19,6 +24,27 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { QUANTIDADE_MAXIMA_POR_ITEM } from '../event-products';
+
+/** Teto da equipe do evento (admins e tesoureiros): mais que isso é engano */
+const MAXIMO_DA_EQUIPE = 50;
+
+/** O multipart manda listas como texto JSON */
+const deJson = ({ value }: { value: unknown }) => {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+export class TesoureiroDoEventoDto {
+  @IsString()
+  userId: string;
+
+  @IsEnum(EventTreasurerKind)
+  kind: EventTreasurerKind;
+}
 
 class RoleDto {
   @IsOptional()
@@ -300,6 +326,38 @@ export class EventDto {
   @IsObject()
   @IsOptional()
   data: Object;
+
+  @ApiProperty({
+    type: [String],
+    required: false,
+    description:
+      'Os admins do evento (ids). Omitido, nada muda; enviado, vira a lista. Só o admin da igreja define.',
+  })
+  @Transform(deJson)
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAXIMO_DA_EQUIPE)
+  @IsString({ each: true })
+  adminIds?: string[];
+
+  @ApiProperty({
+    type: [TesoureiroDoEventoDto],
+    required: false,
+    description:
+      'Os tesoureiros(as) do evento. Omitido, nada muda; enviado, vira a lista. Só o admin da igreja define.',
+  })
+  @Transform(({ value }) => {
+    const lista = deJson({ value });
+    return Array.isArray(lista)
+      ? lista.map((t) => Object.assign(new TesoureiroDoEventoDto(), t))
+      : lista;
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAXIMO_DA_EQUIPE)
+  @ValidateNested({ each: true })
+  @Type(() => TesoureiroDoEventoDto)
+  tesoureiros?: TesoureiroDoEventoDto[];
   @ApiProperty({
     example: 'CURSILHO',
     description: 'Tipo do evento',

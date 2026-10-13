@@ -41,7 +41,11 @@ const alvo = {
  * escopo responde como o banco: acha a pessoa só se alguma igreja pedida no
  * filtro for dela.
  */
-function montar(requester: object, igrejasDoAlvo: string[]) {
+function montar(
+  requester: object,
+  igrejasDoAlvo: string[],
+  adminDeEventoEm: string[] = [],
+) {
   const pediu = (where: any): string[] =>
     where?.OR?.flatMap((c: any) => c.events?.some?.event?.churchId?.in ?? []) ??
     [];
@@ -58,6 +62,14 @@ function montar(requester: object, igrejasDoAlvo: string[]) {
       }),
     },
     groupRoles: { findMany: jest.fn().mockResolvedValue([]) },
+    // admin de um evento em cada igreja de `adminDeEventoEm`
+    eventAdmin: {
+      findMany: jest.fn().mockResolvedValue(
+        adminDeEventoEm.map((churchId) => ({
+          event: { id: `ev-${churchId}`, churchId, church: { plan: null } },
+        })),
+      ),
+    },
   };
   return {
     service: new UserService(prisma as any, {} as any, {} as any),
@@ -116,5 +128,30 @@ describe('Cadastro de pessoas — recorte por igreja', () => {
     );
     expect(grupos.present[0].link).toBe('https://chat.whatsapp.com/a');
     expect(grupos.waitlist[0]).not.toHaveProperty('link');
+  });
+});
+
+describe('Cadastro de pessoas — admin de evento', () => {
+  const adminDeB = {
+    role: Role.ADMIN,
+    churchRoles: [{ churchId: 'B', role: Role.ADMIN }],
+  };
+
+  it('admin da B e de um evento da A lê o cadastro de alguém da A, completo', async () => {
+    const { service } = montar(adminDeB, ['A'], ['A']);
+    const pessoa: any = await service.findOne('alvo', 'req');
+    expect(pessoa.fullName).toBe('Pessoa');
+    expect(pessoa.religion).toBe('Católica');
+  });
+
+  it('não alcança quem é de uma igreja de que não é admin de evento nenhum', async () => {
+    const { service } = montar(
+      { role: Role.USER, churchRoles: [] },
+      ['C'],
+      ['A'],
+    );
+    await expect(service.findOne('alvo', 'req')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });

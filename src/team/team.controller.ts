@@ -20,6 +20,7 @@ import { ADMIN_ROLES } from 'src/auth/roles';
 import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 @ApiTags('team')
 @ApiBearerAuth()
@@ -27,6 +28,8 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
 @Roles(...ADMIN_ROLES)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
 @Modulo(ChurchModule.EVENTS)
+// o admin deste evento vale como admin da igreja aqui
+@AceitaAdminDoEvento()
 @Controller('events/:idEvent/teams')
 export class TeamController {
   constructor(private readonly teamService: TeamService) {}

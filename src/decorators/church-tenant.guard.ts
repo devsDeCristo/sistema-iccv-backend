@@ -13,6 +13,10 @@ import {
   ACEITA_TESOUREIRO_KEY,
   tesoureiroNaIgreja,
 } from 'src/auth/tesoureiro-do-evento';
+import {
+  ACEITA_ADMIN_DO_EVENTO_KEY,
+  adminDeEventoNaIgreja,
+} from 'src/auth/admin-do-evento';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -74,14 +78,20 @@ export class ChurchTenantGuard implements CanActivate {
         message: 'Você não administra esta igreja',
       });
     } catch (erro) {
-      // a rota que aceita o tesoureiro(a) de evento abre para quem é
-      // tesoureiro de um evento **desta** igreja — e só para ele
-      const aceita = this.reflector.getAllAndOverride<boolean>(
-        ACEITA_TESOUREIRO_KEY,
-        [context.getHandler(), context.getClass()],
-      );
-      if (!aceita || !(await tesoureiroNaIgreja(this.prisma, userId, churchId)))
-        throw erro;
+      // a rota que aceita o tesoureiro(a) ou o admin de evento abre para quem
+      // é um deles num evento **desta** igreja — e só para ele
+      const marcada = (chave: string) =>
+        this.reflector.getAllAndOverride<boolean>(chave, [
+          context.getHandler(),
+          context.getClass(),
+        ]);
+      const comoTesoureiro =
+        marcada(ACEITA_TESOUREIRO_KEY) &&
+        (await tesoureiroNaIgreja(this.prisma, userId, churchId));
+      const comoAdminDeEvento =
+        marcada(ACEITA_ADMIN_DO_EVENTO_KEY) &&
+        (await adminDeEventoNaIgreja(this.prisma, userId, churchId));
+      if (!comoTesoureiro && !comoAdminDeEvento) throw erro;
     }
 
     // evita a segunda consulta nos services que também precisam do vínculo

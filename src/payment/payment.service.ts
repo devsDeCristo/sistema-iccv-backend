@@ -8,7 +8,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
-import { SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
+import { isSuperAdmin, SELECT_TENANT, tenantChurchIds } from 'src/auth/tenant';
+import {
+  adminDoEvento,
+  alcanceDoAdminDeEvento,
+} from 'src/auth/admin-do-evento';
 import {
   CheckoutStatus,
   PaymentMethod,
@@ -117,7 +121,11 @@ export class PaymentService {
    * Extrato de pagamento é de quem pagou. Fora ele, só o painel — e o
    * `EventTenantGuard` já garantiu que o evento é da igreja de quem pergunta.
    */
-  async assertCanSeePayments(requesterId: string, targetUserId: string) {
+  async assertCanSeePayments(
+    requesterId: string,
+    targetUserId: string,
+    eventId?: string,
+  ) {
     if (requesterId === targetUserId) return;
 
     const requester = await this.prisma.user.findUnique({
@@ -125,7 +133,17 @@ export class PaymentService {
       select: { role: true },
     });
 
-    if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) {
+    // o admin de evento vê os pagamentos no evento dele; fora de um evento, os
+    // dos eventos das igrejas dele (o recorte é de `findUserEventsWithRoles`)
+    const comoAdminDeEvento = eventId
+      ? await adminDoEvento(this.prisma, requesterId, eventId)
+      : (await alcanceDoAdminDeEvento(this.prisma, requesterId)).churchIds
+          .length > 0;
+
+    if (
+      !ADMIN_AREA_ROLES.includes(requester?.role as Role) &&
+      !comoAdminDeEvento
+    ) {
       throw new ForbiddenException(
         'Você só pode ver os seus próprios pagamentos',
       );
@@ -1235,7 +1253,15 @@ export class PaymentService {
 
     // a própria pessoa vê tudo o que é dela; o painel vê só as igrejas dele
     const churchIds =
-      requesterId === userId ? null : tenantChurchIds(requester);
+      requesterId === userId || isSuperAdmin(requester)
+        ? null
+        : // as igrejas do perfil e as dos eventos de que é admin
+          [
+            ...(tenantChurchIds(requester) ?? []),
+            ...(
+              await alcanceDoAdminDeEvento(this.prisma, requesterId as string)
+            ).churchIds,
+          ];
 
     /**
      * Com a loja pública, dá para comprar sem estar inscrito — e a compra

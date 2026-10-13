@@ -13,6 +13,10 @@ import {
   ACEITA_TESOUREIRO_KEY,
   temVinculoDeTesoureiro,
 } from 'src/auth/tesoureiro-do-evento';
+import {
+  ACEITA_ADMIN_DO_EVENTO_KEY,
+  temVinculoDeAdminDeEvento,
+} from 'src/auth/admin-do-evento';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -60,18 +64,28 @@ export class RolesGuard implements CanActivate {
 
     const user = { role: perfilEfetivo(pessoa) };
 
+    const marcada = (chave: string) =>
+      this.reflector.getAllAndOverride<boolean>(chave, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+
     /**
-     * Fora dos perfis da rota, só passa o tesoureiro(a) de evento, e só em
-     * rota que o aceita. Aqui basta ter algum vínculo: se é deste evento,
-     * quem responde é o `EventTenantGuard`, que vem depois.
+     * Fora dos perfis da rota, só passa o tesoureiro(a) de evento, e o admin
+     * de evento em rota que aceita admin — cada um só em rota que o aceita.
+     * Aqui basta ter algum vínculo: se é deste evento, quem responde é o
+     * `EventTenantGuard` (ou o `ChurchTenantGuard`), que vem depois.
      */
     if (
       !requiredRoles.includes(user.role as Role) &&
       !(
-        this.reflector.getAllAndOverride<boolean>(ACEITA_TESOUREIRO_KEY, [
-          context.getHandler(),
-          context.getClass(),
-        ]) && (await temVinculoDeTesoureiro(this.prisma, userId))
+        marcada(ACEITA_TESOUREIRO_KEY) &&
+        (await temVinculoDeTesoureiro(this.prisma, userId))
+      ) &&
+      !(
+        requiredRoles.includes(Role.ADMIN) &&
+        marcada(ACEITA_ADMIN_DO_EVENTO_KEY) &&
+        (await temVinculoDeAdminDeEvento(this.prisma, userId))
       )
     ) {
       throw new ForbiddenException(

@@ -37,12 +37,15 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 @ApiTags('events')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
 @Modulo(ChurchModule.EVENTS)
+// o admin deste evento vale como admin da igreja aqui
+@AceitaAdminDoEvento()
 @Controller('events')
 export class EventController {
   constructor(private readonly eventService: EventService) {}

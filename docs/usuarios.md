@@ -179,6 +179,14 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   Tesouraria são definidos por igreja em `churchRoles`, não pelo perfil
   global.
 
+### O admin de evento
+
+Quem é admin de um evento (`EventAdmin`, ver `docs/eventos.md`) alcança as pessoas da igreja dos eventos dele — a mesma regra de `userChurchScope`, por `pessoasDasIgrejas` — e só elas. Vale também para quem tem perfil em outra igreja (admin da B e admin de um evento da A alcança as pessoas das duas):
+
+- `GET /users` (a lista do "adicionar inscrito" do evento, com `@AceitaAdminDoEvento()`): as pessoas das igrejas dos eventos dele, somadas às da igreja que administra, se administrar alguma. Sem igreja de admin nem evento, a lista vem vazia — e não o sistema inteiro, que é o que o `userChurchScope` de quem não tem perfil devolveria;
+- `GET /users/:id` e `GET /users/:id/groups` (os grupos, só dos eventos das igrejas dele), com os dados sensíveis;
+- `PUT /users/:id`: edita **o perfil**. Permissão (`role`, `churchRoles`) é descartada como para qualquer não admin; e-mail e CPF diferentes do atual voltam 403 (com o e-mail trocado, o "esqueci a senha" daria a conta a ele); quem tem perfil de painel em alguma igreja, ou é super admin/dev, volta 403 — é assunto do admin da igreja.
+
 ## Permissão em massa (`PUT /users/permissions`)
 
 O mesmo perfil, numa igreja, para várias pessoas de uma vez — a barra de

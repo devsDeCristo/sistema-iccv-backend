@@ -52,15 +52,18 @@ import {
   SELECT_TENANT,
   perfilEfetivo,
   userChurchScope,
+  pessoasDasIgrejas,
   assertChurchAccess,
   churchIdsComPerfil,
   isSuperAdmin,
+  perfilNaIgreja,
   tenantChurchIds,
 } from 'src/auth/tenant';
 import {
   eventosDoTesoureiro,
   tesoureiroDoEvento,
 } from 'src/auth/tesoureiro-do-evento';
+import { adminDoEvento, eventosDoAdmin } from 'src/auth/admin-do-evento';
 import {
   filtroDeEventoEmTeste,
   podeVerEventoEmTeste,
@@ -145,6 +148,14 @@ const IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const IMAGE_CACHE_ERROR_TTL_MS = 30 * 1000;
 const IMAGE_CACHE_MAX_ENTRIES = 50;
 
+/** Quem é da equipe do evento, como o formulário mostra */
+const PESSOA_DA_EQUIPE = {
+  id: true,
+  fullName: true,
+  email: true,
+  profilePhotoUrl: true,
+} as const;
+
 @Injectable()
 export class EventService {
   private readonly logger = new Logger(EventService.name);
@@ -208,7 +219,7 @@ export class EventService {
     // isso bastaria ter o id em mãos para entrar num evento ainda em ensaio
     if (options?.requesterId) {
       await this.assertEventIsVisible(eventId, options.requesterId);
-      await this.assertPodeInscrever(options.requesterId, userId);
+      await this.assertPodeInscrever(options.requesterId, userId, eventId);
       aceitouTermo = await this.assertTermoAceito(
         eventId,
         options.requesterId,
@@ -313,7 +324,7 @@ export class EventService {
 
     if (options?.requesterId) {
       await this.assertEventIsVisible(eventId, options.requesterId);
-      await this.assertPodeInscrever(options.requesterId, userId);
+      await this.assertPodeInscrever(options.requesterId, userId, eventId);
     }
 
     const pedido = montarPedido(body.items);
@@ -1737,6 +1748,7 @@ export class EventService {
     // evento pela metade, nem subir como erro 500 lá de dentro da transação
     validarProdutos(data.products ?? []);
     (data.products ?? []).forEach((produto) => validarFotos(produto.images));
+    await this.validarEquipe(churchId, data);
 
     try {
       data.endDate = new Date(data.endDate);
@@ -1749,7 +1761,7 @@ export class EventService {
         async (tx) => {
           await this.ensureEventNameIsAvailable(name, { tx });
 
-          return tx.event.create({
+          const criado = await tx.event.create({
             data: {
               type: data.type,
               endDate: data.endDate,
@@ -1789,6 +1801,8 @@ export class EventService {
               status: data.status ?? EventStatus.ACTIVE,
             },
           });
+          await this.gravarEquipe(tx, criado.id, data, requesterId);
+          return criado;
         },
         { isolationLevel: 'Serializable' },
       );
@@ -2003,7 +2017,11 @@ export class EventService {
    * lia o cadastro completo dela. Foi metade do caminho da tomada de conta
    * corrigida em 09/10/2026 (ver `docs/usuarios.md`).
    */
-  private async assertPodeInscrever(requesterId: string, userId: string) {
+  private async assertPodeInscrever(
+    requesterId: string,
+    userId: string,
+    eventId: string,
+  ) {
     if (requesterId === userId) return;
 
     const requester = await this.prisma.user.findUnique({
@@ -2011,8 +2029,19 @@ export class EventService {
       select: SELECT_TENANT,
     });
 
+    // o admin deste evento inscreve quem está no cadastro da igreja dele
+    const doAdmin = (await adminDoEvento(this.prisma, requesterId, eventId))
+      ? await this.prisma.event.findUnique({
+          where: { id: eventId },
+          select: { churchId: true },
+        })
+      : null;
+
     // o perfil efetivo, e não o gravado (que pode estar atrasado)
-    if (!ADMIN_AREA_ROLES.includes(perfilEfetivo(requester) as Role)) {
+    if (
+      !doAdmin &&
+      !ADMIN_AREA_ROLES.includes(perfilEfetivo(requester) as Role)
+    ) {
       throw new ForbiddenException(
         'Você só pode inscrever a si mesmo neste evento',
       );
@@ -2021,7 +2050,12 @@ export class EventService {
     if (isSuperAdmin(requester)) return;
 
     const noCadastro = await this.prisma.user.findFirst({
-      where: { id: userId, ...userChurchScope(requester) },
+      where: {
+        id: userId,
+        ...(doAdmin
+          ? pessoasDasIgrejas([doAdmin.churchId])
+          : userChurchScope(requester)),
+      },
       select: { id: true },
     });
 
@@ -2100,7 +2134,11 @@ export class EventService {
         })
       : null;
 
-    if (!podeVerEventoEmTeste(requester, event.churchId)) {
+    if (
+      !podeVerEventoEmTeste(requester, event.churchId) &&
+      // o admin deste evento enxerga o ensaio dele
+      !(requesterId && (await adminDoEvento(this.prisma, requesterId, eventId)))
+    ) {
       throw new NotFoundException('Event does not exist');
     }
   }
@@ -2137,12 +2175,20 @@ export class EventService {
             (vinculo) => vinculo.event.id,
           )
         : [];
+    // e os de que ela é admin (`EventAdmin`), ensaio inclusive
+    const doAdmin =
+      emPainel && requesterId
+        ? (await eventosDoAdmin(this.prisma, requesterId)).map(
+            (vinculo) => vinculo.event.id,
+          )
+        : [];
     const churchFilter =
       emPainel && !isSuperAdmin(requester)
         ? {
             OR: [
               { churchId: { in: igrejasDoPainel ?? [] } },
               { id: { in: doTesoureiro } },
+              { id: { in: doAdmin } },
             ],
             // fora do plano o evento some do painel (o `ModuloGuard` já
             // recusa abri-lo); os dados continuam guardados
@@ -2151,14 +2197,18 @@ export class EventService {
         : {};
 
     // ensaio de configuração só aparece para quem administra aquela igreja
-    const testFilter = filtroDeEventoEmTeste(requester);
+    // (ou aquele evento)
+    const testFilter = doAdmin.length
+      ? { OR: [filtroDeEventoEmTeste(requester), { id: { in: doAdmin } }] }
+      : filtroDeEventoEmTeste(requester);
 
     const events = await this.prisma.event
       .findMany({
         where: {
           name: { contains: filters?.name || undefined },
-          ...testFilter,
-          ...churchFilter,
+          // em `AND`: os dois filtros usam `OR`, e espalhados um apagava o
+          // outro
+          AND: [testFilter, churchFilter],
         },
         select: {
           id: true,
@@ -2237,6 +2287,15 @@ export class EventService {
             include: { variants: { orderBy: { name: 'asc' } } },
             orderBy: { createdAt: 'asc' },
           },
+          // a equipe do evento, para o formulário de edição (só no painel)
+          ...(emPainel
+            ? {
+                admins: { select: { user: { select: PESSOA_DA_EQUIPE } } },
+                treasurers: {
+                  select: { kind: true, user: { select: PESSOA_DA_EQUIPE } },
+                },
+              }
+            : {}),
         },
       });
 
@@ -2245,9 +2304,11 @@ export class EventService {
       }
 
       // ensaio de configuração: existe só para quem administra esta igreja
+      // (ou este evento)
       if (
         event.status === EventStatus.TEST &&
-        !podeVerEventoEmTeste(requester, event.churchId)
+        !podeVerEventoEmTeste(requester, event.churchId) &&
+        !(requesterId && (await adminDoEvento(this.prisma, requesterId, id)))
       ) {
         throw new NotFoundException('Event does not exist');
       }
@@ -2260,10 +2321,12 @@ export class EventService {
       if (
         igrejas &&
         !igrejas.includes(event.churchId) &&
-        // admin ou tesouraria de outra igreja que é tesoureiro(a) deste evento
+        // admin ou tesouraria de outra igreja que é tesoureiro(a) ou admin
+        // deste evento
         !(
           requesterId &&
-          (await tesoureiroDoEvento(this.prisma, requesterId, id))
+          ((await tesoureiroDoEvento(this.prisma, requesterId, id)) ||
+            (await adminDoEvento(this.prisma, requesterId, id)))
         )
       ) {
         throw new NotFoundException('Event does not exist');
@@ -2424,10 +2487,25 @@ export class EventService {
         select: SELECT_TENANT,
       });
 
-      assertChurchAccess(requester, event.churchId, {
-        roles: [Role.ADMIN],
-        message: 'Você não administra a igreja deste evento',
-      });
+      // o admin deste evento também edita (o `EventTenantGuard` já conferiu),
+      // mas a equipe do evento é o admin da igreja quem define
+      const soAdminDoEvento =
+        !isSuperAdmin(requester) &&
+        perfilNaIgreja(requester, event.churchId) !== Role.ADMIN &&
+        (await adminDoEvento(this.prisma, requesterId, id));
+      if (!soAdminDoEvento) {
+        assertChurchAccess(requester, event.churchId, {
+          roles: [Role.ADMIN],
+          message: 'Você não administra a igreja deste evento',
+        });
+      } else if (
+        updateEvent.adminIds !== undefined ||
+        updateEvent.tesoureiros !== undefined
+      ) {
+        throw new ForbiddenException(
+          'Só o admin da igreja define os admins e tesoureiros(as) do evento',
+        );
+      }
 
       // mover o evento de igreja é do super admin: o admin não tem para onde
       // mover, e o campo vem no mesmo formulário
@@ -2448,6 +2526,10 @@ export class EventService {
         novaIgreja = updateEvent.churchId;
       }
     }
+
+    // a equipe é conferida antes de qualquer escrita, uploads inclusive (na
+    // igreja de destino, se o super admin moveu o evento)
+    await this.validarEquipe(novaIgreja ?? event.churchId, updateEvent);
 
     const name = updateEvent.name?.trim();
 
@@ -2703,7 +2785,103 @@ export class EventService {
     // Executa TODAS as operações em uma transaction segura
     await this.prisma.$transaction(ops);
 
+    // interativa, e não no array acima: `deleteMany` seguido de escrita na
+    // forma em array perde as escritas no middleware de auditoria
+    await this.prisma.$transaction((tx) =>
+      this.gravarEquipe(tx, id, updateEvent, requesterId),
+    );
+
     return this.findOneClear(id);
+  }
+
+  /**
+   * A equipe do evento — admins e tesoureiros(as) — vem no cadastro e na
+   * edição dele. Pode ser qualquer usuário do sistema, membro da igreja ou
+   * não; só não entra quem já vê o evento todo pelo perfil (super admin, admin
+   * da igreja e, como tesoureiro, a tesouraria da igreja). Recusa com o nome de
+   * quem, antes de qualquer escrita.
+   */
+  private async validarEquipe(
+    churchId: string,
+    equipe: Pick<EventDto, 'adminIds' | 'tesoureiros'>,
+  ) {
+    const adminIds = equipe.adminIds ?? [];
+    const tesoureiros = (equipe.tesoureiros ?? []).map((t) => t.userId);
+    if (
+      new Set(adminIds).size !== adminIds.length ||
+      new Set(tesoureiros).size !== tesoureiros.length
+    ) {
+      throw new BadRequestException('A mesma pessoa aparece duas vezes');
+    }
+
+    const ids = [...new Set([...adminIds, ...tesoureiros])];
+    if (!ids.length) return;
+
+    const pessoas = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, fullName: true, ...SELECT_TENANT },
+    });
+    const porId = new Map(pessoas.map((p) => [p.id, p]));
+    if (porId.size !== ids.length) {
+      throw new BadRequestException(
+        'Pessoa da equipe do evento não encontrada',
+      );
+    }
+
+    const recusa = (id: string, comoTesoureiro: boolean) => {
+      const pessoa = porId.get(id)!;
+      if (isSuperAdmin(pessoa)) {
+        return `${pessoa.fullName} é super admin e já vê todos os eventos`;
+      }
+      const naIgreja = perfilNaIgreja(pessoa, churchId);
+      if (naIgreja === Role.ADMIN) {
+        return `${pessoa.fullName} já é admin da igreja do evento`;
+      }
+      if (comoTesoureiro && naIgreja === Role.TESOURARIA) {
+        return `${pessoa.fullName} já é tesouraria da igreja do evento`;
+      }
+      return null;
+    };
+    const motivo =
+      adminIds.map((id) => recusa(id, false)).find(Boolean) ??
+      tesoureiros.map((id) => recusa(id, true)).find(Boolean);
+    if (motivo) throw new BadRequestException(motivo);
+  }
+
+  /** Grava a equipe que veio: lista enviada substitui; omitida, nada muda */
+  private async gravarEquipe(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    equipe: Pick<EventDto, 'adminIds' | 'tesoureiros'>,
+    createdById?: string,
+  ) {
+    if (equipe.adminIds !== undefined) {
+      await tx.eventAdmin.deleteMany({
+        where: { eventId, userId: { notIn: equipe.adminIds } },
+      });
+      for (const userId of equipe.adminIds) {
+        await tx.eventAdmin.upsert({
+          where: { eventId_userId: { eventId, userId } },
+          create: { eventId, userId, createdById },
+          update: {},
+        });
+      }
+    }
+    if (equipe.tesoureiros !== undefined) {
+      await tx.eventTreasurer.deleteMany({
+        where: {
+          eventId,
+          userId: { notIn: equipe.tesoureiros.map((t) => t.userId) },
+        },
+      });
+      for (const { userId, kind } of equipe.tesoureiros) {
+        await tx.eventTreasurer.upsert({
+          where: { eventId_userId: { eventId, userId } },
+          create: { eventId, userId, kind, createdById },
+          update: { kind },
+        });
+      }
+    }
   }
 
   async removeUserFromEvent(
@@ -2977,7 +3155,7 @@ export class EventService {
     }
 
     if (requesterId) {
-      await this.assertPodeInscrever(requesterId, userId);
+      await this.assertPodeInscrever(requesterId, userId, eventId);
     }
 
     const registration = await this.prisma.eventOnUsers.findUnique({

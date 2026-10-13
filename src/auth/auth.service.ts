@@ -14,6 +14,7 @@ import { UserService } from 'src/user/user.service';
 import { ADMIN_AREA_ROLES } from './roles';
 import { perfilEfetivo } from './tenant';
 import { eventosDoTesoureiro } from './tesoureiro-do-evento';
+import { eventosDoAdmin } from './admin-do-evento';
 import {
   captchaValido,
   FALHAS_PARA_BLOQUEIO,
@@ -77,11 +78,14 @@ export class AuthService {
      * eventos dele, e o front monta o menu com esta lista.
      */
     const eventTreasurers = await this.eventosComoTesoureiro(userConsult.id);
+    /** E os de que é admin (`EventAdmin`): também abrem o painel */
+    const eventAdmins = await this.eventosComoAdmin(userConsult.id);
     // a tesouraria também entra no painel, mas com abas restritas no front
     if (
       test === 'admin' &&
       !ADMIN_AREA_ROLES.includes(role) &&
-      !eventTreasurers.length
+      !eventTreasurers.length &&
+      !eventAdmins.length
     ) {
       throw new UnauthorizedException('Usuário não é administrador');
     }
@@ -90,6 +94,7 @@ export class AuthService {
       role,
       churchRoles,
       eventTreasurers,
+      eventAdmins,
       fullName: userConsult.fullName,
       email: userConsult.email,
       cpf: userConsult.cpf,
@@ -266,6 +271,7 @@ export class AuthService {
       user: {
         ...user,
         eventTreasurers: await this.eventosComoTesoureiro(user.id),
+        eventAdmins: await this.eventosComoAdmin(user.id),
       },
     };
   }
@@ -284,5 +290,16 @@ export class AuthService {
         kind,
       }),
     );
+  }
+
+  /** Os eventos de que a pessoa é admin, no formato que o front guarda */
+  private async eventosComoAdmin(userId: string) {
+    return (await eventosDoAdmin(this.prisma, userId)).map(({ event }) => ({
+      eventId: event.id,
+      eventName: event.name,
+      churchId: event.churchId,
+      churchName: event.church.name,
+      modulos: modulosDa(event.church),
+    }));
   }
 }

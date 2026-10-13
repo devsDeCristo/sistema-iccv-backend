@@ -60,6 +60,25 @@ eventos do painel.
 Arquivos: `src/event/event.service.ts` (`atualizarStatusEmMassa`),
 `src/event/dto/status-em-massa.dto.ts`, `src/event/status-em-massa.spec.ts`.
 
+## Equipe do evento: admins e tesoureiros(as)
+
+Quem cuida de um evento sem ser admin da igreja. **Pode ser qualquer usuário do sistema**, membro da igreja ou não. Nenhum dos dois é perfil: não muda `User.role` nem `perfilEfetivo`, e quem só tem esses vínculos continua usuário comum fora do painel.
+
+- **Onde se define:** no cadastro e na edição do evento (`POST /events` e `PUT /events/:idEvent`), pelos campos `adminIds: string[]` e `tesoureiros: { userId, kind }[]` (no multipart, JSON em texto). Omitido, nada muda; enviado, **vira a lista** (quem saiu perde o vínculo). Os tesoureiros também se alocam pela Tesouraria (`events/:idEvent/tesoureiros`, ver `docs/tesouraria.md`). Membros **não** mexe aqui: lá é só o perfil na igreja.
+- **Quem define:** o admin da igreja do evento (e dev/super admin). O admin de evento edita o resto do evento, mas mandar `adminIds`/`tesoureiros` volta 403 — senão ele se daria tesoureiro(a) completo e chegaria à Tesouraria.
+- **Recusa (400, com o nome):** quem não existe, a mesma pessoa duas vezes na lista, super admin/dev, o admin da igreja do evento (já administra todos), e — só como tesoureiro — a tesouraria da igreja. Tudo é conferido antes de qualquer escrita (`validarEquipe`); na edição a gravação é numa transação interativa à parte (`gravarEquipe`), porque `deleteMany` + escrita na forma em array perde as escritas no middleware de auditoria.
+- **No detalhe:** `GET /events/:id?painel=true` devolve `admins: [{ user }]` e `treasurers: [{ kind, user }]` (id, nome, e-mail, foto), para o formulário vir preenchido. O catálogo não traz.
+
+### Admin de evento (`EventAdmin`)
+
+- **Modelo:** tabela `event_admins`, chave `(eventId, userId)`, `createdById`. Apagar o evento ou a pessoa apaga o vínculo; vínculo de igreja desativada não vale. Migration `20261013120000_admins_de_evento` (só cria a tabela). No log: "Admin do evento".
+- **O que faz:** dentro do evento, vale como o admin da igreja — editar, inscritos (inclusive inscrever quem está no cadastro da igreja do evento), lista de espera, equipes, quartos, transporte, crachás, check-in, quadrante e **os pagamentos** (conferir, dar baixa, estornar, entrega de produtos). **Não** apaga o evento (rota só de dev), não cria eventos, não muda status em massa, não define a equipe do evento e **não vê a Tesouraria** (o módulo).
+- **Fora do evento:** a lista de Membros da igreja do evento (sem os pedidos) e o cadastro das pessoas que a igreja alcança — ver e **editar o perfil**, com os dados sensíveis. Não troca e-mail nem CPF (com o e-mail trocado, o "esqueci a senha" daria a conta a ele) e não edita quem tem perfil de painel (`docs/usuarios.md`). Vê os pagamentos de uma pessoa só nos eventos das igrejas dele.
+- **Como a rota o aceita** (`src/auth/admin-do-evento.ts`): `@AceitaAdminDoEvento()` na classe dos controllers do evento (eventos, pagamentos, quartos, equipes, transporte, crachás, check-in) no `GET churches/:churchId/membros` e no `GET /users` (recortado no service, ver `docs/usuarios.md`). Nas rotas do evento sem `@Roles` (inscrever outra pessoa, ver os pagamentos de um inscrito) o `EventTenantGuard` também aceita o admin deste evento, para quem tem perfil em outra igreja. Vale **só em rota cujo `@Roles` aceita admin** — rota só de dev continua fechada mesmo marcada. O `RolesGuard` deixa passar quem tem algum vínculo; o `EventTenantGuard` cobra que seja **deste** evento (rota sem evento, como criar evento, recusa); o `ChurchTenantGuard`, que seja de um evento **desta** igreja. O controller dos tesoureiros fica sem a marca de propósito.
+- **No painel:** `GET /events?painel=true` traz os eventos dele (ensaio inclusive), e `GET /events/:id?painel=true` abre o evento dele.
+- **Sessão:** `login`, `/auth/validate` e `/auth/admin/validate` mandam `eventAdmins` (`eventId`, `eventName`, `churchId`, `churchName`, `modulos`). O painel admite quem tem perfil de painel **ou** vínculo de tesoureiro **ou** de admin de evento.
+- **Testes:** `event-tenant.guard.spec.ts`, `roles.guard.spec.ts`, `inscricao-de-terceiros.spec.ts`, `quadrante-acesso.spec.ts`, `event-equipe.spec.ts`.
+
 ## Visibilidade
 
 - **Catálogo (área do usuário):** todo evento `ACTIVE`/`INACTIVE` aparece,

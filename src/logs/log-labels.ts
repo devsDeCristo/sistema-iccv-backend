@@ -42,6 +42,7 @@ export const MODEL_LABELS: Record<string, string> = {
   Church: 'Igreja',
   UserChurchRole: 'Vínculo com igreja',
   EventTreasurer: 'Tesoureiro(a) do evento',
+  EventAdmin: 'Admin do evento',
 };
 
 /**

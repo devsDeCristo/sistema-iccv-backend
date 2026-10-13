@@ -22,7 +22,7 @@ Código: `src/membros` (controller, service, DTOs), campos em `User` e o modelo 
 
 `ADMIN_ROLES` + `ChurchTenantGuard`: quem mexe é só o **admin da igreja da rota** (e dev/super admin) — nem quem é tesouraria desta igreja e admin de outra.
 
-**Só a lista (`GET membros`) se lê também** pela **tesouraria** desta igreja e por quem é **tesoureiro(a) de um evento** dela (`@Roles(...ADMIN_AREA_ROLES)` + `@AceitaTesoureiroDoEvento()`; o `ChurchTenantGuard` confere o vínculo com um evento desta igreja). Para eles a lista vem **sem os pedidos** (`pendentes: []`): aceitar ou recusar é do admin.
+**Só a lista (`GET membros`) se lê também** pela **tesouraria** desta igreja e por quem é **tesoureiro(a) de um evento** dela (`@Roles(...ADMIN_AREA_ROLES)` + `@AceitaTesoureiroDoEvento()`; o `ChurchTenantGuard` confere o vínculo com um evento desta igreja). Para eles a lista vem **sem os pedidos** (`pendentes: []`): aceitar ou recusar é do admin. O **admin de um evento** desta igreja também lê a lista (`@AceitaAdminDoEvento()`), sem os pedidos, e edita o perfil de cada um pela edição de usuário (`docs/usuarios.md`). Membros só cuida do perfil **na igreja** (admin e tesouraria); admin e tesoureiro(a) de evento se definem no cadastro do evento.
 
 Dar a um membro o perfil de admin ou tesouraria na igreja não é rota daqui: é `PUT /users/permissions` (a edição em massa de Usuários), que já confere que quem dá é admin da igreja. Toda escrita confere ainda que a pessoa ou a família da URL é desta igreja (404 caso contrário): membro por `{ id, memberChurchId }`, pedido por `{ id, requestedChurchId }`, família por `{ id, churchId }`.
 

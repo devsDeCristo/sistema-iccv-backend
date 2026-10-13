@@ -6,6 +6,8 @@ import {
 import { ADMIN_AREA_ROLES, Role } from '../auth/roles';
 import { EventTenantGuard } from './event-tenant.guard';
 import { ROLES_KEY } from './roles.decorator';
+import { ACEITA_TESOUREIRO_KEY } from '../auth/tesoureiro-do-evento';
+import { ACEITA_ADMIN_DO_EVENTO_KEY } from '../auth/admin-do-evento';
 
 /**
  * O guard é a fronteira das rotas penduradas em um evento — quartos, equipes,
@@ -42,6 +44,8 @@ const PESSOAS: Record<string, Pessoa> = {
   inscrito: { role: Role.USER, churchRoles: [] },
   // só tesoureiro(a) do evento A: continua usuário comum
   'tesoureiro-de-a': { role: Role.USER, churchRoles: [] },
+  // só admin do evento A: também continua usuário comum
+  'admin-do-evento-a': { role: Role.USER, churchRoles: [] },
   // tesouraria da igreja A e tesoureira de um evento da B
   'tesouraria-a-tesoureira-de-b': {
     role: Role.TESOURARIA,
@@ -57,6 +61,8 @@ const TESOUREIROS = [
     kind: 'COMPLETO',
   },
 ];
+
+const ADMINS_DE_EVENTO = [{ userId: 'admin-do-evento-a', eventId: 'evento-a' }];
 
 const EVENTOS: Record<string, { churchId: string }> = {
   'evento-a': { churchId: IGREJA_A },
@@ -88,17 +94,33 @@ const prismaFalso = {
         ) ?? null,
       ),
   },
+  eventAdmin: {
+    findFirst: ({ where }: any) =>
+      Promise.resolve(
+        ADMINS_DE_EVENTO.find(
+          (a) => a.userId === where.userId && a.eventId === where.eventId,
+        ) ?? null,
+      ),
+  },
 } as any;
 
 /**
  * O guard lê pelo Reflector o `@Roles` da rota, para saber qual perfil
- * cobrar, e o `@AceitaTesoureiroDoEvento()`.
+ * cobrar, o `@AceitaTesoureiroDoEvento()` e o `@AceitaAdminDoEvento()`.
  */
-const guardComRoles = (roles?: Role[], aceitaTesoureiro = false) =>
+const guardComRoles = (
+  roles?: Role[],
+  aceitaTesoureiro = false,
+  aceitaAdmin = false,
+) =>
   new EventTenantGuard(
     {
       getAllAndOverride: (chave: string) =>
-        chave === ROLES_KEY ? roles : aceitaTesoureiro,
+        ({
+          [ROLES_KEY]: roles,
+          [ACEITA_TESOUREIRO_KEY]: aceitaTesoureiro,
+          [ACEITA_ADMIN_DO_EVENTO_KEY]: aceitaAdmin,
+        }[chave]),
     } as any,
     prismaFalso,
   );
@@ -341,6 +363,45 @@ describe('EventTenantGuard — tesoureiro(a) do evento', () => {
       naoAceita.canActivate(
         contexto('tesouraria-a-tesoureira-de-b', { idEvent: 'evento-b' }),
       ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('EventTenantGuard — admin do evento', () => {
+  const aceita = guardComRoles([Role.SUPER_ADMIN, Role.ADMIN], false, true);
+
+  it('entra no evento dele em rota de admin que o aceita', async () => {
+    await expect(
+      aceita.canActivate(
+        contexto('admin-do-evento-a', { idEvent: 'evento-a' }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('não entra em outro evento', async () => {
+    await expect(
+      aceita.canActivate(
+        contexto('admin-do-evento-a', { idEvent: 'evento-b' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('não entra em rota sem evento (criar evento, status em massa)', async () => {
+    await expect(
+      aceita.canActivate(contexto('admin-do-evento-a', {})),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('não entra em rota que não o aceita', async () => {
+    await expect(
+      guard.canActivate(contexto('admin-do-evento-a', { idEvent: 'evento-a' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('não entra em rota só de dev, mesmo marcada (apagar o evento)', async () => {
+    const soDev = guardComRoles([Role.DEV], false, true);
+    await expect(
+      soDev.canActivate(contexto('admin-do-evento-a', { idEvent: 'evento-a' })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

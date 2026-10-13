@@ -30,6 +30,7 @@ import { RolesGuard } from 'src/decorators/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
 import { ADMIN_ROLES } from 'src/auth/roles';
 import { EventService } from 'src/event/event.service';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 /** Foto de perfil: imagem comum de câmera ou celular, e nada mais */
 const TIPOS_DE_FOTO = ['image/jpeg', 'image/png', 'image/webp'];
@@ -80,6 +81,9 @@ export class UserController {
   @ApiOperation({ summary: 'All users' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLES)
+  // o "adicionar inscrito" do admin de evento: o service recorta pelas
+  // igrejas dos eventos dele
+  @AceitaAdminDoEvento()
   @Get()
   async findAll(@Query() filters: Partial<UserDTO>, @Req() req: any) {
     const users = await this.userService.findAll(filters, req.user?.userId);

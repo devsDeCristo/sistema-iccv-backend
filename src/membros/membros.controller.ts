@@ -27,6 +27,7 @@ import {
   BuscarPessoasQuery,
   CriarFamiliaDto,
 } from './membros.dto';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 /**
  * Membros e famílias da igreja: quem mexe é só o admin dela (`ADMIN_ROLES` +
@@ -52,6 +53,7 @@ export class MembrosController {
   @Get('membros')
   @Roles(...ADMIN_AREA_ROLES)
   @AceitaTesoureiroDoEvento()
+  @AceitaAdminDoEvento()
   listar(@Param('churchId') churchId: string, @Req() req: any) {
     // o guard já deixou o vínculo da pessoa na requisição
     const admin =

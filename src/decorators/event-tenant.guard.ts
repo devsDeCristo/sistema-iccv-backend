@@ -14,6 +14,10 @@ import {
   ACEITA_TESOUREIRO_KEY,
   tesoureiroDoEvento,
 } from 'src/auth/tesoureiro-do-evento';
+import {
+  ACEITA_ADMIN_DO_EVENTO_KEY,
+  adminDoEvento,
+} from 'src/auth/admin-do-evento';
 import { ROLES_KEY } from './roles.decorator';
 
 /**
@@ -29,7 +33,8 @@ import { ROLES_KEY } from './roles.decorator';
  * 24h e guardaria a permissão antiga depois de uma mudança.
  *
  * Em rota com `@AceitaTesoureiroDoEvento()`, quem é tesoureiro(a) **deste**
- * evento também entra, mesmo sem vínculo com a igreja dele.
+ * evento também entra, mesmo sem vínculo com a igreja dele. Em rota com
+ * `@AceitaAdminDoEvento()` que aceita admin, entra o admin **deste** evento.
  */
 @Injectable()
 export class EventTenantGuard implements CanActivate {
@@ -75,11 +80,24 @@ export class EventTenantGuard implements CanActivate {
       ACEITA_TESOUREIRO_KEY,
       [context.getHandler(), context.getClass()],
     );
-    const ehTesoureiroDaqui = async () => {
-      if (!aceitaTesoureiro) return false;
+    // rota que aceita admin, ou rota sem `@Roles` (inscrever alguém, ver os
+    // pagamentos de um inscrito), que o usuário comum já alcança
+    const aceitaAdminDoEvento =
+      (!exigidos.length || exigidos.includes(Role.ADMIN)) &&
+      this.reflector.getAllAndOverride<boolean>(ACEITA_ADMIN_DO_EVENTO_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+    // tesoureiro(a) ou admin deste evento, na rota que aceita cada um
+    const temVinculoDaqui = async () => {
+      if (!aceitaTesoureiro && !aceitaAdminDoEvento) return false;
       const eventId = await this.resolveEventId(request);
+      if (!eventId) return false;
       return (
-        !!eventId && !!(await tesoureiroDoEvento(this.prisma, userId, eventId))
+        (aceitaTesoureiro &&
+          !!(await tesoureiroDoEvento(this.prisma, userId, eventId))) ||
+        (aceitaAdminDoEvento &&
+          (await adminDoEvento(this.prisma, userId, eventId)))
       );
     };
 
@@ -90,8 +108,10 @@ export class EventTenantGuard implements CanActivate {
      * de qualquer igreja.
      */
     if (exigidos.length && !exigidos.includes(perfilEfetivo(requester))) {
-      if (!(await ehTesoureiroDaqui())) {
-        throw new ForbiddenException('Você não é tesoureiro(a) deste evento');
+      if (!(await temVinculoDaqui())) {
+        throw new ForbiddenException(
+          'Você não é tesoureiro(a) nem admin deste evento',
+        );
       }
       request.user.role = requester.role;
       request.user.churchRoles = requester.churchRoles;
@@ -115,8 +135,9 @@ export class EventTenantGuard implements CanActivate {
       throw new NotFoundException('Event does not exist');
     }
 
-    // admin ou tesouraria de outra igreja que é tesoureiro(a) deste evento
-    if (!churchIds.includes(event.churchId) && !(await ehTesoureiroDaqui())) {
+    // admin ou tesouraria de outra igreja que é tesoureiro(a) ou admin deste
+    // evento
+    if (!churchIds.includes(event.churchId) && !(await temVinculoDaqui())) {
       throw new ForbiddenException(
         'Você não tem esta permissão na igreja deste evento',
       );

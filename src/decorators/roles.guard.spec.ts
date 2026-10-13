@@ -2,6 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ADMIN_AREA_ROLES, Role } from 'src/auth/roles';
 import { ACEITA_TESOUREIRO_KEY } from 'src/auth/tesoureiro-do-evento';
+import { ACEITA_ADMIN_DO_EVENTO_KEY } from 'src/auth/admin-do-evento';
 import { RolesGuard } from './roles.guard';
 
 /**
@@ -12,7 +13,19 @@ import { RolesGuard } from './roles.guard';
  */
 function montar(
   pessoa: object | null,
-  { aceitaTesoureiro = false, tesoureiro = false } = {},
+  {
+    aceitaTesoureiro = false,
+    tesoureiro = false,
+    aceitaAdmin = false,
+    adminDeEvento = false,
+    roles = ADMIN_AREA_ROLES,
+  }: {
+    aceitaTesoureiro?: boolean;
+    tesoureiro?: boolean;
+    aceitaAdmin?: boolean;
+    adminDeEvento?: boolean;
+    roles?: Role[];
+  } = {},
 ) {
   const prisma = {
     user: { findUnique: jest.fn().mockResolvedValue(pessoa) },
@@ -21,10 +34,19 @@ function montar(
         .fn()
         .mockResolvedValue(tesoureiro ? { eventId: 'evento-1' } : null),
     },
+    eventAdmin: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(adminDeEvento ? { eventId: 'evento-1' } : null),
+    },
   };
   const reflector = {
     getAllAndOverride: (chave: string) =>
-      chave === ACEITA_TESOUREIRO_KEY ? aceitaTesoureiro : ADMIN_AREA_ROLES,
+      chave === ACEITA_TESOUREIRO_KEY
+        ? aceitaTesoureiro
+        : chave === ACEITA_ADMIN_DO_EVENTO_KEY
+        ? aceitaAdmin
+        : roles,
   } as unknown as Reflector;
   const request = { user: { userId: 'u1' } as Record<string, unknown> };
   const context = {
@@ -94,6 +116,43 @@ describe('RolesGuard', () => {
       { aceitaTesoureiro: true },
     );
 
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+});
+
+describe('RolesGuard — admin de evento', () => {
+  const soAdminDeEvento = { role: Role.USER, churchRoles: [] };
+
+  it('passa em rota de admin que o aceita (o evento é com o EventTenantGuard)', async () => {
+    const { guard, context } = montar(soAdminDeEvento, {
+      aceitaAdmin: true,
+      adminDeEvento: true,
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it('é barrado em rota que não o aceita', async () => {
+    const { guard, context } = montar(soAdminDeEvento, { adminDeEvento: true });
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('é barrado em rota marcada que não aceita admin (só de dev)', async () => {
+    const { guard, context } = montar(soAdminDeEvento, {
+      aceitaAdmin: true,
+      adminDeEvento: true,
+      roles: [Role.DEV],
+    });
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('quem não é admin de evento nenhum continua barrado', async () => {
+    const { guard, context } = montar(soAdminDeEvento, { aceitaAdmin: true });
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
       ForbiddenException,
     );

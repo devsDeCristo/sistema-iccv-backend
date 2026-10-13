@@ -17,13 +17,20 @@ function montar({
   aprovacao = 'NOT_REQUIRED',
   emAberto = 0,
   crachaEntregue = false,
+  adminDoEvento = false,
 }: {
   aprovacao?: string;
   emAberto?: number;
   crachaEntregue?: boolean;
+  adminDoEvento?: boolean;
 }) {
   const prisma = {
     user: { findUnique: jest.fn().mockResolvedValue(inscrito) },
+    eventAdmin: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(adminDoEvento ? { eventId: 'ev' } : null),
+    },
     event: {
       findUnique: jest.fn().mockResolvedValue({
         churchId: 'A',
@@ -78,6 +85,14 @@ describe('Quadrante — quem vê', () => {
   it('menor com termo aprovado: vê', async () => {
     await expect(
       montar({ aprovacao: 'APPROVED' }).assertPodeVer('ev', 'u'),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('Quadrante — admin do evento', () => {
+  it('vê sem estar inscrito', async () => {
+    await expect(
+      montar({ adminDoEvento: true, emAberto: 1 }).assertPodeVer('ev', 'u'),
     ).resolves.toBeUndefined();
   });
 });

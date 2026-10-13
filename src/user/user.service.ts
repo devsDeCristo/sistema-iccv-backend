@@ -31,7 +31,9 @@ import {
   isSuperAdmin,
   tenantChurchIds,
   userChurchScope,
+  pessoasDasIgrejas,
 } from 'src/auth/tenant';
+import { alcanceDoAdminDeEvento } from 'src/auth/admin-do-evento';
 
 import {
   aplicarConsentimento,
@@ -250,15 +252,43 @@ export class UserService {
         })
       : {};
 
-    const recortes = [userChurchScope(requester, [Role.ADMIN]), lente].filter(
+    /**
+     * O admin de evento (a lista é a do "adicionar inscrito") alcança as
+     * pessoas da igreja dos eventos dele, somadas às da igreja que administra,
+     * se administrar alguma. Sem perfil de admin, o `userChurchScope` vem
+     * vazio — "sem recorte" —, então ele só entra quando há igreja de admin.
+     */
+    const igrejasDoEvento =
+      requesterId && !isSuperAdmin(requester)
+        ? (await alcanceDoAdminDeEvento(this.prisma, requesterId)).churchIds
+        : [];
+    const doPerfil =
+      isSuperAdmin(requester) || alcance.length
+        ? userChurchScope(requester, [Role.ADMIN])
+        : null;
+    // nem admin de igreja nem de evento: ninguém (e não todo mundo)
+    if (!doPerfil && !igrejasDoEvento.length) return [];
+    const base = igrejasDoEvento.length
+      ? {
+          OR: [
+            ...(doPerfil ? [doPerfil] : []),
+            pessoasDasIgrejas(igrejasDoEvento),
+          ],
+        }
+      : (doPerfil ?? {});
+
+    const recortes = [base, lente].filter(
       (recorte) => Object.keys(recorte).length > 0,
     );
 
     // as igrejas que mandam nos eventos mostrados em cada linha: as do admin
-    // ou, para o super admin, a que ele escolheu na lente
+    // (e as dos eventos de que é admin) ou, para o super admin, a que ele
+    // escolheu na lente
     const churchIds = podeUsarLente
       ? [filters!.churchId as string]
-      : tenantChurchIds(requester, [Role.ADMIN]);
+      : igrejasDoEvento.length
+        ? [...alcance, ...igrejasDoEvento]
+        : tenantChurchIds(requester, [Role.ADMIN]);
 
     const users = await this.prisma.user.findMany({
       where: {
@@ -385,6 +415,11 @@ export class UserService {
     if (!requesterId || requesterId === targetId) return true;
 
     const requester = await this.getRequester(requesterId);
+    // o admin de evento administra as pessoas que alcança, como o da igreja
+    if (await this.alcancaComoAdminDeEvento(requesterId, targetId)) {
+      return true;
+    }
+    if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) return false;
     const scope = userChurchScope(requester, [Role.ADMIN]);
     if (!Object.keys(scope).length) return true; // super admin/dev
 
@@ -489,11 +524,49 @@ export class UserService {
 
     const requester = await this.getRequester(requesterId);
 
+    // o admin de evento alcança as pessoas da igreja dos eventos dele, tenha
+    // ou não perfil em outra igreja
+    if (await this.alcancaComoAdminDeEvento(requesterId, targetId)) return;
+
     if (!ADMIN_AREA_ROLES.includes(requester?.role as Role)) {
       throw new ForbiddenException('Você só pode ver o seu cadastro');
     }
 
     await this.assertUserInScope(requester, targetId, roles);
+  }
+
+  /** Uma igreja que ele administra alcança a pessoa? */
+  private async alcancaComoAdminDaIgreja(
+    requester: TenantRequester | null,
+    targetId: string,
+  ) {
+    const scope = userChurchScope(requester, [Role.ADMIN]);
+    if (!Object.keys(scope).length) return true; // super admin/dev
+    const alcancavel = await this.prisma.user.findFirst({
+      where: { id: targetId, ...scope },
+      select: { id: true },
+    });
+    return !!alcancavel;
+  }
+
+  /**
+   * O admin de evento alcança as pessoas da igreja dos eventos dele (é o que
+   * a tela de Membros mostra a ele), e não as de outras igrejas.
+   */
+  private async alcancaComoAdminDeEvento(
+    requesterId: string,
+    targetId: string,
+  ) {
+    const { churchIds } = await alcanceDoAdminDeEvento(
+      this.prisma,
+      requesterId,
+    );
+    if (!churchIds.length) return false;
+    const alcancavel = await this.prisma.user.findFirst({
+      where: { id: targetId, ...pessoasDasIgrejas(churchIds) },
+      select: { id: true },
+    });
+    return !!alcancavel;
   }
 
   private async getRequester(requesterId: string) {
@@ -627,14 +700,46 @@ export class UserService {
         requester?.role as Role,
       );
 
+      /**
+       * O admin de evento edita o perfil das pessoas que alcança (as da
+       * igreja dos eventos dele), e só o perfil: nem permissão, nem e-mail ou
+       * CPF — com o e-mail trocado, o "esqueci a senha" daria a conta a ele —,
+       * nem quem tem perfil de painel, que é assunto do admin da igreja.
+       */
+      // (quem é admin de uma igreja e admin de evento em outra, sobre as
+      // pessoas desta, também entra aqui)
+      const comoAdminDeEvento =
+        requesterId !== id &&
+        !requesterIsSuperAdmin &&
+        !(
+          requesterIsAdmin &&
+          (await this.alcancaComoAdminDaIgreja(requester, id))
+        ) &&
+        (await this.alcancaComoAdminDeEvento(requesterId, id));
+      if (comoAdminDeEvento) {
+        const deIgreja = await this.prisma.userChurchRole.count({
+          where: { userId: id },
+        });
+        if (deIgreja || SUPER_ADMIN_ROLES.includes(userExists.role as Role)) {
+          throw new ForbiddenException(
+            'Quem tem perfil de painel só é editado pelo admin da igreja',
+          );
+        }
+        if (mudaAcesso(data, userExists)) {
+          throw new ForbiddenException(
+            'O e-mail e o CPF só são trocados pelo admin da igreja',
+          );
+        }
+      }
+
       // usuário comum só edita o próprio cadastro
-      if (!requesterIsAdmin && requesterId !== id) {
+      if (!requesterIsAdmin && requesterId !== id && !comoAdminDeEvento) {
         throw new ForbiddenException('Você só pode editar o seu cadastro');
       }
 
       // e só pelo perfil (`PUT /users/me`): por esta rota ele trocaria o CPF de
       // acesso ou o e-mail de recuperação sem confirmar a senha atual
-      if (!requesterIsAdmin && !opcoes.peloPerfil) {
+      if (!requesterIsAdmin && !opcoes.peloPerfil && !comoAdminDeEvento) {
         throw new ForbiddenException(
           'Para editar o seu cadastro, use a tela de perfil',
         );
@@ -648,7 +753,7 @@ export class UserService {
 
       // só admin altera permissão — para os demais o campo é ignorado,
       // já que o formulário de perfil devolve o usuário inteiro no payload
-      if (!requesterIsAdmin) {
+      if (!requesterIsAdmin || comoAdminDeEvento) {
         delete data.role;
         delete data.churchRoles;
       } else {
@@ -1006,7 +1111,16 @@ export class UserService {
       requesterId && requesterId !== userId
         ? await this.getRequester(requesterId)
         : null;
-    const churchIds = requester ? tenantChurchIds(requester) : null;
+    // as igrejas do perfil e as dos eventos de que é admin
+    const churchIds =
+      requester && !isSuperAdmin(requester)
+        ? [
+            ...(tenantChurchIds(requester) ?? []),
+            ...(
+              await alcanceDoAdminDeEvento(this.prisma, requesterId as string)
+            ).churchIds,
+          ]
+        : null;
     const daIgreja = churchIds
       ? { event: { churchId: { in: churchIds } } }
       : {};

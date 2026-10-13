@@ -201,6 +201,14 @@ export function userChurchScope(
   const churchIds = tenantChurchIds(requester, roles);
   if (churchIds === null) return {};
 
+  return pessoasDasIgrejas(churchIds);
+}
+
+/**
+ * As pessoas que estas igrejas alcançam — a regra de `userChurchScope`, para
+ * quando as igrejas não vêm do perfil (o admin de evento, por exemplo).
+ */
+export function pessoasDasIgrejas(churchIds: string[]) {
   return {
     OR: [
       { churchRoles: { some: { churchId: { in: churchIds } } } },

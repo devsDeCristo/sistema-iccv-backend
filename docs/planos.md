@@ -62,7 +62,7 @@ Para quem trabalha na igreja: `ADMIN_AREA_ROLES` + `ChurchTenantGuard` (admin e 
 
 ## Sessão
 
-`/auth/validate` e `/auth/admin/validate` devolvem em cada vínculo `church.modulos` (os módulos do plano da igreja), e em cada `eventTreasurers` os `modulos` da igreja do evento — o menu do tesoureiro(a) de evento segue o plano dela. A tela renova a sessão a cada navegação no painel: trocar o plano vale na navegação seguinte de quem já está logado.
+`/auth/validate` e `/auth/admin/validate` devolvem em cada vínculo `church.modulos` (os módulos do plano da igreja), e em cada `eventTreasurers` e `eventAdmins` os `modulos` da igreja do evento — o menu do tesoureiro(a) e do admin de evento segue o plano dela. A tela renova a sessão a cada navegação no painel: trocar o plano vale na navegação seguinte de quem já está logado.
 
 ## Migration
 

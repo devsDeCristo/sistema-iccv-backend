@@ -39,6 +39,7 @@ import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
 import { AceitaTesoureiroDoEvento } from 'src/auth/tesoureiro-do-evento';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -51,6 +52,8 @@ import { AceitaTesoureiroDoEvento } from 'src/auth/tesoureiro-do-evento';
  * (`@AceitaTesoureiroDoEvento()`); a entrega de produtos é da aba Pedidos,
  * que ele não vê.
  */
+// o admin deste evento vale como admin da igreja aqui
+@AceitaAdminDoEvento()
 @Controller()
 export class PaymentController {
   constructor(
@@ -160,7 +163,11 @@ export class PaymentController {
     @Param('idUser') userId: string,
     @Req() req: any,
   ) {
-    await this.paymentService.assertCanSeePayments(req.user?.userId, userId);
+    await this.paymentService.assertCanSeePayments(
+      req.user?.userId,
+      userId,
+      eventId,
+    );
     return this.paymentService.findPaymentsByUser(userId, eventId);
   }
 

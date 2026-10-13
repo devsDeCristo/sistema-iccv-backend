@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma';
 import { TeamService } from '../team/team.service';
 import { Role } from '../auth/roles';
 import { isSuperAdmin, perfilNaIgreja, SELECT_TENANT } from '../auth/tenant';
+import { adminDoEvento } from '../auth/admin-do-evento';
 import { quadranteAtivo } from '../event/event-quadrante';
 import { prepararImagens } from '../pdf/imagens';
 import { novaPagina, prepararNavegador } from '../pdf/navegador';
@@ -110,7 +111,8 @@ export class QuadranteService {
 
     if (
       isSuperAdmin(requester) ||
-      perfilNaIgreja(requester, event.churchId) === Role.ADMIN
+      perfilNaIgreja(requester, event.churchId) === Role.ADMIN ||
+      (await adminDoEvento(this.prisma, requesterId, eventId))
     ) {
       return;
     }

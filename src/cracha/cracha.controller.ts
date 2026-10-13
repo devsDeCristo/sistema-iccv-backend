@@ -20,6 +20,7 @@ import { naFilaDaRequisicao } from 'src/pdf/fila';
 import { ChurchModule } from '@prisma/client';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
+import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
 /**
  * Os mesmos perfis que abrem a lista de inscritos do evento — é dela que saem
@@ -31,6 +32,8 @@ import { ModuloGuard } from 'src/planos/modulo.guard';
 @UseGuards(JwtAuthGuard, RolesGuard, EventTenantGuard, ModuloGuard)
 // fora do plano da igreja, o painel deste módulo recusa (ver `ModuloGuard`)
 @Modulo(ChurchModule.EVENTS)
+// o admin deste evento vale como admin da igreja aqui
+@AceitaAdminDoEvento()
 @Controller('events/:idEvent/crachas')
 export class CrachaController {
   constructor(private readonly crachaService: CrachaService) {}

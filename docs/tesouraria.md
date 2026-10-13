@@ -34,7 +34,7 @@ O perfil da igreja que cuida do caixa se chamava "Financeiro" e agora é **Tesou
 | `PUT /events/:idEvent/tesoureiros/:userId`    | `ADMIN_ROLES` da igreja do evento      | dá o vínculo ou troca o tipo (`{ kind }`); recusa (400) quem já é admin ou tesouraria da igreja do evento |
 | `DELETE /events/:idEvent/tesoureiros/:userId` | `ADMIN_ROLES` da igreja do evento      | tira o vínculo                                                                                            |
 
-O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela busca de Membros (`GET /churches/:churchId/membros/busca`). O log de auditoria chama a tabela de "Tesoureiro(a) do evento".
+O módulo do plano é o de Eventos (`ModuloGuard`). A pessoa se escolhe pela busca de Membros (`GET /churches/:churchId/membros/busca`). O log de auditoria chama a tabela de "Tesoureiro(a) do evento". Os tesoureiros também se definem no cadastro e na edição do evento (campo `tesoureiros`, ver "Equipe do evento" em `docs/eventos.md`), e podem ser qualquer usuário do sistema. O admin de evento não alcança estas rotas (nem a Tesouraria).
 
 ## Rotas (`/churches/:churchId/tesouraria`)
 

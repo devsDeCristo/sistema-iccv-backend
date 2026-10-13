@@ -116,6 +116,23 @@ model EventTreasurer {
   @@map("event_treasurers")
 }
 
+/// Admin de evento: administra um evento (tudo nele, menos apagar) e edita o
+/// perfil dos membros da igreja dele, sem ser admin da igreja. Não vê a
+/// tesouraria. Como o tesoureiro(a) de evento, não muda o perfil da pessoa.
+model EventAdmin {
+  eventId     String
+  userId      String
+  createdAt   DateTime @default(now())
+  /// Quem deu o vínculo (o admin da igreja do evento)
+  createdById String?
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, userId])
+  @@index([userId])
+  @@map("event_admins")
+}
+
 enum EventTreasurerKind {
   BASICO
   COMPLETO
@@ -192,6 +209,7 @@ model User {
   /// Eventos em que a pessoa é tesoureira sem ser admin nem tesouraria da
   /// igreja (ver `EventTreasurer`).
   eventTreasurers    EventTreasurer[]
+  eventAdmins        EventAdmin[]
   /// Igrejas em que esta pessoa é o líder espiritual. Ver
   /// `Church.spiritualLeaderId`.
   ledChurches        Church[]           @relation("ChurchLeader")
@@ -383,6 +401,7 @@ model Event {
   news       News[]
   products   EventProduct[]
   treasurers EventTreasurer[]
+  admins     EventAdmin[]
   /// A tesouraria do evento, quando criada (Tesouraria › Eventos)
   treasury   Treasury?
 
