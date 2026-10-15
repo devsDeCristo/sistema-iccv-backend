@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Query,
@@ -28,7 +29,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_ROLES, SUPER_ADMIN_ROLES } from 'src/auth/roles';
+import { BloquearUsuarioDto } from './dto/bloquear-usuario.dto';
 import { EventService } from 'src/event/event.service';
 import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
 
@@ -163,6 +165,28 @@ export class UserController {
     @Req() req: any,
   ) {
     return this.userService.atualizarPermissoesEmMassa(req.user.userId, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Bloqueia a conta: sem login e com as sessões derrubadas',
+  })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...SUPER_ADMIN_ROLES)
+  @Put(':id/block')
+  async bloquear(
+    @Param('id') id: string,
+    @Body() dto: BloquearUsuarioDto,
+    @Req() req: any,
+  ) {
+    return this.userService.bloquear(id, dto.reason, req.user.userId);
+  }
+
+  @ApiOperation({ summary: 'Desbloqueia a conta' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...SUPER_ADMIN_ROLES)
+  @Delete(':id/block')
+  async desbloquear(@Param('id') id: string, @Req() req: any) {
+    return this.userService.desbloquear(id, req.user.userId);
   }
 
   @ApiOperation({ summary: 'Edit user' })

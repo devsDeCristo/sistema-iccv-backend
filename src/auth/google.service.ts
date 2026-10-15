@@ -23,6 +23,7 @@ import { perfilEfetivo } from './tenant';
 import { BCRYPT_ROUNDS, conferirSenhaAtual } from './senha';
 import { mascararEmail } from 'src/user/acesso';
 import * as bcrypt from 'bcrypt';
+import { contaBloqueadaNoLogin } from './bloqueio';
 import { randomInt } from 'crypto';
 
 /**
@@ -92,6 +93,18 @@ export class GoogleService {
 
     const user = await this.usersService.findByDocument(vinculo.user.cpf);
 
+    if (user.block) {
+      await this.authService.registrarTentativa({
+        document: conta.email,
+        userId: user.id,
+        success: false,
+        reason: LoginFailureReason.BLOCKED,
+        method: LoginMethod.GOOGLE,
+        contexto,
+      });
+      throw contaBloqueadaNoLogin();
+    }
+
     await this.authService.registrarTentativa({
       document: conta.email,
       userId: user.id,
@@ -101,7 +114,7 @@ export class GoogleService {
     });
 
     // o mesmo formato do login por senha: sem o hash e com o perfil efetivo
-    const { password: _hash, ...semSenha } = user;
+    const { password: _hash, block: _bloqueio, ...semSenha } = user;
     return this.authService.login({ ...semSenha, role: perfilEfetivo(user) });
   }
 

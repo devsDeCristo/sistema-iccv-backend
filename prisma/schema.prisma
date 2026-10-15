@@ -233,6 +233,10 @@ model User {
   identities         UserIdentity[]
   termsAcceptances   TermsAcceptance[]
   termsPublished     TermsDocument[]    @relation("TermsPublisher")
+  /// Bloqueio da conta, quando houver — ver `UserBlock`
+  block              UserBlock?         @relation("UserBlocked")
+  /// Bloqueios que esta pessoa aplicou
+  blocksApplied      UserBlock[]        @relation("UserBlocker")
   /// Os lançamentos ligados a esta pessoa (dízimos, ofertas)
   financialEntries   FinancialEntry[]
   /// O valor do dízimo combinado com a pessoa, na igreja de que é membro. Na
@@ -379,6 +383,28 @@ enum LoginFailureReason {
   USER_NOT_FOUND
   /// O usuário existe e a senha não confere
   WRONG_PASSWORD
+  /// Senha (ou conta Google) certa, mas a conta está bloqueada (`UserBlock`)
+  BLOCKED
+}
+
+/// Conta bloqueada pelo super admin: não entra no sistema (senha nem Google) e
+/// as sessões abertas caem na próxima requisição. Vale até alguém desbloquear,
+/// que apaga a linha — o histórico fica no log de auditoria.
+///
+/// Tabela à parte, e não colunas em `User`, de propósito: o usuário vem
+/// inteiro em muitas consultas (`include: { user: true }`) que o admin da
+/// igreja lê, e o motivo é só do super admin.
+model UserBlock {
+  userId      String   @id
+  user        User     @relation("UserBlocked", fields: [userId], references: [id], onDelete: Cascade)
+  /// Por que a conta foi bloqueada. Interno: a pessoa vê só um aviso genérico
+  reason      String
+  blockedAt   DateTime @default(now())
+  /// Quem bloqueou. `SetNull`: apagar essa conta não desbloqueia ninguém
+  blockedById String?
+  blockedBy   User?    @relation("UserBlocker", fields: [blockedById], references: [id], onDelete: SetNull)
+
+  @@map("user_blocks")
 }
 
 model Event {

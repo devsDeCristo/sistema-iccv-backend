@@ -18,6 +18,7 @@ import {
   temVinculoDeAdminDeEvento,
 } from 'src/auth/admin-do-evento';
 import { ROLES_KEY } from './roles.decorator';
+import { contaBloqueadaNaSessao } from 'src/auth/bloqueio';
 
 /**
  * Libera a rota apenas para os perfis declarados em `@Roles(...)`.
@@ -55,12 +56,16 @@ export class RolesGuard implements CanActivate {
 
     const pessoa = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: SELECT_TENANT,
+      // o bloqueio vem na mesma busca do perfil: é aqui que as rotas do painel
+      // derrubam quem foi bloqueado, sem consulta a mais por requisição
+      select: { ...SELECT_TENANT, block: { select: { userId: true } } },
     });
 
     if (!pessoa) {
       throw new UnauthorizedException('Usuário não encontrado');
     }
+
+    if (pessoa.block) throw contaBloqueadaNaSessao();
 
     const user = { role: perfilEfetivo(pessoa) };
 

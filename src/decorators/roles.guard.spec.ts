@@ -59,6 +59,18 @@ function montar(
 }
 
 describe('RolesGuard', () => {
+  it('conta bloqueada cai com 401 e o código do bloqueio, mesmo sendo super admin', async () => {
+    const { guard, context } = montar({
+      role: Role.SUPER_ADMIN,
+      churchRoles: [],
+      block: { userId: 'u1' },
+    });
+
+    const erro = await guard.canActivate(context).catch((e) => e);
+    expect(erro.getStatus()).toBe(401);
+    expect(erro.getResponse()).toMatchObject({ code: 'CONTA_BLOQUEADA' });
+  });
+
   it('admin gravado sem vínculo que valha é barrado', async () => {
     const { guard, context } = montar({ role: Role.ADMIN, churchRoles: [] });
 

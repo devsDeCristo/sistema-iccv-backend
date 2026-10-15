@@ -70,6 +70,7 @@ import {
   podeVerEventoEmTeste,
 } from './event-visibility';
 import { exigeAceiteDeTermo, idadeDoTermo } from './event-terms';
+import { contaBloqueadaNaSessao } from 'src/auth/bloqueio';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
 import {
@@ -612,7 +613,15 @@ export class EventService {
     const [user, event] = await Promise.all([
       tx.user.findUnique({
         where: { id: userId },
-        select: { id: true, fullName: true, email: true, birthday: true },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          birthday: true,
+          // na mesma busca: quem se inscreve sozinho com a conta bloqueada é
+          // barrado aqui, sem esperar a próxima troca de tela
+          block: { select: { userId: true } },
+        },
       }),
       tx.event.findUnique({
         where: { id: eventId },
@@ -629,6 +638,9 @@ export class EventService {
 
     if (!user) throw new NotFoundException('Usuario não encontrado');
     if (!event) throw new NotFoundException('Evento não encontrado');
+    // só quem se inscreve sozinho: o admin inscrevendo a pessoa pelo painel
+    // não usa a sessão dela, e o bloqueio não mexe em inscrição
+    if (respeitarJanela && user.block) throw contaBloqueadaNaSessao();
 
     // Elegibilidade de menor de idade é fixada na idade que o participante
     // terá na data do evento, não na data em que se inscreve — quem se

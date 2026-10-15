@@ -87,7 +87,8 @@ export class CheckinGateway implements OnGatewayConnection {
     const [requester, event] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
-        select: SELECT_TENANT,
+        // o bloqueio vem na mesma busca: conta bloqueada não entra na sala
+        select: { ...SELECT_TENANT, block: { select: { userId: true } } },
       }),
       this.prisma.event.findUnique({
         where: { id: eventId },
@@ -95,7 +96,7 @@ export class CheckinGateway implements OnGatewayConnection {
       }),
     ]);
 
-    if (!requester || !event) return { joined: false };
+    if (!requester || !event || requester.block) return { joined: false };
 
     // check-in é trabalho de admin: a tesouraria e o inscrito não entram, e o
     // admin só entra na sala de evento de igreja que ele administra

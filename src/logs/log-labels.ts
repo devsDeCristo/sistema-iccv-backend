@@ -43,6 +43,7 @@ export const MODEL_LABELS: Record<string, string> = {
   UserChurchRole: 'Vínculo com igreja',
   EventTreasurer: 'Tesoureiro(a) do evento',
   EventAdmin: 'Admin do evento',
+  UserBlock: 'Bloqueio de conta',
 };
 
 /**
@@ -108,6 +109,8 @@ export const OPERATION_LABELS: Record<string, string> = {
   'POST /users': 'Cadastro de pessoa',
   'PUT /users/:id': 'Edição de cadastro',
   'POST /users/:id/profile-photo': 'Troca de foto do perfil',
+  'PUT /users/:id/block': 'Bloqueio de conta',
+  'DELETE /users/:id/block': 'Desbloqueio de conta',
 
   // Senha
   'POST /auth/password/forgot': 'Pedido de redefinição de senha',

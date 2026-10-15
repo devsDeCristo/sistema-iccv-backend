@@ -52,6 +52,7 @@ import {
   mudaAcesso,
 } from './acesso';
 import { SELECT_MODULOS } from 'src/planos/modulos';
+import { podeBloquear } from 'src/auth/bloqueio';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -303,6 +304,17 @@ export class UserService {
         role: 'asc',
       },
       include: {
+        // o bloqueio, com motivo e autor, é só do super admin: o admin da
+        // igreja não bloqueia nem lê o motivo
+        block: isSuperAdmin(requester)
+          ? {
+              select: {
+                reason: true,
+                blockedAt: true,
+                blockedBy: { select: { id: true, fullName: true } },
+              },
+            }
+          : false,
         // os vínculos de painel: é o que diferencia um admin do outro na lista
         // do super admin, que enxerga os de todas as igrejas
         churchRoles: {
@@ -362,6 +374,9 @@ export class UserService {
           where: VINCULO_VALE,
           select: { role: true, church: { select: { id: true, name: true } } },
         },
+        // na mesma busca, e não numa a mais: o login confere o bloqueio por
+        // aqui (só os dois logins usam este método)
+        block: { select: { userId: true } },
       },
     });
   }
@@ -370,12 +385,22 @@ export class UserService {
    * @param requesterId quem pediu o cadastro. Usuário comum só lê o próprio;
    * o painel lê quem estiver na sua igreja.
    */
-  async findOne(id: string, requesterId?: string) {
+  async findOne(
+    id: string,
+    requesterId?: string,
+    /**
+     * Traz `block` junto, na mesma busca: é por onde o `/auth/validate`
+     * confere o bloqueio sem consulta a mais. Fora dele não vem — o cadastro
+     * que o painel lê não conta que a pessoa está bloqueada.
+     */
+    { comBloqueio = false } = {},
+  ) {
     await this.assertCanReachUser(requesterId, id);
 
     const user = await this.prisma.user.findFirst({
       where: { id },
       include: {
+        ...(comBloqueio ? { block: { select: { userId: true } } } : {}),
         // o painel precisa saber em quais igrejas a pessoa trabalha. A
         // situação vai junto: a sessão (`/auth/validate`) descarta as
         // inativas, e a tela de permissões mostra todas. Os módulos do plano
@@ -909,6 +934,48 @@ export class UserService {
       userExists.email
     ) {
       await this.avisaTrocaDeEmail(userExists, data.email, requesterId);
+    }
+  }
+
+  /**
+   * Bloqueia a conta: ela não entra mais no sistema, e as sessões abertas caem
+   * na próxima requisição (`JwtStrategy`). Bloquear de novo só troca o motivo.
+   * A recusa não diz por quê — o motivo contaria o perfil da pessoa.
+   */
+  async bloquear(alvoId: string, reason: string, requesterId: string) {
+    await this.assertPodeBloquear(alvoId, requesterId);
+
+    await this.prisma.userBlock.upsert({
+      where: { userId: alvoId },
+      create: { userId: alvoId, reason, blockedById: requesterId },
+      update: { reason, blockedById: requesterId, blockedAt: new Date() },
+    });
+
+    return { message: 'Conta bloqueada' };
+  }
+
+  /** Desbloqueia: a pessoa volta a entrar. O histórico fica na auditoria. */
+  async desbloquear(alvoId: string, requesterId: string) {
+    await this.assertPodeBloquear(alvoId, requesterId);
+
+    await this.prisma.userBlock.deleteMany({ where: { userId: alvoId } });
+
+    return { message: 'Conta desbloqueada' };
+  }
+
+  private async assertPodeBloquear(alvoId: string, requesterId: string) {
+    const [quemPede, alvo] = await Promise.all(
+      [requesterId, alvoId].map((id) =>
+        this.prisma.user.findUnique({
+          where: { id },
+          select: { id: true, role: true },
+        }),
+      ),
+    );
+
+    if (!alvo) throw new NotFoundException('Usuário não encontrado');
+    if (!quemPede || !podeBloquear(quemPede, alvo)) {
+      throw new ForbiddenException('Não é possível bloquear esta pessoa');
     }
   }
 

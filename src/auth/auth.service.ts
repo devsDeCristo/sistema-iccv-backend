@@ -23,6 +23,7 @@ import {
   situacaoDoLogin,
 } from './protecao-de-login';
 import { modulosDa } from 'src/planos/modulos';
+import { contaBloqueadaNaSessao, contaBloqueadaNoLogin } from './bloqueio';
 
 /** De onde veio a tentativa. O controller extrai da requisição. */
 export type ContextoDeLogin = {
@@ -56,9 +57,18 @@ export class AuthService {
   ) {}
 
   async validateUserGuardRouter(user: any, test: string): Promise<any> {
-    const userConsult = await this.usersService.findOne(user.userId);
+    const userConsult = await this.usersService.findOne(
+      user.userId,
+      undefined,
+      { comBloqueio: true },
+    );
     if (!userConsult) {
       throw new NotFoundException('Usuário não encontrado');
+    }
+    // o front confere a sessão por aqui a cada troca de tela: é onde a área do
+    // participante derruba quem foi bloqueado, sem consulta a mais
+    if ((userConsult as { block?: unknown }).block) {
+      throw contaBloqueadaNaSessao();
     }
     // o painel usa os vínculos para saber em quais igrejas a pessoa trabalha;
     // igreja inativa não dá painel (ver `VINCULO_VALE`)
@@ -144,6 +154,19 @@ export class AuthService {
     }
 
     if (await bcrypt.compare(password, user.password)) {
+      // depois da senha, e não antes: conferir o bloqueio primeiro contaria a
+      // qualquer um, com uma senha qualquer, que este CPF está bloqueado
+      if (user.block) {
+        await this.registrarTentativa({
+          document,
+          userId: user.id,
+          success: false,
+          reason: LoginFailureReason.BLOCKED,
+          contexto,
+        });
+        throw contaBloqueadaNoLogin();
+      }
+
       await this.registrarTentativa({
         document,
         userId: user.id,
@@ -154,7 +177,7 @@ export class AuthService {
       // Remove a senha antes de retornar. O perfil é o efetivo, e não o
       // gravado: é por ele que o front decide abrir o painel, e o gravado pode
       // estar atrasado em relação aos vínculos (igreja desativada)
-      const { password: _, ...userWithoutPassword } = user;
+      const { password: _, block: _bloqueio, ...userWithoutPassword } = user;
       return { ...userWithoutPassword, role: perfilEfetivo(user) };
     }
 

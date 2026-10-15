@@ -13,6 +13,8 @@ import { Role } from './roles';
 async function logar(
   role: number,
   vinculos: { status: string; role: number }[],
+  { bloqueada = false, senhaDigitada = 'senha-certa' } = {},
+  tentativas: any[] = [],
 ) {
   const senha = 'senha-certa';
   const gravado = {
@@ -32,6 +34,8 @@ async function logar(
         const fora = args.include?.churchRoles?.where?.church?.status?.not;
         return {
           ...gravado,
+          // o bloqueio vem na mesma busca (`findByDocument`)
+          block: bloqueada ? { userId: 'u1' } : null,
           churchRoles: gravado.churchRoles.filter(
             (vinculo) => vinculo.church.status !== fora,
           ),
@@ -41,13 +45,13 @@ async function logar(
     loginAttempt: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
-      create: jest.fn(),
+      create: jest.fn(async ({ data }: any) => tentativas.push(data)),
     },
   };
 
   const users = new UserService(prisma as any, {} as any, {} as any);
   const auth = new AuthService(users, {} as any, prisma as any);
-  return auth.validateUser('123', senha);
+  return auth.validateUser('123', senhaDigitada);
 }
 
 describe('AuthService — login de quem administra igreja', () => {
@@ -77,5 +81,35 @@ describe('AuthService — login de quem administra igreja', () => {
   it('super admin não depende de igreja', async () => {
     const user = await logar(Role.SUPER_ADMIN, []);
     expect(user.role).toBe(Role.SUPER_ADMIN);
+  });
+});
+
+describe('AuthService — conta bloqueada', () => {
+  it('senha certa: recusa com o aviso genérico e registra BLOCKED', async () => {
+    const tentativas: any[] = [];
+    const erro = await logar(Role.USER, [], { bloqueada: true }, tentativas)
+      .then(() => null)
+      .catch((e) => e);
+
+    expect(erro.getStatus()).toBe(403);
+    expect(erro.getResponse()).toEqual({
+      message: 'Sua conta está bloqueada. Fale com a organização.',
+      code: 'CONTA_BLOQUEADA',
+    });
+    expect(tentativas).toEqual([
+      expect.objectContaining({ success: false, reason: 'BLOCKED' }),
+    ]);
+  });
+
+  it('senha errada: não conta que a conta está bloqueada', async () => {
+    const erro = await logar(Role.USER, [], {
+      bloqueada: true,
+      senhaDigitada: 'chute',
+    })
+      .then(() => null)
+      .catch((e) => e);
+
+    expect(erro.getStatus()).toBe(401);
+    expect(JSON.stringify(erro.getResponse())).not.toContain('bloqueada');
   });
 });

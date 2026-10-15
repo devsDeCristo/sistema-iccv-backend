@@ -124,6 +124,49 @@ pessoa: guards, recorte por igreja e sessão continuam iguais.
 Arquivos: `src/auth/google.ts`, `src/auth/google.service.ts`,
 `src/auth/dto/google.dto.ts`, `src/auth/google.spec.ts`.
 
+## Bloqueio de conta (`src/auth/bloqueio.ts`)
+
+O super admin (ou dev) bloqueia uma conta no sistema inteiro, até alguém
+desbloquear. A conta bloqueada não entra e as sessões abertas dela caem.
+
+- **Onde mora:** tabela `UserBlock` (`user_blocks`), uma linha por conta
+  bloqueada: `reason` (motivo, obrigatório), `blockedAt` e `blockedById`
+  (quem bloqueou; `SetNull` se essa conta for apagada). Desbloquear apaga a
+  linha; o histórico fica na auditoria (`UserBlock` upsert/deleteMany, com a
+  pessoa em `targetUserIds`). Tabela à parte, e não colunas em `User`, de
+  propósito: o usuário vem inteiro em muitas consultas que o admin da igreja
+  lê, e o motivo é só do super admin.
+- **Rotas:** `PUT /users/:id/block` (`{ reason }`, 3 a 500 caracteres) e
+  `DELETE /users/:id/block`, com `@Roles(...SUPER_ADMIN_ROLES)`. Regras em
+  `podeBloquear`: ninguém bloqueia a si mesmo, e conta de super admin ou dev
+  só um dev bloqueia (vale o maior perfil). A recusa é genérica — "Não é
+  possível bloquear esta pessoa" —, sem contar o perfil de ninguém.
+- **Login (senha e Google):** o bloqueio vem na mesma busca do cadastro
+  (`findByDocument`), e a conferência vem **depois** da senha certa (ou da
+  conta Google reconhecida). Antes dela, qualquer um com uma senha qualquer
+  descobriria que o CPF está bloqueado. Bloqueada: `403` com
+  `{ message: "Sua conta está bloqueada. Fale com a organização.", code:
+  "CONTA_BLOQUEADA" }` e a tentativa gravada como falha `BLOCKED` em
+  `LoginAttempt` (não conta para o bloqueio temporário por senha errada).
+- **Sessão aberta:** nenhuma consulta só para isso. O bloqueio vem junto
+  (`block: { select: { userId: true } }`) nas buscas que já leem quem pede, e
+  derruba a sessão com `401` e o mesmo corpo:
+  - `RolesGuard` — toda rota com `@Roles` (o painel): cai na hora;
+  - `/auth/validate` e `/auth/admin/validate` (`findOne` com `comBloqueio`),
+    que o front chama a cada troca de tela: a área do participante cai na
+    próxima navegação;
+  - a inscrição feita pela própria pessoa (`_registerUserInEventTx`) — o
+    admin inscrevendo alguém pelo painel não é barrado;
+  - a entrada na sala do check-in (`checkin:join`).
+  Rota que só confere o token e não lê a pessoa (ex.: `/users/me`, Minhas
+  Inscrições) ainda responde até a próxima troca de tela. O token não é
+  conferido no banco a cada requisição, de propósito: seria uma consulta a
+  mais em todas elas.
+- **O que não muda:** inscrições, pagamentos e vínculos da pessoa ficam como
+  estão. Esqueci a senha continua funcionando, mas não dá sessão.
+- **Listagem:** `GET /users` traz `block` (`reason`, `blockedAt`,
+  `blockedBy { id, fullName }`) só para o super admin.
+
 ## Validação de sessão
 
 | Método | Rota | Guard | Retorna |
