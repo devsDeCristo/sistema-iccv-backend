@@ -53,6 +53,7 @@ import {
 } from './acesso';
 import { SELECT_MODULOS } from 'src/planos/modulos';
 import { podeBloquear } from 'src/auth/bloqueio';
+import { historicoDaConta } from './exclusao';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -961,6 +962,58 @@ export class UserService {
     await this.prisma.userBlock.deleteMany({ where: { userId: alvoId } });
 
     return { message: 'Conta desbloqueada' };
+  }
+
+  /**
+   * Exclui a conta de vez — só o dev, e nunca a própria. Só conta sem
+   * histórico: inscrição, pagamento, check-in e afins são registro dos eventos
+   * e da tesouraria, e apagá-los junto sumiria com dinheiro e presença. Com
+   * histórico a recusa diz o que a conta tem.
+   *
+   * O resto vai junto pelo próprio banco: vínculos de igreja e de evento,
+   * contas Google, códigos, aceites de termo e bloqueio (`Cascade`); onde a
+   * pessoa só aparece como autora ou líder fica a referência vazia
+   * (`SetNull`). A auditoria registra a exclusão com o cadastro de antes.
+   */
+  async excluir(alvoId: string, requesterId: string) {
+    if (alvoId === requesterId) {
+      throw new ForbiddenException('Você não pode excluir a própria conta');
+    }
+
+    const alvo = await this.prisma.user.findUnique({
+      where: { id: alvoId },
+      select: {
+        id: true,
+        _count: {
+          select: {
+            events: true,
+            waitlists: true,
+            checkins: true,
+            bedrooms: true,
+            transports: true,
+            TeamOnUsers: true,
+            news: true,
+          },
+        },
+      },
+    });
+    if (!alvo) throw new NotFoundException('Usuário não encontrado');
+
+    // `Payment.userId` não tem relação no schema: conta à parte
+    const pagamentos = await this.prisma.payment.count({
+      where: { userId: alvoId },
+    });
+
+    const historico = historicoDaConta({ ...alvo._count, pagamentos });
+    if (historico.length) {
+      throw new ConflictException(
+        `Esta conta tem histórico e não pode ser excluída: ${historico.join(', ')}.`,
+      );
+    }
+
+    await this.prisma.user.delete({ where: { id: alvoId } });
+
+    return { message: 'Conta excluída' };
   }
 
   private async assertPodeBloquear(alvoId: string, requesterId: string) {

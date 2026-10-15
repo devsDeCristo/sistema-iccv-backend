@@ -229,6 +229,29 @@ Arquivos: `src/user/user.service.ts` (`atualizarPermissoesEmMassa`),
   só então leve `403`.
 - Mesma trava de conta Dev: só Dev troca a foto de um Dev.
 
+## Exclusão de conta (`DELETE /users/:id`)
+
+Só o **dev** (`@Roles(Role.DEV)`), qualquer conta menos a própria ("Você não
+pode excluir a própria conta").
+
+- **Só conta sem histórico:** inscrição, lugar na lista de espera, pagamento
+  (inclusive compra, contada por `Payment.userId`, que não tem relação no
+  schema), check-in, quarto, transporte, equipe ou notícia publicada impedem
+  a exclusão. A recusa é `409` e diz o que a conta tem, ex.: "Esta conta tem
+  histórico e não pode ser excluída: 2 inscrições, 1 pagamento." (frases em
+  `src/user/exclusao.ts`). Esse histórico é registro dos eventos e da
+  tesouraria; para tirar a pessoa sem apagá-lo, o caminho é o bloqueio
+  (`docs/autenticacao.md`).
+- **O que vai junto** (pelo banco): vínculos de igreja (`UserChurchRole`), de
+  tesoureiro(a) e admin de evento, contas Google (`UserIdentity`), códigos
+  (`UserToken`), aceites de termo e o bloqueio (`Cascade`). Onde a pessoa só
+  aparece como autora ou líder — tentativas de login, versões de termos,
+  lançamentos da tesouraria, líder de igreja, quem bloqueou alguém — a
+  referência fica vazia (`SetNull`).
+- **Auditoria:** a exclusão entra no log (`User` `delete`, operação "Exclusão
+  de conta"), com o cadastro de antes já redigido.
+- A foto de perfil no Storage não é apagada.
+
 ## Listagem (`GET /users`) e insights
 
 - Só `ADMIN_ROLES`. Filtra por `fullName`, `email`.

@@ -29,7 +29,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES, SUPER_ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_ROLES, Role, SUPER_ADMIN_ROLES } from 'src/auth/roles';
 import { BloquearUsuarioDto } from './dto/bloquear-usuario.dto';
 import { EventService } from 'src/event/event.service';
 import { AceitaAdminDoEvento } from 'src/auth/admin-do-evento';
@@ -187,6 +187,16 @@ export class UserController {
   @Delete(':id/block')
   async desbloquear(@Param('id') id: string, @Req() req: any) {
     return this.userService.desbloquear(id, req.user.userId);
+  }
+
+  @ApiOperation({
+    summary: 'Exclui a conta de vez (só dev, só conta sem histórico)',
+  })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.DEV)
+  @Delete(':id')
+  async excluir(@Param('id') id: string, @Req() req: any) {
+    return this.userService.excluir(id, req.user.userId);
   }
 
   @ApiOperation({ summary: 'Edit user' })

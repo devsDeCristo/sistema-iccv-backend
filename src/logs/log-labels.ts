@@ -111,6 +111,7 @@ export const OPERATION_LABELS: Record<string, string> = {
   'POST /users/:id/profile-photo': 'Troca de foto do perfil',
   'PUT /users/:id/block': 'Bloqueio de conta',
   'DELETE /users/:id/block': 'Desbloqueio de conta',
+  'DELETE /users/:id': 'Exclusão de conta',
 
   // Senha
   'POST /auth/password/forgot': 'Pedido de redefinição de senha',
