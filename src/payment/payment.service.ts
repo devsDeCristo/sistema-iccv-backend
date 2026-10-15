@@ -1333,6 +1333,9 @@ export class PaymentService {
                   select: {
                     status: true,
                     method: true,
+                    // o valor cobrado de fato (ingresso + produtos, com
+                    // desconto), que Minhas Inscrições mostra
+                    amount: true,
                     productItems: { select: SELECT_ITEM_DE_PRODUTO },
                   },
                 },
@@ -1405,6 +1408,7 @@ export class PaymentService {
           price: r.role.price,
           paymentStatus: r.payment?.status ?? 'WAITING',
           paymentMethod: r.payment?.method ?? null,
+          amount: r.payment?.amount ?? null,
           products: r.payment?.productItems ?? [],
         })),
       ),
