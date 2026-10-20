@@ -52,12 +52,14 @@ em minúsculas.
 
 ## O certificado
 
-A4 deitada, com cara de diploma: papel marfim, letra **Times New Roman** e
-moldura de duas linhas com um entrelaçado ondulado entre elas (guilhochê,
-quatro ondas defasadas) e ornamento nos quatro cantos (losango, volutas e uma
-folha apontando para dentro), tudo na cor do evento (`paletaDoEvento`, a mesma
-do quadrante). A moldura é desenhada uma vez por documento (`<symbol>`) e cada
-folha a reusa, para o PDF de muitos não crescer a cada página.
+A4 deitada, com cara de diploma: papel marfim, letra **Times New Roman** e uma
+moldura clássica e contida, na cor do evento (`paletaDoEvento`, a mesma do
+quadrante): filete fino por fora, o traço principal e filete fino por dentro,
+este com os cantos recortados em curva para dentro. Nos cantos, um losango
+pequeno dentro do recorte e um "L" duplo e fino logo para dentro; no meio do
+traço de cima e do de baixo, um losango entre dois pontos. A moldura é
+desenhada uma vez por documento (`<symbol>`) e cada folha a reusa, para o PDF
+de muitos não crescer a cada página.
 
 O Chrome do servidor (Linux) não tem a Times New Roman: lá entra a **Tinos**,
 desenhada com as mesmas medidas, embutida do Google Fonts (`embutirFonte`).

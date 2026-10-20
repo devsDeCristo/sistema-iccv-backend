@@ -93,95 +93,62 @@ export function qrEmSvg(texto: string): string {
 /** A folha, em mm: A4 deitada */
 const LARGURA = 297;
 const ALTURA = 210;
-/** Onde corre a faixa ondulada, a partir da borda da folha */
-const FAIXA = 12.5;
-/** Quanto do canto fica para o ornamento, sem onda por baixo */
-const CANTO = 27;
 /** O marfim da folha */
 const PAPEL = '#fffdf8';
+/** Os recuos da moldura, da borda da folha: filete de fora, traço, filete de dentro */
+const FORA = 8;
+const TRACO = 10;
+const DENTRO = 12.5;
+/** O raio do recorte do filete de dentro nos cantos */
+const RECORTE = 5;
 
 /**
- * Uma onda que corre por um lado da moldura, de `de` até `ate`, oscilando para
- * dentro e para fora da linha da faixa. Quatro delas, defasadas, se cruzam e
- * fazem o entrelaçado de diploma (guilhochê).
+ * O filete de dentro: um retângulo com os quatro cantos recortados em quarto
+ * de círculo para dentro, centrado no canto.
  */
-function onda(
-  de: [number, number],
-  ate: [number, number],
-  fase: number,
-  amplitude = 1.7,
-  comprimento = 6,
-): string {
-  const [dx, dy] = [ate[0] - de[0], ate[1] - de[1]];
-  const tamanho = Math.hypot(dx, dy);
-  const [nx, ny] = [-dy / tamanho, dx / tamanho];
-  const pontos: string[] = [];
-  for (let t = 0; t <= tamanho; t += 0.4) {
-    const desvio = amplitude * Math.sin((2 * Math.PI * t) / comprimento + fase);
-    pontos.push(
-      `${(de[0] + (dx * t) / tamanho + nx * desvio).toFixed(2)},${(
-        de[1] +
-        (dy * t) / tamanho +
-        ny * desvio
-      ).toFixed(2)}`,
-    );
-  }
-  return `M${pontos.join('L')}`;
+function fileteRecortado(): string {
+  const [x0, y0, x1, y1] = [DENTRO, DENTRO, LARGURA - DENTRO, ALTURA - DENTRO];
+  const r = RECORTE;
+  return [
+    `M${x0 + r},${y0} H${x1 - r}`,
+    `A${r},${r} 0 0 0 ${x1},${y0 + r} V${y1 - r}`,
+    `A${r},${r} 0 0 0 ${x1 - r},${y1} H${x0 + r}`,
+    `A${r},${r} 0 0 0 ${x0},${y1 - r} V${y0 + r}`,
+    `A${r},${r} 0 0 0 ${x0 + r},${y0} Z`,
+  ].join(' ');
 }
 
 /**
- * O ornamento de um canto, desenhado no de cima à esquerda: o losango no
- * cruzamento das faixas, as volutas que saem dele ao longo dos dois lados e a
- * folha que aponta para dentro da folha. Por baixo, um quadrado da cor do
- * papel interrompe as linhas internas, que terminam no ornamento em vez de
- * cruzá-lo. Os outros três são ele espelhado.
+ * O canto, desenhado no de cima à esquerda: o losango no centro do recorte e
+ * o "L" duplo, fino, logo para dentro. Os outros três são ele espelhado.
  */
-const ORNAMENTO_DO_CANTO = `
-  <rect x="8.4" y="8.4" width="23" height="23" class="fundo" />
-  <circle cx="${FAIXA}" cy="${FAIXA}" r="5.2" class="fino" />
-  <path d="M${FAIXA},${FAIXA - 3.4} L${FAIXA + 3.4},${FAIXA} L${FAIXA},${
-  FAIXA + 3.4
-} L${FAIXA - 3.4},${FAIXA} Z" class="cheio" />
-  <g class="voluta">
-    <path d="M17.7,12.5 C21,8.2 25.5,8.2 26.5,11.6 C27.3,14.6 24,16 22.6,13.9 C21.6,12.4 23,11.2 24,12" />
-    <path d="M12.5,17.7 C8.2,21 8.2,25.5 11.6,26.5 C14.6,27.3 16,24 13.9,22.6 C12.4,21.6 11.2,23 12,24" />
-    <path d="M16.3,16.3 C19.5,17.5 21,20 20.4,22.6 C19.9,24.6 17.6,24.4 17.8,22.6" />
-    <path d="M16.3,16.3 C17.5,19.5 20,21 22.6,20.4 C24.6,19.9 24.4,17.6 22.6,17.8" />
-  </g>
-  <path d="M18.5,18.5 Q25,21 29,29 Q21,25 18.5,18.5 Z" class="cheio" />
-  <circle cx="30.4" cy="30.4" r="0.9" class="cheio" />
+const CANTO_DA_MOLDURA = `
+  <path d="M${DENTRO},${DENTRO - 1.3} L${DENTRO + 1.3},${DENTRO} L${DENTRO},${
+  DENTRO + 1.3
+} L${DENTRO - 1.3},${DENTRO} Z" class="cheio" />
+  <path d="M17,34 V17 H34" class="fino" />
+  <path d="M18.6,26 V18.6 H26" class="fino" />
 `;
 
-/** A moldura inteira, uma vez por documento; cada folha a reusa (`<use>`) */
-function moldura(forte: string, media: string): string {
-  const [a, b] = [FAIXA, LARGURA - FAIXA];
-  const [c, d] = [FAIXA, ALTURA - FAIXA];
-  const lados: [[number, number], [number, number]][] = [
-    [
-      [a + CANTO - FAIXA, c],
-      [b - CANTO + FAIXA, c],
-    ],
-    [
-      [b, c + CANTO - FAIXA],
-      [b, d - CANTO + FAIXA],
-    ],
-    [
-      [b - CANTO + FAIXA, d],
-      [a + CANTO - FAIXA, d],
-    ],
-    [
-      [a, d - CANTO + FAIXA],
-      [a, c + CANTO - FAIXA],
-    ],
-  ];
-  const ondas = lados
-    .flatMap(([de, ate]) =>
-      [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2].map((fase) =>
-        onda(de, ate, fase),
-      ),
-    )
-    .join(' ');
+/** O meio do traço de cima (ou de baixo): o losango entre dois pontos */
+const MEIO = (y: number) => {
+  const x = LARGURA / 2;
+  return `
+    <rect x="${x - 8}" y="${y - 1.2}" width="16" height="2.4" class="papel" />
+    <path d="M${x},${y - 2} L${x + 2},${y} L${x},${y + 2} L${
+    x - 2
+  },${y} Z" class="cheio" />
+    <circle cx="${x - 5}" cy="${y}" r="0.55" class="cheio" />
+    <circle cx="${x + 5}" cy="${y}" r="0.55" class="cheio" />`;
+};
 
+/**
+ * A moldura, uma vez por documento; cada folha a reusa (`<use>`). Clássica e
+ * contida: filete fino por fora, o traço principal, filete fino por dentro com
+ * os cantos recortados em curva; nos cantos, um losango no recorte e um "L"
+ * duplo; no meio do traço de cima e do de baixo, um losango entre dois pontos.
+ */
+function moldura(forte: string, media: string): string {
   const retangulo = (recuo: number, classe: string) =>
     `<rect x="${recuo}" y="${recuo}" width="${LARGURA - 2 * recuo}" height="${
       ALTURA - 2 * recuo
@@ -193,7 +160,7 @@ function moldura(forte: string, media: string): string {
     `transform="translate(0 ${ALTURA}) scale(1 -1)"`,
     `transform="translate(${LARGURA} ${ALTURA}) scale(-1 -1)"`,
   ]
-    .map((t) => `<g ${t}>${ORNAMENTO_DO_CANTO}</g>`)
+    .map((t) => `<g ${t}>${CANTO_DA_MOLDURA}</g>`)
     .join('');
 
   return `
@@ -201,19 +168,18 @@ function moldura(forte: string, media: string): string {
       <defs>
         <symbol id="moldura" viewBox="0 0 ${LARGURA} ${ALTURA}">
           <style>
-            .grosso { fill: none; stroke: ${forte}; stroke-width: 1.1; }
+            .traco { fill: none; stroke: ${forte}; stroke-width: 0.75; }
+            .filete { fill: none; stroke: ${media}; stroke-width: 0.3; }
             .fino { fill: none; stroke: ${forte}; stroke-width: 0.3; }
-            .onda { fill: none; stroke: ${media}; stroke-width: 0.22; }
-            .voluta path { fill: none; stroke: ${forte}; stroke-width: 0.45; stroke-linecap: round; }
             .cheio { fill: ${forte}; }
-            .fundo { fill: ${PAPEL}; }
+            .papel { fill: ${PAPEL}; }
           </style>
-          ${retangulo(6, 'grosso')}
-          ${retangulo(8, 'fino')}
-          <path d="${ondas}" class="onda" />
-          ${retangulo(17, 'fino')}
-          ${retangulo(18.2, 'fino')}
+          ${retangulo(FORA, 'filete')}
+          ${retangulo(TRACO, 'traco')}
+          <path d="${fileteRecortado()}" class="filete" />
           ${cantos}
+          ${MEIO(TRACO)}
+          ${MEIO(ALTURA - TRACO)}
         </symbol>
       </defs>
     </svg>`;
