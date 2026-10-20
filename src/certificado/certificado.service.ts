@@ -279,9 +279,9 @@ export class CertificadoService {
   }
 
   /**
-   * A lista de presença: todos os inscritos, com o grupo e a hora de chegada
-   * de quem fez check-in (nula para quem não veio). Com mais de um grupo, a
-   * pessoa aparece no primeiro em ordem alfabética.
+   * A lista de presença: todos os inscritos, com o nome do crachá, o tipo de
+   * inscrição e o grupo (de cada inscrição, quando são mais de uma) e a hora
+   * de chegada de quem fez check-in (nula para quem não veio).
    */
   async presenca(eventId: string) {
     const [inscricoes, checkins] = await Promise.all([
@@ -289,9 +289,18 @@ export class CertificadoService {
         where: { eventId },
         select: {
           userId: true,
-          user: { select: { fullName: true } },
+          user: {
+            select: { fullName: true, badgeName: true, profilePhotoUrl: true },
+          },
           rolesRegistration: {
-            select: { role: { select: { group: { select: { name: true } } } } },
+            select: {
+              role: {
+                select: {
+                  description: true,
+                  group: { select: { name: true } },
+                },
+              },
+            },
           },
         },
         orderBy: { user: { fullName: 'asc' } },
@@ -308,13 +317,21 @@ export class CertificadoService {
 
     return inscricoes.map((inscricao) => {
       const chegada = chegou.get(inscricao.userId);
+      // quem está em mais de um grupo tem um tipo de inscrição em cada
+      const inscricoesDoUsuario = [...inscricao.rolesRegistration].sort(
+        (a, b) => a.role.group.name.localeCompare(b.role.group.name, 'pt-BR'),
+      );
       return {
         userId: inscricao.userId,
         nome: inscricao.user.fullName,
+        nomeNoCracha: inscricao.user.badgeName ?? null,
+        foto: inscricao.user.profilePhotoUrl ?? null,
+        tipo:
+          inscricoesDoUsuario.map((r) => r.role.description).join(', ') ||
+          'Sem inscrição',
         grupo:
-          inscricao.rolesRegistration
-            .map((r) => r.role.group.name)
-            .sort((a, b) => a.localeCompare(b, 'pt-BR'))[0] ?? 'Sem grupo',
+          inscricoesDoUsuario.map((r) => r.role.group.name).join(', ') ||
+          'Sem grupo',
         chegada: chegada ? horaDeChegada(chegada) : null,
       };
     });

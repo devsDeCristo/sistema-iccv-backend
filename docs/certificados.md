@@ -75,8 +75,9 @@ lido em UTC, como as datas do evento são gravadas.
 ## A lista de presença
 
 Na tela, não em PDF (`presenca`): todos os inscritos em ordem alfabética, com o
-grupo (com mais de um, o primeiro em ordem alfabética; sem nenhum, "Sem
-grupo") e `chegada` — "05/02 às 08:12" (hora da entrega do crachá, horário de
+`nomeNoCracha` (nulo quando a pessoa não definiu), a `foto` de perfil, o `tipo` de inscrição e o
+`grupo` (com mais de uma inscrição, todas, separadas por vírgula e na ordem
+dos grupos; sem nenhuma, "Sem inscrição"/"Sem grupo") e `chegada` — "05/02 às 08:12" (hora da entrega do crachá, horário de
 Brasília) ou nula para quem não veio. É dela que o painel gera os
 certificados, um a um ou os marcados.
 
