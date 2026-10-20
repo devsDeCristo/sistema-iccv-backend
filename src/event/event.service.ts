@@ -70,6 +70,7 @@ import {
   podeVerEventoEmTeste,
 } from './event-visibility';
 import { exigeAceiteDeTermo, idadeDoTermo } from './event-terms';
+import { certificadoParaGravar } from '../certificado/dto/configurar-certificado.dto';
 import { contaBloqueadaNaSessao } from 'src/auth/bloqueio';
 import { MailService } from 'src/mail/mail.service';
 import * as path from 'path';
@@ -1880,6 +1881,14 @@ export class EventService {
             data,
             requesterId,
           );
+          if (data.certificate) {
+            await tx.eventCertificate.create({
+              data: {
+                eventId: criado.id,
+                ...certificadoParaGravar(data.certificate),
+              },
+            });
+          }
           return criado;
         },
         { isolationLevel: 'Serializable' },
@@ -2883,9 +2892,18 @@ export class EventService {
 
     // interativa, e não no array acima: `deleteMany` seguido de escrita na
     // forma em array perde as escritas no middleware de auditoria
-    const avisosDaEquipe = await this.prisma.$transaction((tx) =>
-      this.gravarEquipe(tx, id, updateEvent, requesterId),
-    );
+    const avisosDaEquipe = await this.prisma.$transaction(async (tx) => {
+      // omitido, o certificado fica como está
+      if (updateEvent.certificate) {
+        const certificado = certificadoParaGravar(updateEvent.certificate);
+        await tx.eventCertificate.upsert({
+          where: { eventId: id },
+          create: { eventId: id, ...certificado },
+          update: certificado,
+        });
+      }
+      return this.gravarEquipe(tx, id, updateEvent, requesterId);
+    });
     this.avisarEquipe(id, avisosDaEquipe);
 
     return this.findOneClear(id);

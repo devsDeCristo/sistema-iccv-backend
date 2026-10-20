@@ -14,6 +14,7 @@ import {
   alcanceDoAdminDeEvento,
 } from 'src/auth/admin-do-evento';
 import {
+  CheckinStatus,
   CheckoutStatus,
   PaymentMethod,
   PaymentProvider,
@@ -45,6 +46,7 @@ import {
   reativarCompras,
 } from 'src/event/event-products';
 import { SELECT_MODULOS, cobraOnline } from 'src/planos/modulos';
+import { eventoTerminou } from 'src/certificado/certificado-regras';
 /**
  * Os estados que só se alcançam quando alguém declara, pela mão, que o
  * dinheiro chegou ou está a caminho: baixa direta e comprovante anexado.
@@ -1312,6 +1314,13 @@ export class PaymentService {
         // ou esconde tudo que fala de pagamento neste cartão. Sem vir daqui, a
         // tela teria que perguntar igreja por igreja para montar a lista.
         church: { select: SELECT_MODULOS },
+        // o certificado de participação: ligado, e a pessoa fez check-in
+        endDate: true,
+        certConfig: { select: { enabled: true } },
+        checkins: {
+          where: { userId, status: { not: CheckinStatus.PENDING } },
+          select: { id: true },
+        },
 
         users: {
           where: { userId },
@@ -1392,6 +1401,11 @@ export class PaymentService {
       data: event.data,
       // o nome antigo, para a tela: agora sai do plano da igreja
       modulePayment: cobraOnline(event.church),
+      /** 🔹 Dá para baixar o certificado: ligado, presente e evento terminado */
+      certificateAvailable:
+        !!event.certConfig?.enabled &&
+        event.checkins.length > 0 &&
+        eventoTerminou(event.endDate),
 
       /** 🔹 Liberação de menor de idade — NOT_REQUIRED quando não há inscrição do usuário neste evento */
       minorApprovalStatus:

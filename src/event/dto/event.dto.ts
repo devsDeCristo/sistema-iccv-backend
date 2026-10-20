@@ -5,7 +5,7 @@ import {
   EventType,
   MinorApprovalStatus,
 } from '@prisma/client';
-import { Transform, Type } from 'class-transformer';
+import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -24,6 +24,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { QUANTIDADE_MAXIMA_POR_ITEM } from '../event-products';
+import { ConfigurarCertificadoDto } from '../../certificado/dto/configurar-certificado.dto';
 
 /** Teto da equipe do evento (admins e tesoureiros): mais que isso é engano */
 const MAXIMO_DA_EQUIPE = 50;
@@ -358,6 +359,23 @@ export class EventDto {
   @ValidateNested({ each: true })
   @Type(() => TesoureiroDoEventoDto)
   tesoureiros?: TesoureiroDoEventoDto[];
+
+  @ApiProperty({
+    type: ConfigurarCertificadoDto,
+    required: false,
+    description:
+      'O certificado de participação: ligado, carga horária e quem assina. Omitido, nada muda. Fica em `event_certificates`, fora de `data` (que é público)',
+  })
+  @Transform(({ value }) => {
+    const certificado = deJson({ value });
+    return certificado && typeof certificado === 'object'
+      ? plainToInstance(ConfigurarCertificadoDto, certificado)
+      : certificado;
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ConfigurarCertificadoDto)
+  certificate?: ConfigurarCertificadoDto;
   @ApiProperty({
     example: 'CURSILHO',
     description: 'Tipo do evento',

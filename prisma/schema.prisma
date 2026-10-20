@@ -408,22 +408,22 @@ model UserBlock {
 }
 
 model Event {
-  id         String           @id @default(uuid())
+  id         String            @id @default(uuid())
   name       String
   startDate  DateTime
   endDate    DateTime
-  createdAt  DateTime         @default(now())
-  updateAt   DateTime         @updatedAt
+  createdAt  DateTime          @default(now())
+  updateAt   DateTime          @updatedAt
   /// Coluna antiga, preservada porque os eventos já existem em produção.
   /// `@ignore` mantém ela no banco e fora do Prisma Client: nada no código lê
   /// ou escreve esse campo — quem manda na visibilidade agora é `status`.
-  isActive   Boolean          @default(false) @ignore
-  status     EventStatus      @default(ACTIVE)
+  isActive   Boolean           @default(false) @ignore
+  status     EventStatus       @default(ACTIVE)
   groupLink  String? // link do grupo do evento (Inativo)
-  type       EventType        @default(CURSILHO)
+  type       EventType         @default(CURSILHO)
   data       Json?
   churchId   String
-  church     Church           @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  church     Church            @relation(fields: [churchId], references: [id], onDelete: Cascade)
   users      EventOnUsers[]
   bedrooms   Bedrooms[]
   transports Transport[]
@@ -435,6 +435,8 @@ model Event {
   products   EventProduct[]
   treasurers EventTreasurer[]
   admins     EventAdmin[]
+  /// O certificado de participação, quando configurado — ver `EventCertificate`
+  certConfig EventCertificate?
   /// A tesouraria do evento, quando criada (Tesouraria › Eventos)
   treasury   Treasury?
 
@@ -445,6 +447,10 @@ model Event {
 model EventOnUsers {
   userId            String
   eventId           String
+  /// Código de autenticidade do certificado de participação, gerado na
+  /// primeira vez que o certificado desta inscrição sai. É o que o QR do
+  /// certificado leva até a página pública de verificação.
+  certificateCode   String?                         @unique
   createdAt         DateTime                        @default(now())
   updatedAt         DateTime                        @updatedAt
   event             Event                           @relation(fields: [eventId], references: [id])
@@ -484,6 +490,25 @@ enum MinorApprovalStatus {
   APPROVED
   /// Admin recusou o termo enviado — o responsável pode reenviar
   REJECTED
+}
+
+/// O certificado de participação do evento. Tabela à parte, e não em
+/// `Event.data`, de propósito: o `data` vai inteiro para a página pública do
+/// evento, e as imagens de assinatura não podem sair de lá para qualquer um.
+/// Quem tem direito ao certificado é quem fez check-in (crachá entregue).
+model EventCertificate {
+  eventId   String   @id
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  /// Desligado, ninguém baixa — nem o participante, nem o painel
+  enabled   Boolean  @default(false)
+  /// Texto livre da carga horária ("20 horas"); vazio não aparece
+  workload  String?
+  /// Até duas pessoas que assinam: `{ name, role, signature }`, com a
+  /// assinatura em data URI (PNG ou JPEG) ou nula
+  signers   Json     @default("[]")
+  updatedAt DateTime @updatedAt
+
+  @@map("event_certificates")
 }
 
 model EventOnUsersRolesRegistration {

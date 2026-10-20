@@ -101,7 +101,7 @@ function hex([r, g, b]: number[]): string {
 }
 
 /** Mistura `cor` com `outra`; `peso` é quanto de `outra` entra (0 a 1). */
-function misturar(cor: string, outra: string, peso: number): string {
+export function misturar(cor: string, outra: string, peso: number): string {
   const a = rgb(cor);
   const b = rgb(outra);
   return hex(a.map((c, i) => c + (b[i] - c) * peso));
@@ -136,7 +136,7 @@ interface CorDaEquipe {
   media: string;
 }
 
-function paletaDoEvento(colors: EventoDoPdf['colors']) {
+export function paletaDoEvento(colors: EventoDoPdf['colors']) {
   const primaria = ehHex(colors?.primary) ? colors!.primary! : AZUL_VIVO;
   const secundaria = ehHex(colors?.secondary)
     ? colors!.secondary!

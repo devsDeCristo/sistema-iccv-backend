@@ -21,6 +21,7 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 | Check-in | `src/checkin` | [checkin.md](checkin.md) |
 | Quartos, equipes e transporte | `src/bedrooms`, `src/team`, `src/transport` | [quartos-equipes-transporte.md](quartos-equipes-transporte.md) |
 | Crachás e PDF | `src/cracha`, `src/pdf` | [crachas-e-pdf.md](crachas-e-pdf.md) |
+| Certificado e lista de presença | `src/certificado` | [certificados.md](certificados.md) |
 | Quadrante | `src/quadrante` | [quadrante.md](quadrante.md) |
 | **Pagamentos** | | |
 | Pagamentos | `src/payment`, `src/gateways` | [pagamentos.md](pagamentos.md) |

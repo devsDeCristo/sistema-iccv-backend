@@ -6,6 +6,7 @@ import { BedroomsModule } from './bedrooms/bedrooms.module';
 import { TransportModule } from './transport/transport.module';
 import { TeamModule } from './team/team.module';
 import { QuadranteModule } from './quadrante/quadrante.module';
+import { CertificadoModule } from './certificado/certificado.module';
 import { CrachaModule } from './cracha/cracha.module';
 import { TermsModule } from './terms/terms.module';
 import { AuthController } from './auth/auth.controller';
@@ -40,6 +41,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     TransportModule,
     TeamModule,
     QuadranteModule,
+    CertificadoModule,
     CrachaModule,
     TermsModule,
     AuthModule,

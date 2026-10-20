@@ -140,6 +140,14 @@ Mora em `data.modules`, com três chaves conhecidas: `bedrooms`, `teams`,
 
 Arquivos: `src/event/event-modules.ts`, `src/event/event-modules.spec.ts`.
 
+## Certificado de participação
+
+Também vem no cadastro e na edição do evento: o campo `certificate` do
+multipart (JSON em texto — `{ enabled, workload, signers }`), gravado em
+`event_certificates` na mesma transação. Omitido, nada muda. Fica fora de
+`data`, que é público, porque leva a imagem da assinatura de gente. Regras,
+geração e verificação em `docs/certificados.md`.
+
 ## Quadrante de equipes
 
 `showQuadrante` (em `data`) libera a lista de e-mail, celular e data de
