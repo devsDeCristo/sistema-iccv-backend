@@ -22,6 +22,7 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 | `EVENTS`   | Painel de eventos: criar, editar, inscritos, equipes, quartos, transporte, crachás, check-in e os pagamentos do evento no painel; a configuração dos gateways (`/churches/:churchId/payment-providers`, a tela Pagamentos); e a cobrança online nas inscrições (ver abaixo) |
 | `NEWS`     | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores)                                                                                                                                                                           |
 | `TREASURY` | Tesouraria (`/churches/:churchId/tesouraria`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações)                                                                                                                                                   |
+| `REQUESTS` | Solicitações no painel (`/churches/:churchId/solicitacoes`); e o membro só pede à igreja dele se ela tiver o módulo (ver [solicitacoes.md](solicitacoes.md)) |
 
 ## Rotas (`/plans`)
 

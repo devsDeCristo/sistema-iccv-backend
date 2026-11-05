@@ -99,10 +99,21 @@ export class AuthService {
     ) {
       throw new UnauthorizedException('Usuário não é administrador');
     }
+    // a igreja de que é membro (inativa não conta), para a área do participante
+    const igrejaDoMembro =
+      userConsult.memberChurch &&
+      userConsult.memberChurch.status !== ChurchStatus.INACTIVE
+        ? {
+            id: userConsult.memberChurch.id,
+            name: userConsult.memberChurch.name,
+            modulos: modulosDa(userConsult.memberChurch),
+          }
+        : null;
     return {
       id: userConsult.id,
       role,
       churchRoles,
+      memberChurch: igrejaDoMembro,
       eventTreasurers,
       eventAdmins,
       fullName: userConsult.fullName,

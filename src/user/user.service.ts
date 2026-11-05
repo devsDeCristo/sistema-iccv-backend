@@ -414,6 +414,12 @@ export class UserService {
             },
           },
         },
+        // a igreja de que é membro, com os módulos dela: a área do
+        // participante mostra Solicitações só a quem é membro de uma igreja
+        // que usa o módulo
+        memberChurch: {
+          select: { id: true, name: true, status: true, ...SELECT_MODULOS },
+        },
       },
     });
     if (!user) return null;

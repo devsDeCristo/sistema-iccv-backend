@@ -6,6 +6,7 @@ export const ROTULO_DO_MODULO: Record<ChurchModule, string> = {
   EVENTS: 'Eventos',
   NEWS: 'Notícias',
   TREASURY: 'Tesouraria',
+  REQUESTS: 'Solicitações',
 };
 
 /**

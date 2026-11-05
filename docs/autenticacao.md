@@ -192,7 +192,7 @@ desbloquear. A conta bloqueada não entra e as sessões abertas dela caem.
 
 | Método | Rota | Guard | Retorna |
 | --- | --- | --- | --- |
-| `GET` | `/auth/validate` | `JwtAuthGuard` | perfil, vínculos por igreja, dados básicos |
+| `GET` | `/auth/validate` | `JwtAuthGuard` | perfil, vínculos por igreja, dados básicos e `memberChurch` (a igreja de que é membro, com os módulos; ver [solicitacoes.md](solicitacoes.md)) |
 | `GET` | `/auth/admin/validate` | `JwtAuthGuard` | igual, mas `401` se o perfil não estiver em `ADMIN_AREA_ROLES` |
 
 As duas relêem o usuário no banco (`validateUserGuardRouter`) — não confiam

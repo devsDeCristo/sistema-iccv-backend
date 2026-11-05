@@ -19,6 +19,7 @@ import { PaymentProviderModule } from './payment-providers/payment-provider.modu
 import { PluggyModule } from './pluggy/pluggy.module';
 import { TesourariaModule } from './tesouraria/tesouraria.module';
 import { MembrosModule } from './membros/membros.module';
+import { SolicitacoesModule } from './solicitacoes/solicitacoes.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
 import { CheckinModule } from './checkin/checkin.module';
@@ -53,6 +54,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     PluggyModule,
     TesourariaModule,
     MembrosModule,
+    SolicitacoesModule,
     WebhooksModule,
     CronModule,
     CheckinModule,

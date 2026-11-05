@@ -12,6 +12,7 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 | Igrejas | `src/church` | [igrejas.md](igrejas.md) |
 | Planos (módulos por igreja) | `src/planos` | [planos.md](planos.md) |
 | Membros e famílias | `src/membros` | [membros.md](membros.md) |
+| Solicitações (pedidos dos membros à igreja) | `src/solicitacoes` | [solicitacoes.md](solicitacoes.md) |
 | Termos de Uso | `src/terms` | [termos.md](termos.md) |
 | **Eventos** | | |
 | Eventos | `src/event` | [eventos.md](eventos.md) |

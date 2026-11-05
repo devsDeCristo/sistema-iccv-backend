@@ -31,6 +31,8 @@ model Church {
   members            User[]                  @relation("MemberOf")
   membershipRequests User[]                  @relation("MembershipRequest")
   families           Family[]
+  /// Módulo Solicitações: o que os membros pedem à igreja (ver `ChurchRequest`)
+  requests           ChurchRequest[]
   /// Tesourarias de evento e de congregação (a Administrativa é a própria
   /// igreja). Ver `Treasury`.
   treasuries         Treasury[]
@@ -253,19 +255,21 @@ model User {
   /// banco garantir que ninguém seja membro de duas. Quem coloca e tira é o
   /// admin ou a tesouraria da igreja (módulo Membros); a pessoa não se coloca.
   memberChurchId    String?
-  memberChurch      Church?   @relation("MemberOf", fields: [memberChurchId], references: [id], onDelete: SetNull)
+  memberChurch      Church?         @relation("MemberOf", fields: [memberChurchId], references: [id], onDelete: SetNull)
   memberSince       DateTime?
   /// A igreja que ela escolheu na inscrição: um pedido, que o admin aceita
   /// (vira membro) ou recusa. Sem isso, marcar o nome de uma igreja bastava
   /// para entrar na lista de membros — e na tesouraria — dela.
   requestedChurchId String?
-  requestedChurch   Church?   @relation("MembershipRequest", fields: [requestedChurchId], references: [id], onDelete: SetNull)
+  requestedChurch   Church?         @relation("MembershipRequest", fields: [requestedChurchId], references: [id], onDelete: SetNull)
   /// "Outra" na inscrição: o nome da igreja, como a pessoa escreveu. Só
   /// informativo; a busca de Membros mostra, para o admin decidir.
   otherChurchName   String?
   /// A família dentro da igreja de que é membro. Sai junto quando deixa de ser membro.
   familyId          String?
-  family            Family?   @relation(fields: [familyId], references: [id], onDelete: SetNull)
+  family            Family?         @relation(fields: [familyId], references: [id], onDelete: SetNull)
+  /// O que a pessoa pediu à igreja de que é membro (módulo Solicitações)
+  churchRequests    ChurchRequest[]
 
   @@index([email])
   @@index([memberChurchId])
@@ -1588,6 +1592,56 @@ enum ChurchModule {
   NEWS
   /// Tesouraria: dizimistas, lançamentos, conciliação e os bancos pela Pluggy
   TREASURY
+  /// Solicitações: os membros pedem à igreja equipamentos e melhorias, e o
+  /// admin responde (ver `ChurchRequest`)
+  REQUESTS
+}
+
+/// Em que pé está uma solicitação. O membro acompanha por aqui.
+enum ChurchRequestStatus {
+  /// Acabou de chegar
+  REQUESTED
+  /// O admin está olhando
+  IN_REVIEW
+  /// Indeferida
+  REJECTED
+  /// Aceita
+  ACCEPTED
+}
+
+/// Um pedido de um membro à igreja: um equipamento para o louvor, um aparelho
+/// para a mídia, uma melhoria no espaço.
+///
+/// A igreja é sempre a de que a pessoa é membro na hora de pedir
+/// (`User.memberChurchId`), nunca uma escolhida no pedido. Se ela sair da
+/// igreja depois, o pedido fica com a igreja a que foi feito.
+model ChurchRequest {
+  id          String              @id @default(uuid())
+  churchId    String
+  requesterId String
+  /// O ministério que pede, de uma lista fixa (`MINISTERIOS` em
+  /// `src/solicitacoes`): é texto, e não enum, para a lista crescer sem
+  /// migração
+  ministry    String
+  title       String
+  description String
+  /// Onde ver o produto pedido (a loja, o anúncio). Opcional; só http(s),
+  /// porque a tela mostra como link
+  link        String?
+  status      ChurchRequestStatus @default(REQUESTED)
+  /// O que o admin respondeu: o motivo do indeferimento, o prazo da compra
+  response    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  church    Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  /// `Cascade`: apagar a conta apaga o que ela pediu, como o resto dos dados dela
+  requester User   @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+
+  @@index([churchId, createdAt(sort: Desc)])
+  @@index([requesterId, createdAt(sort: Desc)])
+  @@map("church_requests")
 }
 
 /// O plano de uma igreja: o que ela pode usar no sistema. Só dev e super admin
