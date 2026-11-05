@@ -1,7 +1,12 @@
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('ProtecaoDeLogin');
+
 /**
  * Freio contra senha errada repetida, por documento.
  *
- * Conta só senha errada (`WRONG_PASSWORD`) desde o último acerto. Documento
+ * Conta só senha errada (`WRONG_PASSWORD`) desde o último acerto ou a última
+ * troca de senha (`User.passwordChangedAt`). Documento
  * inexistente fica de fora: ele leva a pessoa para o cadastro, e quem digitou
  * o CPF errado não está tentando adivinhar senha de ninguém.
  */
@@ -82,9 +87,21 @@ export async function captchaValido(
         signal: AbortSignal.timeout(5000),
       },
     );
-    const corpo = (await resposta.json()) as { success?: boolean };
+    const corpo = (await resposta.json()) as {
+      success?: boolean;
+      'error-codes'?: string[];
+    };
+    // `invalid-input-secret` aqui é chave errada no servidor: recusa todo mundo
+    if (corpo.success !== true) {
+      logger.warn(
+        `Turnstile recusou o token: ${
+          corpo['error-codes']?.join(', ') || resposta.status
+        }`,
+      );
+    }
     return corpo.success === true;
-  } catch {
+  } catch (erro) {
+    logger.warn(`Turnstile sem resposta: ${erro}`);
     return false;
   }
 }

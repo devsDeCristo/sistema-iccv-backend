@@ -222,7 +222,7 @@ export class PasswordResetService {
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: token.userId },
-        data: { password: passwordHash },
+        data: { password: passwordHash, passwordChangedAt: new Date() },
       });
 
       await tx.userToken.deleteMany({
@@ -271,7 +271,7 @@ export class PasswordResetService {
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
-        data: { password: passwordHash },
+        data: { password: passwordHash, passwordChangedAt: new Date() },
       });
       await tx.userToken.deleteMany({
         where: { userId, type: TOKEN_TYPE_PASSWORD_RESET },

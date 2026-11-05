@@ -37,6 +37,27 @@ segue normalmente: a auditoria não pode derrubar quem digitou a senha certa.
 Arquivos: `src/logs/dispositivo.ts`, `src/logs/logs.controller.ts`,
 `src/logs/logs.service.ts`.
 
+### Captcha e bloqueio por senha errada
+
+Freio por documento, contado em `LoginAttempt` (`WRONG_PASSWORD`) numa janela
+de 15 minutos:
+
+- **2 erros:** o login passa a exigir o captcha (Cloudflare Turnstile,
+  `captchaToken` no corpo). Sem token válido: `401` com
+  `captchaRequired: true`. Sem `TURNSTILE_SECRET_KEY` o captcha fica
+  desligado.
+- **5 erros:** `429` com `bloqueadoAte`, por 15 minutos a partir do último
+  erro. Durante o bloqueio a senha nem é conferida.
+- **Zera** num login certo ou numa troca de senha (redefinição ou perfil,
+  `User.passwordChangedAt`): os erros de antes eram contra a senha antiga. A
+  tela do bloqueio indica "Esqueci minha senha", então quem redefine entra na
+  hora com a senha nova.
+- **Recusa do Turnstile** sai no log como `Turnstile recusou o token: <códigos>`.
+  `invalid-input-secret` é a chave secreta errada no servidor, e com ela todo
+  mundo que errou a senha duas vezes fica preso.
+
+Arquivos: `src/auth/protecao-de-login.ts`, `src/auth/auth.service.ts`.
+
 ## Login com Google
 
 O botão "Entrar com Google" do front (Google Identity Services) entrega um

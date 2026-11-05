@@ -13,7 +13,12 @@ import { Role } from './roles';
 async function logar(
   role: number,
   vinculos: { status: string; role: number }[],
-  { bloqueada = false, senhaDigitada = 'senha-certa' } = {},
+  {
+    bloqueada = false,
+    senhaDigitada = 'senha-certa',
+    falhas = [] as Date[],
+    senhaTrocadaEm = null as Date | null,
+  } = {},
   tentativas: any[] = [],
 ) {
   const senha = 'senha-certa';
@@ -22,6 +27,7 @@ async function logar(
     cpf: '123',
     role,
     password: await bcrypt.hash(senha, 4),
+    passwordChangedAt: senhaTrocadaEm,
     churchRoles: vinculos.map(({ status, role: perfil }, i) => ({
       role: perfil,
       church: { id: `igreja-${i}`, name: `Igreja ${i}`, status },
@@ -44,7 +50,12 @@ async function logar(
     },
     loginAttempt: {
       findFirst: jest.fn().mockResolvedValue(null),
-      findMany: jest.fn().mockResolvedValue([]),
+      // as senhas erradas depois do marco que o serviço pediu, da mais nova
+      findMany: jest.fn(async ({ where }: any) =>
+        falhas
+          .filter((data) => data > where.createdAt.gt)
+          .map((createdAt) => ({ createdAt })),
+      ),
       create: jest.fn(async ({ data }: any) => tentativas.push(data)),
     },
   };
@@ -111,5 +122,26 @@ describe('AuthService — conta bloqueada', () => {
 
     expect(erro.getStatus()).toBe(401);
     expect(JSON.stringify(erro.getResponse())).not.toContain('bloqueada');
+  });
+});
+
+describe('AuthService — freio de senha errada', () => {
+  // cinco erros nos últimos 5 minutos: bloqueia por 15
+  const minutosAtras = (m: number) => new Date(Date.now() - m * 60000);
+  const falhas = [1, 2, 3, 4, 5].map(minutosAtras);
+
+  it('5 senhas erradas: bloqueia mesmo com a senha certa', async () => {
+    const erro = await logar(Role.USER, [], { falhas })
+      .then(() => null)
+      .catch((e) => e);
+    expect(erro.getStatus()).toBe(429);
+  });
+
+  it('senha redefinida depois dos erros: entra com a nova', async () => {
+    const user = await logar(Role.USER, [], {
+      falhas,
+      senhaTrocadaEm: minutosAtras(0.5),
+    });
+    expect(user.id).toBe('u1');
   });
 });

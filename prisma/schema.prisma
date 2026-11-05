@@ -210,6 +210,10 @@ model User {
   /// responsável usa a mesma coluna de `emergencyContact` — é o mesmo dado.
   guardianName       String?
   password           String             @default("$2b$10$QGF/lucztAy.bqQFEQcSOOjP3fGMZfSsCIl4t.dfFo15Hh0v/C8xW")
+  /// Última troca de senha (redefinição ou perfil). As senhas erradas de antes
+  /// dela não contam para o captcha nem para o bloqueio do login: eram contra
+  /// a senha antiga.
+  passwordChangedAt  DateTime?
   /// Vínculos de painel: em qual igreja a pessoa é admin e em qual é
   /// tesouraria. É daqui que sai QUAL igreja ela alcança.
   churchRoles        UserChurchRole[]

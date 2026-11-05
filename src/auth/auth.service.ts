@@ -208,23 +208,42 @@ export class AuthService {
   }
 
   /**
-   * Senhas erradas deste documento desde o último acerto, nas duas últimas
-   * janelas — ver `protecao-de-login.ts`.
+   * Senhas erradas deste documento desde o último acerto ou a última troca de
+   * senha, nas duas últimas janelas — ver `protecao-de-login.ts`.
+   *
+   * A troca conta porque a tela do bloqueio manda usar "Esqueci minha senha":
+   * sem isso, quem redefinia continuava bloqueado com a senha nova.
    */
   private async situacao(document: string) {
     const desde = new Date(Date.now() - 2 * JANELA_MS);
 
-    const ultimoAcerto = await this.prisma.loginAttempt.findFirst({
-      where: { document, success: true, createdAt: { gte: desde } },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
+    const [ultimoAcerto, usuario] = await Promise.all([
+      this.prisma.loginAttempt.findFirst({
+        where: { document, success: true, createdAt: { gte: desde } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+      document
+        ? this.prisma.user.findUnique({
+            where: { cpf: document },
+            select: { passwordChangedAt: true },
+          })
+        : null,
+    ]);
+
+    const marco = new Date(
+      Math.max(
+        desde.getTime(),
+        ultimoAcerto?.createdAt.getTime() ?? 0,
+        usuario?.passwordChangedAt?.getTime() ?? 0,
+      ),
+    );
 
     const falhas = await this.prisma.loginAttempt.findMany({
       where: {
         document,
         reason: LoginFailureReason.WRONG_PASSWORD,
-        createdAt: { gt: ultimoAcerto?.createdAt ?? desde },
+        createdAt: { gt: marco },
       },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
