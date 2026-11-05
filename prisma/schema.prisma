@@ -1605,8 +1605,11 @@ enum ChurchRequestStatus {
   IN_REVIEW
   /// Indeferida
   REJECTED
-  /// Aceita
+  /// Aceita: todos os produtos
   ACCEPTED
+  /// Aceita em parte: alguns produtos sim, outros não (ver
+  /// `ChurchRequestItem.accepted`)
+  PARTIALLY_ACCEPTED
 }
 
 /// Um pedido de um membro à igreja: um equipamento para o louvor, um aparelho
@@ -1625,9 +1628,6 @@ model ChurchRequest {
   ministry    String
   title       String
   description String
-  /// Onde ver o produto pedido (a loja, o anúncio). Opcional; só http(s),
-  /// porque a tela mostra como link
-  link        String?
   status      ChurchRequestStatus @default(REQUESTED)
   /// O que o admin respondeu: o motivo do indeferimento, o prazo da compra
   response    String?
@@ -1635,13 +1635,38 @@ model ChurchRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  church    Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  church    Church              @relation(fields: [churchId], references: [id], onDelete: Cascade)
   /// `Cascade`: apagar a conta apaga o que ela pediu, como o resto dos dados dela
-  requester User   @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  requester User                @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  /// Os produtos pedidos: um pedido pode ter vários (dois microfones e um cabo)
+  items     ChurchRequestItem[]
 
   @@index([churchId, createdAt(sort: Desc)])
   @@index([requesterId, createdAt(sort: Desc)])
   @@map("church_requests")
+}
+
+/// Um produto de uma solicitação: o que é, quantos e onde ver.
+///
+/// `accepted` é a decisão do admin por produto: nulo enquanto a solicitação
+/// não foi respondida; aceita, todos `true`; recusada, todos `false`; aceita
+/// parcialmente, uns e outros.
+model ChurchRequestItem {
+  id        String   @id @default(uuid())
+  requestId String
+  name      String
+  quantity  Int      @default(1)
+  /// Onde ver o produto (a loja, o anúncio). Opcional; só http(s), porque a
+  /// tela mostra como link
+  link      String?
+  accepted  Boolean?
+  /// A ordem em que a pessoa listou
+  position  Int
+
+  request ChurchRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("church_request_items")
 }
 
 /// O plano de uma igreja: o que ela pode usar no sistema. Só dev e super admin
