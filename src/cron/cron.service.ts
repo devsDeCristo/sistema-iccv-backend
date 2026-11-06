@@ -322,9 +322,10 @@ export class CronService {
 
   /**
    * O sininho não guarda tudo para sempre: some a notificação lida há mais de
-   * 90 dias e a não lida com mais de 180. Só o destinatário sai — a
-   * `Notification` fica, porque é ela que impede a mesma origem de avisar de
-   * novo (a notícia que se repete toda semana).
+   * 90 dias e a não lida com mais de 180. A `Notification` fica mais tempo,
+   * porque é ela que impede a mesma origem de avisar de novo (o evento
+   * desligado e religado); sem ninguém para ler e com mais de um ano, sai
+   * também — o evento religado um ano depois pode avisar de novo.
    */
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   purgeOldNotifications() {
@@ -339,8 +340,14 @@ export class CronService {
         },
       });
 
-      if (count > 0) {
-        this.logger.log(`🧹 ${count} notificação(ões) antiga(s) removida(s)`);
+      const orfas = await this.prisma.notification.deleteMany({
+        where: { createdAt: { lt: dias(365) }, recipients: { none: {} } },
+      });
+
+      if (count > 0 || orfas.count > 0) {
+        this.logger.log(
+          `🧹 ${count} notificação(ões) antiga(s) removida(s), ${orfas.count} origem(ns) esquecida(s)`,
+        );
       }
     });
   }

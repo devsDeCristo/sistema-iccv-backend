@@ -1,7 +1,11 @@
+import { Logger } from '@nestjs/common';
 import { Role } from 'src/auth/roles';
+import { MembrosService } from 'src/membros/membros.service';
 import { NotificacoesService } from './notificacoes.service';
 import {
+  encerrarPedidoDeMembro,
   notificarEvento,
+  notificarEventosDaIgreja,
   notificarNoticia,
   notificarPedidoDeMembro,
   notificarRespostaDaSolicitacao,
@@ -13,14 +17,20 @@ function montar({
   eventId = null as string | null,
   status = 'ACCEPTED',
   statusDoEvento = 'ACTIVE',
+  statusDaIgreja = 'ACTIVE',
   autorId = null as string | null,
 } = {}) {
   const criadas: any[] = [];
   const prisma = {
     notification: {
-      findUnique: jest.fn(async () => (jaExiste ? { id: 'x' } : null)),
-      create: jest.fn(async ({ data }: any) => criadas.push(data)),
+      // a origem repetida bate no índice único, como no banco
+      create: jest.fn(async ({ data }: any) => {
+        if (jaExiste)
+          throw Object.assign(new Error('unique'), { code: 'P2002' });
+        criadas.push(data);
+      }),
     },
+    notificationRecipient: { deleteMany: jest.fn() },
     userChurchRole: {
       findMany: jest.fn(async ({ where }: any) =>
         where.role === Role.ADMIN ? [{ userId: 'admin-1' }] : [],
@@ -45,6 +55,7 @@ function montar({
       findUnique: jest.fn(async () => ({
         title: 'Culto',
         summary: null,
+        publishedAt: new Date(1000),
         churchId: 'ig1',
         eventId,
         authorId: autorId,
@@ -56,7 +67,9 @@ function montar({
         name: 'Retiro',
         status: statusDoEvento,
         churchId: 'ig1',
+        church: { status: statusDaIgreja },
       })),
+      findMany: jest.fn(async () => [{ id: 'e1' }, { id: 'e2' }]),
     },
   };
   const destinatarios = () =>
@@ -80,12 +93,22 @@ describe('notificar', () => {
     });
   });
 
-  it('notícia vai para os membros; com evento, só os que estão nele', async () => {
+  it('notícia vai para os membros da igreja', async () => {
+    const { prisma, criadas } = montar();
+    await notificarNoticia(prisma, 'n1');
+    expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({
+      memberChurchId: 'ig1',
+    });
+    // uma vez por publicação: o disparo agendado seguinte avisa de novo
+    expect(criadas[0].sourceId).toBe('n1:1000');
+  });
+
+  it('notícia de evento vai para quem está nele, de qualquer igreja', async () => {
     const { prisma, destinatarios } = montar({ eventId: 'ev1' });
     await notificarNoticia(prisma, 'n1');
     expect(destinatarios()).toEqual([['m1', 'm2']]);
     const where = prisma.user.findMany.mock.calls[0][0].where;
-    expect(where.memberChurchId).toBe('ig1');
+    expect(where.memberChurchId).toBeUndefined();
     expect(where.OR).toHaveLength(2);
   });
 
@@ -120,10 +143,37 @@ describe('notificar', () => {
     expect(ativo.destinatarios()).toEqual([['m2']]);
   });
 
-  it('a mesma origem notifica uma vez só', async () => {
+  it('evento de igreja em implantação espera a igreja sair do teste', async () => {
+    const { prisma, criadas } = montar({ statusDaIgreja: 'TEST' });
+    await notificarEvento(prisma, 'e1');
+    expect(criadas).toHaveLength(0);
+
+    const saiu = montar();
+    await notificarEventosDaIgreja(saiu.prisma, 'ig1');
+    expect(saiu.prisma.event.findMany.mock.calls[0][0].where).toMatchObject({
+      churchId: 'ig1',
+      status: 'ACTIVE',
+    });
+    expect(saiu.criadas.map((c) => c.sourceId)).toEqual(['e1', 'e2']);
+  });
+
+  it('a mesma origem notifica uma vez só, sem virar erro no log', async () => {
     const { prisma, criadas } = montar({ jaExiste: true });
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation();
     await notificarNoticia(prisma, 'n1');
     expect(criadas).toHaveLength(0);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it('o fim do pedido tira o aviso do sininho dos admins', async () => {
+    const { prisma } = montar();
+    await encerrarPedidoDeMembro(prisma, 'u1');
+    expect(prisma.notificationRecipient.deleteMany).toHaveBeenCalledWith({
+      where: {
+        notification: { type: 'MEMBERSHIP_REQUEST', sourceId: 'u1' },
+      },
+    });
   });
 
   it('erro no aviso não derruba quem chamou', async () => {
@@ -152,5 +202,38 @@ describe('NotificacoesService.marcarLidas', () => {
       userId: 'u1',
       readAt: null,
     });
+  });
+});
+
+describe('MembrosService.tornarMembro', () => {
+  function servico(requestedChurchId: string | null) {
+    const { prisma, criadas } = montar();
+    prisma.user.findUnique = jest.fn(async () => ({
+      requestedChurchId,
+      fullName: 'Ana',
+    }));
+    prisma.user.updateMany = jest.fn(async () => ({ count: 1 }));
+    return { service: new MembrosService(prisma), prisma, criadas };
+  }
+
+  it('por qualquer caminho, quem tinha pedido esta igreja fica sabendo', async () => {
+    const { service, prisma, criadas } = servico('ig1');
+    await service.tornarMembro('ig1', 'u1', 'admin-1');
+    expect(criadas.map((c) => c.type)).toEqual(['MEMBERSHIP_ANSWERED']);
+    expect(prisma.notificationRecipient.deleteMany).toHaveBeenCalled();
+  });
+
+  it('pedido para outra igreja só some do sininho de lá', async () => {
+    const { service, prisma, criadas } = servico('ig2');
+    await service.tornarMembro('ig1', 'u1');
+    expect(criadas).toHaveLength(0);
+    expect(prisma.notificationRecipient.deleteMany).toHaveBeenCalled();
+  });
+
+  it('sem pedido, nada muda no sininho', async () => {
+    const { service, prisma, criadas } = servico(null);
+    await service.tornarMembro('ig1', 'u1');
+    expect(criadas).toHaveLength(0);
+    expect(prisma.notificationRecipient.deleteMany).not.toHaveBeenCalled();
   });
 });

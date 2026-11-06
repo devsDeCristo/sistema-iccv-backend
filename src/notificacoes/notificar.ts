@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import {
   ChurchRequestStatus,
+  ChurchStatus,
   EventStatus,
   NotificationType,
   PrismaClient,
@@ -10,6 +11,7 @@ import { Role } from 'src/auth/roles';
 type Prisma = Pick<
   PrismaClient,
   | 'notification'
+  | 'notificationRecipient'
   | 'userChurchRole'
   | 'user'
   | 'church'
@@ -43,7 +45,8 @@ async function seguro(origem: string, disparo: () => Promise<void>) {
 /**
  * Cria a notificação para quem deve recebê-la — os destinatários são os de
  * agora, menos quem fez a ação. A mesma origem notifica uma vez só
- * (`@@unique([type, sourceId])`).
+ * (`@@unique([type, sourceId])`): quem chega depois bate no índice, e isso
+ * não é erro — dois disparos da mesma notícia podem correr juntos.
  */
 async function notificar(
   prisma: Prisma,
@@ -53,17 +56,18 @@ async function notificar(
 ) {
   const para = userIds.filter((id) => id !== quemFez);
   if (!para.length) return;
-  const ja = await prisma.notification.findUnique({
-    where: { type_sourceId: { type: aviso.type, sourceId: aviso.sourceId } },
-    select: { id: true },
-  });
-  if (ja) return;
-  await prisma.notification.create({
-    data: {
-      ...aviso,
-      recipients: { createMany: { data: para.map((userId) => ({ userId })) } },
-    },
-  });
+  try {
+    await prisma.notification.create({
+      data: {
+        ...aviso,
+        recipients: {
+          createMany: { data: para.map((userId) => ({ userId })) },
+        },
+      },
+    });
+  } catch (erro) {
+    if (erro?.code !== 'P2002') throw erro;
+  }
 }
 
 const adminsDa = async (prisma: Prisma, churchId: string) =>
@@ -74,18 +78,21 @@ const adminsDa = async (prisma: Prisma, churchId: string) =>
     })
   ).map((v) => v.userId);
 
-const membrosDa = async (prisma: Prisma, churchId: string, eventId?: string) =>
+/**
+ * Os membros da igreja; com evento, quem está nele (inscrito ou na lista de
+ * espera), de qualquer igreja — a regra do mural (`NewsService.filtroDoFeed`).
+ */
+const publicoDa = async (prisma: Prisma, churchId: string, eventId?: string) =>
   (
     await prisma.user.findMany({
-      where: {
-        memberChurchId: churchId,
-        ...(eventId && {
-          OR: [
-            { events: { some: { eventId } } },
-            { waitlists: { some: { eventId } } },
-          ],
-        }),
-      },
+      where: eventId
+        ? {
+            OR: [
+              { events: { some: { eventId } } },
+              { waitlists: { some: { eventId } } },
+            ],
+          }
+        : { memberChurchId: churchId },
       select: { id: true },
     })
   ).map((m) => m.id);
@@ -119,6 +126,23 @@ export const notificarPedidoDeMembro = (
       await adminsDa(prisma, churchId),
       userId,
     );
+  });
+
+/**
+ * O pedido saiu da fila (aceito, recusado, ou a pessoa entrou como membro por
+ * outro caminho): o "Novo pedido" some do sininho dos admins, que levaria a
+ * uma aba onde ele já não está.
+ */
+export const encerrarPedidoDeMembro = (prisma: Prisma, userId: string) =>
+  seguro(`fim do pedido de ${userId}`, async () => {
+    await prisma.notificationRecipient.deleteMany({
+      where: {
+        notification: {
+          type: NotificationType.MEMBERSHIP_REQUEST,
+          sourceId: userId,
+        },
+      },
+    });
   });
 
 /** O admin aceitou ou recusou o pedido: avisa a pessoa */
@@ -222,9 +246,13 @@ export const notificarRespostaDaSolicitacao = (
 
 /**
  * Notícia no ar: avisa os membros da igreja que publicou — e, se o público é
- * um evento, só os que estão nele (inscritos ou na lista de espera), a mesma
- * regra do mural. O aviso do sistema (sem igreja) não tem membros e não
- * notifica ninguém.
+ * um evento, quem está nele (inscritos ou na lista de espera, de qualquer
+ * igreja), a mesma regra do mural. O aviso do sistema (sem igreja) não tem
+ * membros e não notifica ninguém.
+ *
+ * Uma vez por publicação (`<id>:<publishedAt>`): tirar do ar e voltar não
+ * avisa de novo, mas cada disparo agendado é uma publicação nova — a notícia
+ * volta ao topo do mural, e o sininho acompanha.
  */
 export const notificarNoticia = (prisma: Prisma, newsId: string) =>
   seguro(`notícia ${newsId}`, async () => {
@@ -233,23 +261,24 @@ export const notificarNoticia = (prisma: Prisma, newsId: string) =>
       select: {
         title: true,
         summary: true,
+        publishedAt: true,
         churchId: true,
         eventId: true,
         authorId: true,
         church: { select: { name: true } },
       },
     });
-    if (!n?.churchId) return;
+    if (!n?.churchId || !n.publishedAt) return;
     await notificar(
       prisma,
       {
         type: NotificationType.NEWS,
-        sourceId: newsId,
+        sourceId: `${newsId}:${n.publishedAt.getTime()}`,
         title: n.title,
         body: n.summary || n.church?.name || 'Nova notícia',
         churchId: n.churchId,
       },
-      await membrosDa(prisma, n.churchId, n.eventId ?? undefined),
+      await publicoDa(prisma, n.churchId, n.eventId ?? undefined),
       n.authorId,
     );
   });
@@ -257,6 +286,10 @@ export const notificarNoticia = (prisma: Prisma, newsId: string) =>
 /**
  * Evento aberto ao público (ACTIVE; ensaio não conta): avisa os membros da
  * igreja. Uma vez por evento — desligar e religar não avisa de novo.
+ *
+ * Igreja em implantação esconde os eventos dela (`filtroDeEventoEmTeste`): o
+ * aviso espera a igreja sair do teste (`notificarEventosDaIgreja`), em vez de
+ * levar para uma página que não abre e gastar a única vez.
  */
 export const notificarEvento = (
   prisma: Prisma,
@@ -266,9 +299,15 @@ export const notificarEvento = (
   seguro(`evento ${eventId}`, async () => {
     const e = await prisma.event.findUnique({
       where: { id: eventId },
-      select: { name: true, status: true, churchId: true },
+      select: {
+        name: true,
+        status: true,
+        churchId: true,
+        church: { select: { status: true } },
+      },
     });
     if (e?.status !== EventStatus.ACTIVE) return;
+    if (e.church.status === ChurchStatus.TEST) return;
     await notificar(
       prisma,
       {
@@ -278,7 +317,24 @@ export const notificarEvento = (
         body: e.name,
         churchId: e.churchId,
       },
-      await membrosDa(prisma, e.churchId),
+      await publicoDa(prisma, e.churchId),
       quemFez,
     );
+  });
+
+/**
+ * A igreja saiu da implantação: os eventos dela que já estavam abertos (e não
+ * acabaram) dão agora o aviso que esperaram.
+ */
+export const notificarEventosDaIgreja = (prisma: Prisma, churchId: string) =>
+  seguro(`eventos da igreja ${churchId}`, async () => {
+    const eventos = await prisma.event.findMany({
+      where: {
+        churchId,
+        status: EventStatus.ACTIVE,
+        endDate: { gte: new Date() },
+      },
+      select: { id: true },
+    });
+    for (const { id } of eventos) await notificarEvento(prisma, id);
   });

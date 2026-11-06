@@ -162,7 +162,7 @@ export class PlanilhaService {
           continue;
         }
         try {
-          await this.membros.tornarMembro(churchId, pessoa.id);
+          await this.membros.tornarMembro(churchId, pessoa.id, actorId);
         } catch (erro) {
           // entrou em outra igreja entre a leitura e aqui
           if (!(erro instanceof ConflictException)) throw erro;

@@ -54,7 +54,9 @@ Arquivos: `src/church/church.controller.ts`, `src/church/church.service.ts`,
     sendo montada. Para o público ela ainda não existe: não aparece na
     inscrição (`GET /public/churches` traz só as ativas), nem no filtro da
     home, e os eventos dela ficam fora do catálogo — só quem a administra os
-    vê (ver `docs/eventos.md`).
+    vê (ver `docs/eventos.md`). Por isso os eventos abertos lá não avisam os
+    membros no sininho; o aviso sai quando a igreja deixa a implantação
+    (`notificarEventosDaIgreja`, ver `docs/notificacoes.md`).
 - Editar sem mandar `status` no corpo não reativa nem desativa nada — quem só
   renomeia não corre o risco de reverter uma desativação de outra pessoa.
 

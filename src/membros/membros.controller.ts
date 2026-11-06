@@ -77,8 +77,9 @@ export class MembrosController {
   async adicionar(
     @Param('churchId') churchId: string,
     @Body() dto: AdicionarMembroDto,
+    @Req() req: any,
   ) {
-    await this.service.adicionar(churchId, dto.userId);
+    await this.service.adicionar(churchId, dto.userId, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Aceita o pedido feito na inscrição' })

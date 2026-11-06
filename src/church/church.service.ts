@@ -4,7 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ChurchStatus, Prisma } from '@prisma/client';
+import { notificarEventosDaIgreja } from 'src/notificacoes/notificar';
 import { Role } from 'src/auth/roles';
 import { perfilEfetivo, SELECT_TENANT } from 'src/auth/tenant';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -67,12 +68,12 @@ export class ChurchService {
 
   async update(id: string, dto: CreateChurchDto) {
     const name = dto.name.trim();
-    await this.findOneOrFail(id);
+    const antes = await this.findOneOrFail(id);
     await this.ensureNameIsAvailable(name, id);
     const lider = await this.findLeaderOrFail(dto.spiritualLeaderId);
     await this.planoExiste(dto.planId);
 
-    return this.prisma.$transaction(async (tx) => {
+    const salva = await this.prisma.$transaction(async (tx) => {
       const church = await tx.church.update({
         where: { id },
         // `status` ausente no corpo mantém o que está gravado: quem só renomeia
@@ -92,6 +93,15 @@ export class ChurchService {
 
       return church;
     });
+
+    // saiu da implantação: os eventos abertos ficam visíveis, e só agora avisam
+    if (
+      antes.status === ChurchStatus.TEST &&
+      salva.status !== ChurchStatus.TEST
+    ) {
+      await notificarEventosDaIgreja(this.prisma, id);
+    }
+    return salva;
   }
 
   /**
@@ -206,6 +216,7 @@ export class ChurchService {
       select: {
         id: true,
         name: true,
+        status: true,
         _count: { select: { users: true, events: true } },
       },
     });

@@ -7,7 +7,10 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AtualizarFamiliaDto, CriarFamiliaDto } from './membros.dto';
-import { notificarRespostaDoPedido } from 'src/notificacoes/notificar';
+import {
+  encerrarPedidoDeMembro,
+  notificarRespostaDoPedido,
+} from 'src/notificacoes/notificar';
 
 const PESSOA = {
   id: true,
@@ -142,7 +145,7 @@ export class MembrosService {
   }
 
   /** Coloca como membro. Quem já é membro de outra igreja não entra. */
-  async adicionar(churchId: string, userId: string) {
+  async adicionar(churchId: string, userId: string, actorId?: string) {
     const pessoa = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -159,7 +162,7 @@ export class MembrosService {
         `Esta pessoa é membro de ${pessoa.memberChurch?.name}. Quem administra lá precisa tirá-la antes.`,
       );
     }
-    await this.tornarMembro(churchId, userId);
+    await this.tornarMembro(churchId, userId, actorId);
   }
 
   /** Aceita o pedido feito na inscrição */
@@ -168,14 +171,7 @@ export class MembrosService {
     if (pessoa.memberChurchId) {
       throw new ConflictException('Esta pessoa já é membro de uma igreja');
     }
-    await this.tornarMembro(churchId, userId);
-    await notificarRespostaDoPedido(
-      this.prisma,
-      userId,
-      churchId,
-      true,
-      actorId,
-    );
+    await this.tornarMembro(churchId, userId, actorId);
   }
 
   async recusar(churchId: string, userId: string, actorId?: string) {
@@ -184,6 +180,7 @@ export class MembrosService {
       where: { id: userId },
       data: { requestedChurchId: null },
     });
+    await encerrarPedidoDeMembro(this.prisma, userId);
     await notificarRespostaDoPedido(
       this.prisma,
       userId,
@@ -284,8 +281,18 @@ export class MembrosService {
    * duas igrejas colocando a mesma pessoa ao mesmo tempo não sobrescrevem uma
    * à outra — a segunda recebe o conflito.
    */
-  /** Atômico: só entra quem não é membro de nenhuma igreja (409 se já é) */
-  async tornarMembro(churchId: string, userId: string) {
+  /**
+   * Atômico: só entra quem não é membro de nenhuma igreja (409 se já é).
+   *
+   * É por aqui que todo caminho atende o pedido da inscrição — aceitar, a
+   * busca e a planilha de dízimos —, então é aqui que a pessoa fica sabendo e
+   * o pedido sai do sininho dos admins. Pedido para outra igreja só some.
+   */
+  async tornarMembro(churchId: string, userId: string, actorId?: string) {
+    const antes = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { requestedChurchId: true },
+    });
     const { count } = await this.prisma.user.updateMany({
       where: { id: userId, memberChurchId: null },
       // o pedido, se havia, está atendido; "Outra" deixa de valer
@@ -298,6 +305,17 @@ export class MembrosService {
     });
     if (!count) {
       throw new ConflictException('Esta pessoa já é membro de uma igreja');
+    }
+    if (!antes?.requestedChurchId) return;
+    await encerrarPedidoDeMembro(this.prisma, userId);
+    if (antes.requestedChurchId === churchId) {
+      await notificarRespostaDoPedido(
+        this.prisma,
+        userId,
+        churchId,
+        true,
+        actorId,
+      );
     }
   }
 

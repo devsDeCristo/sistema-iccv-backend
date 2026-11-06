@@ -18,8 +18,11 @@ Código: `src/membros` (controller, service, DTOs), campos em `User` e o modelo 
 - `GET /public/churches` (sem login): as igrejas ativas, só `id` e `name`, para o select da inscrição.
 - `PUT /users/:id` e o perfil **descartam** `requestedChurchId` e `otherChurchName`: a pessoa não troca de igreja sozinha depois da inscrição. Quem coloca e tira é a igreja, aqui.
 
-**Notificações:** o pedido feito no cadastro avisa os admins da igreja, e
-aceitar ou recusar avisa a pessoa ([notificacoes.md](notificacoes.md)).
+**Notificações:** o pedido feito no cadastro avisa os admins da igreja.
+Recusar avisa a pessoa; virar membro da igreja pedida também, por qualquer
+caminho (aceitar, a busca, a planilha de dízimos — todos passam por
+`tornarMembro`). Atendido ou recusado, o pedido sai do sininho dos admins
+([notificacoes.md](notificacoes.md)).
 
 ## Quem acessa
 

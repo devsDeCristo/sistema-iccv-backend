@@ -116,7 +116,8 @@ confere o perfil no banco, porque o perfil do token pode estar defasado em até
 
 A notícia que entra no ar (criada publicada, rascunho publicado ou disparo
 agendado — todos passam por `disparaEmSegundoPlano`) avisa no sininho os
-membros da igreja que publicou, uma vez só. Ver
+membros da igreja que publicou — com evento de público, quem está nele, de
+qualquer igreja —, uma vez por publicação (cada disparo agendado avisa). Ver
 [notificacoes.md](notificacoes.md).
 
 ## Agendamento de disparos (`NewsSchedule`)

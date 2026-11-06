@@ -1849,11 +1849,12 @@ model Notification {
   id         String                  @id @default(uuid())
   type       NotificationType
   /// O que originou: o usuário que pediu, a solicitação, a notícia, o evento
-  /// (a resposta de solicitação leva a situação junto: `<id>:ACCEPTED`). Não é
-  /// chave estrangeira (cada tipo aponta para uma tabela); serve para a mesma
-  /// origem notificar uma vez só — a notícia agendada que se repete toda
-  /// semana não avisa de novo, nem o evento desligado e religado. Por isso a
-  /// limpeza diária apaga só os destinatários, e esta linha fica
+  /// (a resposta de solicitação leva a situação junto: `<id>:ACCEPTED`; a
+  /// notícia, a publicação: `<id>:<publishedAt>`). Não é chave estrangeira
+  /// (cada tipo aponta para uma tabela); serve para a mesma origem notificar
+  /// uma vez só — o evento desligado e religado não avisa de novo. Por isso a
+  /// limpeza diária apaga primeiro os destinatários, e esta linha só sai sem
+  /// destinatário e com mais de um ano
   sourceId   String
   title      String
   body       String

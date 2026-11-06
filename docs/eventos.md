@@ -239,7 +239,8 @@ Arquivos: `src/event/event.service.ts` (`findAll`, `findOne`),
 ## Notificação
 
 O evento que vira `ACTIVE` pela primeira vez (na criação, na edição ou no
-status em massa) avisa os membros da igreja, uma vez só. Ver
+status em massa) avisa os membros da igreja, uma vez só. Em igreja em
+implantação o aviso espera ela sair do teste. Ver
 [notificacoes.md](notificacoes.md).
 
 ## Tela correspondente

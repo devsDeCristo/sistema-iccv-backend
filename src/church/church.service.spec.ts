@@ -35,10 +35,11 @@ function montar(
       findUnique: jest.fn().mockResolvedValue({ id: 'igreja-1', _count: {} }),
     },
     user: { findUnique: jest.fn().mockResolvedValue(pessoa) },
+    event: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
   };
 
-  return { service: new ChurchService(prisma as any), tx };
+  return { service: new ChurchService(prisma as any), tx, prisma };
 }
 
 const admin = { churchId: 'igreja-1', role: Role.ADMIN };
@@ -165,4 +166,30 @@ describe('ChurchService — igreja desativada', () => {
       expect(tx.user.update).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('ChurchService — saída da implantação', () => {
+  it('ao sair do teste, os eventos abertos da igreja avisam os membros', async () => {
+    const { service, tx, prisma } = montar(null);
+    prisma.church.findUnique.mockResolvedValue({
+      id: 'igreja-1',
+      status: 'TEST',
+      _count: {},
+    });
+    tx.church.update.mockResolvedValue({ id: 'igreja-1', status: 'ACTIVE' });
+
+    await service.update('igreja-1', { name: 'Igreja', status: 'ACTIVE' });
+
+    expect(prisma.event.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ churchId: 'igreja-1' }),
+      }),
+    );
+  });
+
+  it('quem só renomeia a igreja não dispara nada', async () => {
+    const { service, prisma } = montar(null);
+    await service.update('igreja-1', { name: 'Igreja' });
+    expect(prisma.event.findMany).not.toHaveBeenCalled();
+  });
 });

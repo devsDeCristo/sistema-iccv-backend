@@ -58,8 +58,9 @@ do banco por esta rotina. Roda uma vez por dia, às 3h.
 ### Limpeza de notificações antigas
 
 `purgeOldNotifications` apaga os destinatários (`NotificationRecipient`) lidos
-há mais de 90 dias e os não lidos com mais de 180. A `Notification` fica: é ela
-que impede a mesma origem de avisar de novo. Roda uma vez por dia, às 4h. Ver
+há mais de 90 dias e os não lidos com mais de 180. A `Notification` fica, porque
+é ela que impede a mesma origem de avisar de novo; sem destinatário e com mais
+de um ano, sai também. Roda uma vez por dia, às 4h. Ver
 [notificacoes.md](notificacoes.md).
 
 ## Testes
