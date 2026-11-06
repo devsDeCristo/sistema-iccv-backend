@@ -46,14 +46,11 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { MailService } from 'src/mail/mail.service';
 import { LOGO_DO_EMAIL } from 'src/mail/logo';
 import { escapeHtml } from 'src/quadrante/quadrante-pdf';
-import {
-  EMAIL_EM_USO,
-  mascararEmail,
-  mudaAcesso,
-} from './acesso';
+import { EMAIL_EM_USO, mascararEmail, mudaAcesso } from './acesso';
 import { SELECT_MODULOS } from 'src/planos/modulos';
 import { podeBloquear } from 'src/auth/bloqueio';
 import { historicoDaConta } from './exclusao';
+import { notificarPedidoDeMembro } from 'src/notificacoes/notificar';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -130,6 +127,10 @@ export class UserService {
             : otherChurchName?.trim() || null,
         },
       });
+
+      if (igrejaPedida) {
+        await notificarPedidoDeMembro(this.prisma, user.id, igrejaPedida);
+      }
 
       // o aceite marcado na tela de cadastro, com de onde ele veio
       if (acceptedTerms === true) {
@@ -278,7 +279,7 @@ export class UserService {
             pessoasDasIgrejas(igrejasDoEvento),
           ],
         }
-      : (doPerfil ?? {});
+      : doPerfil ?? {};
 
     const recortes = [base, lente].filter(
       (recorte) => Object.keys(recorte).length > 0,
@@ -290,8 +291,8 @@ export class UserService {
     const churchIds = podeUsarLente
       ? [filters!.churchId as string]
       : igrejasDoEvento.length
-        ? [...alcance, ...igrejasDoEvento]
-        : tenantChurchIds(requester, [Role.ADMIN]);
+      ? [...alcance, ...igrejasDoEvento]
+      : tenantChurchIds(requester, [Role.ADMIN]);
 
     const users = await this.prisma.user.findMany({
       where: {
@@ -327,7 +328,9 @@ export class UserService {
         events: {
           // quem participa de evento de outra igreja entra na lista pelo
           // vínculo local, mas o evento de lá não aparece junto
-          where: churchIds ? { event: { churchId: { in: churchIds } } } : undefined,
+          where: churchIds
+            ? { event: { churchId: { in: churchIds } } }
+            : undefined,
           include: {
             event: {
               select: {
@@ -816,9 +819,7 @@ export class UserService {
         // o perfil global só tem três valores: dev, super admin e usuário
         // comum. Admin e tesouraria moram nos vínculos, um por igreja.
         if (data.role !== undefined) {
-          if (
-            ![Role.DEV, Role.SUPER_ADMIN, Role.USER].includes(data.role)
-          ) {
+          if (![Role.DEV, Role.SUPER_ADMIN, Role.USER].includes(data.role)) {
             throw new BadRequestException(
               'Admin e tesouraria são definidos por igreja, em churchRoles',
             );
@@ -1013,7 +1014,9 @@ export class UserService {
     const historico = historicoDaConta({ ...alvo._count, pagamentos });
     if (historico.length) {
       throw new ConflictException(
-        `Esta conta tem histórico e não pode ser excluída: ${historico.join(', ')}.`,
+        `Esta conta tem histórico e não pode ser excluída: ${historico.join(
+          ', ',
+        )}.`,
       );
     }
 

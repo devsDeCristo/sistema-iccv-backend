@@ -32,6 +32,7 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 | Dizimistas, livro-caixa, Pluggy e tesoureiros de evento | `src/tesouraria`, `src/pluggy`, `src/auth/tesoureiro-do-evento.ts` | [tesouraria.md](tesouraria.md) |
 | **Comunicação e operação** | | |
 | Notícias e WhatsApp | `src/news`, `src/whatsapp` | [noticias-e-whatsapp.md](noticias-e-whatsapp.md) |
+| Notificações (sininho) | `src/notificacoes` | [notificacoes.md](notificacoes.md) |
 | E-mail | `src/mail` | [email.md](email.md) |
 | Dashboard | `src/dashboard` | [dashboard.md](dashboard.md) |
 | Logs e auditoria | `src/logs`, `src/context`, `src/prisma` | [logs-e-auditoria.md](logs-e-auditoria.md) |

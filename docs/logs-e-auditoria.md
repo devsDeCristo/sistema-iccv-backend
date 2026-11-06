@@ -43,6 +43,7 @@ intercepta `create`, `update`, `delete`, `createMany`, `updateMany`,
 | `PaymentLog` | é log também — auditar geraria linha genérica em dobro para a mesma escrita financeira |
 | `WhatsappAuth` | são as chaves do Signal, reescritas a cada mensagem trocada; encheria a tabela e copiaria material criptográfico |
 | `LoginAttempt` | é um registro por tentativa de entrada; auditar geraria uma linha de log por login, e o log de auditoria existe para contar o que as pessoas mudam, não quantas vezes entram |
+| `Notification`, `NotificationRecipient` | uma notícia gera uma linha por membro, e ler é um clique no sininho — nada que alguém mudou |
 
 ### Campos ocultados dentro do que é auditado (`REDACTED_FIELDS`)
 

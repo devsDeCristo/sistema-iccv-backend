@@ -18,6 +18,9 @@ Código: `src/membros` (controller, service, DTOs), campos em `User` e o modelo 
 - `GET /public/churches` (sem login): as igrejas ativas, só `id` e `name`, para o select da inscrição.
 - `PUT /users/:id` e o perfil **descartam** `requestedChurchId` e `otherChurchName`: a pessoa não troca de igreja sozinha depois da inscrição. Quem coloca e tira é a igreja, aqui.
 
+**Notificações:** o pedido feito no cadastro avisa os admins da igreja, e
+aceitar ou recusar avisa a pessoa ([notificacoes.md](notificacoes.md)).
+
 ## Quem acessa
 
 `ADMIN_ROLES` + `ChurchTenantGuard`: quem mexe é só o **admin da igreja da rota** (e dev/super admin) — nem quem é tesouraria desta igreja e admin de outra.

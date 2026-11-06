@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AtualizarFamiliaDto, CriarFamiliaDto } from './membros.dto';
+import { notificarRespostaDoPedido } from 'src/notificacoes/notificar';
 
 const PESSOA = {
   id: true,
@@ -162,20 +163,34 @@ export class MembrosService {
   }
 
   /** Aceita o pedido feito na inscrição */
-  async aceitar(churchId: string, userId: string) {
+  async aceitar(churchId: string, userId: string, actorId?: string) {
     const pessoa = await this.exigirPedido(churchId, userId);
     if (pessoa.memberChurchId) {
       throw new ConflictException('Esta pessoa já é membro de uma igreja');
     }
     await this.tornarMembro(churchId, userId);
+    await notificarRespostaDoPedido(
+      this.prisma,
+      userId,
+      churchId,
+      true,
+      actorId,
+    );
   }
 
-  async recusar(churchId: string, userId: string) {
+  async recusar(churchId: string, userId: string, actorId?: string) {
     await this.exigirPedido(churchId, userId);
     await this.prisma.user.update({
       where: { id: userId },
       data: { requestedChurchId: null },
     });
+    await notificarRespostaDoPedido(
+      this.prisma,
+      userId,
+      churchId,
+      false,
+      actorId,
+    );
   }
 
   /**

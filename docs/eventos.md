@@ -236,6 +236,12 @@ Arquivos: `src/event/event.service.ts` (`findAll`, `findOne`),
 `src/auth/tenant.ts` (`isSuperAdmin`, `tenantChurchIds`,
 `churchIdsComPerfil`).
 
+## Notificação
+
+O evento que vira `ACTIVE` pela primeira vez (na criação, na edição ou no
+status em massa) avisa os membros da igreja, uma vez só. Ver
+[notificacoes.md](notificacoes.md).
+
 ## Tela correspondente
 
 ic-front, `docs/admin-eventos.md`.

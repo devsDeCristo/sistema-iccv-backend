@@ -87,8 +87,9 @@ export class MembrosController {
   async aceitar(
     @Param('churchId') churchId: string,
     @Param('userId', ParseUUIDPipe) userId: string,
+    @Req() req: any,
   ) {
-    await this.service.aceitar(churchId, userId);
+    await this.service.aceitar(churchId, userId, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Recusa o pedido feito na inscrição' })
@@ -97,8 +98,9 @@ export class MembrosController {
   async recusar(
     @Param('churchId') churchId: string,
     @Param('userId', ParseUUIDPipe) userId: string,
+    @Req() req: any,
   ) {
-    await this.service.recusar(churchId, userId);
+    await this.service.recusar(churchId, userId, req.user?.userId);
   }
 
   @ApiOperation({ summary: 'Tira da família em que está' })

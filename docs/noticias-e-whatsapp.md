@@ -112,6 +112,13 @@ confere o perfil no banco, porque o perfil do token pode estar defasado em até
 - **Eventos elegíveis:** só grupos de eventos `ACTIVE` ou `TEST` aparecem para
   disparo — evento encerrado não recebe aviso.
 
+## Notificação
+
+A notícia que entra no ar (criada publicada, rascunho publicado ou disparo
+agendado — todos passam por `disparaEmSegundoPlano`) avisa no sininho os
+membros da igreja que publicou, uma vez só. Ver
+[notificacoes.md](notificacoes.md).
+
 ## Agendamento de disparos (`NewsSchedule`)
 
 A notícia pode ter vários agendamentos, até 20. Cada um é de um destes tipos:
