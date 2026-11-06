@@ -45,7 +45,7 @@ e a tesouraria da B via a B como admin: inscrições recentes e mural.
 | --- | --- | --- |
 | `churches` | quem tem recorte (`scope: church`) | igrejas da pessoa, cada uma com o perfil que ela tem lá (pode ser admin de uma e tesouraria de outra) |
 | `events` | quem tem recorte, exceto tesouraria na leitura de "abertos" (tesouraria recebe `eventosComSaldo`, ver abaixo) | eventos da igreja, todos do mesmo tamanho na tela |
-| `pending` | todos com recorte, exceto lista de espera para tesouraria | pendências acionáveis: comprovantes em análise e lista de espera com vaga livre |
+| `pending` | todos com recorte, exceto lista de espera, membros e solicitações para tesouraria | pendências acionáveis: pedidos para ser membro, solicitações sem resposta, comprovantes em análise e lista de espera com vaga livre |
 | `treasury` | só tesouraria | resumo de cobrança em aberto (ver "Métricas financeiras") |
 | `news` | quem tem recorte e não é tesouraria | mural: últimas 3 notícias publicadas + contagem de rascunhos |
 | `resumo` | quem tem recorte (`scope: church`) | um número por módulo, para os cards do topo (ver "Resumo dos módulos") |
@@ -69,7 +69,12 @@ Os blocos seguem o plano de cada igreja do recorte — **para qualquer um que ab
 
 ### Pendências (`pending`)
 
-Duas categorias, cada uma amarrada a um evento específico:
+Quatro categorias. As duas da igreja vêm primeiro (a home não é só eventos), com `churchId` e `churchName` e sem `eventId`; só nas igrejas em que a pessoa é admin (`pendenciasDaIgreja`):
+
+- **`members`:** pessoas pedindo para entrar como membro (`User.requestedChurchId`). Não depende de plano: toda igreja tem Membros.
+- **`requests`:** solicitações dos ministérios ainda sem resposta (`REQUESTED` ou `IN_REVIEW`), só onde o plano tem `REQUESTS`.
+
+As outras duas, cada uma amarrada a um evento específico:
 
 - **`receipts`:** evento com comprovante `IN_ANALYSIS` > 0 — mesmo em evento já encerrado, porque o dinheiro continua sendo tarefa.
 - **`waitlist`:** evento com lista de espera **e** vaga livre (`seats.total - seats.taken > 0`), e que ainda não terminou (`phase !== 'finished'`). Fila em evento lotado não é pendência; chamar alguém para um evento já encerrado também não é. Tesouraria nunca recebe pendência de lista de espera — quem chama da fila é quem administra a inscrição.

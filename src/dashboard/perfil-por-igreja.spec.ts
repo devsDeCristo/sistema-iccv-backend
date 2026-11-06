@@ -28,7 +28,20 @@ function montar(
         Promise.resolve(
           where.id.in.map((id: string) => ({
             id,
+            name: `Igreja ${id}`,
             plan: { modules: planos[id] ?? [] },
+            // 2 pessoas pedindo para entrar em cada igreja
+            _count: { membershipRequests: 2 },
+          })),
+        ),
+    },
+    churchRequest: {
+      // 3 solicitações sem resposta em cada igreja com o módulo
+      groupBy: ({ where }: any) =>
+        Promise.resolve(
+          where.churchId.in.map((churchId: string) => ({
+            churchId,
+            _count: { _all: 3 },
           })),
         ),
     },
@@ -104,6 +117,23 @@ describe('DashboardService — perfil por igreja', () => {
       'NEWS',
       'TREASURY',
     ]);
+  });
+
+  it('pedidos de membro e solicitações: só onde é admin, e solicitações só com o módulo', async () => {
+    const { service } = montar({ A: ['REQUESTS'], B: ['REQUESTS'] });
+    const daA = await service.overview('u', 'A');
+    expect(daA.pending).toEqual([
+      { kind: 'members', churchId: 'A', churchName: 'Igreja A', count: 2 },
+      { kind: 'requests', churchId: 'A', churchName: 'Igreja A', count: 3 },
+    ]);
+
+    // na B é tesouraria: aceitar membro e responder pedido não é dele
+    const daB = await service.overview('u', 'B');
+    expect(daB.pending).toEqual([]);
+
+    const semModulo = montar({ A: ['EVENTS'] });
+    const home = await semModulo.service.overview('u', 'A');
+    expect(home.pending.map((p: any) => p.kind)).toEqual(['members']);
   });
 
   it('super admin abrindo a home de uma igreja vê o plano dela, e não tudo', async () => {

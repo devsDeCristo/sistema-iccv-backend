@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   CheckinStatus,
   ChurchModule,
+  ChurchRequestStatus,
   EventStatus,
   PaymentStatus,
   Prisma,
@@ -222,10 +223,16 @@ export class DashboardService {
 
     // (as "últimas inscrições" saíram da home em 13/10/2026: a home não é
     // só eventos, e os inscritos estão na lista de cada evento)
-    const [abertos, churches, news] = await Promise.all([
+    const [abertos, churches, news, daAdministracao] = await Promise.all([
       this.eventosAbertos(doRecorte),
       todasAsIgrejas ? null : this.minhasIgrejas(requester, churchIds),
       veMural ? this.mural(igrejasDoMural) : null,
+      igrejasDeAdmin
+        ? this.pendenciasDaIgreja(
+            igrejasDeAdmin,
+            comModulo(igrejasDeAdmin, ChurchModule.REQUESTS),
+          )
+        : [],
     ]);
 
     const treasury =
@@ -294,7 +301,11 @@ export class DashboardService {
       scope: todasAsIgrejas ? 'system' : 'church',
       role: perfil,
       churches,
-      pending: this.pendencias(daIgreja, perfil, todasAsIgrejas),
+      // as da igreja primeiro: a home não é só eventos
+      pending: [
+        ...daAdministracao,
+        ...this.pendencias(daIgreja, perfil, todasAsIgrejas),
+      ],
       /**
        * Quem atravessa todas as igrejas não recebe os blocos de operação.
        *
@@ -698,6 +709,62 @@ export class DashboardService {
     }
 
     return lista;
+  }
+
+  /**
+   * O que espera o admin fora dos eventos, por igreja: gente pedindo para
+   * entrar como membro e solicitações dos ministérios ainda sem resposta
+   * (solicitadas ou em análise). Só nas igrejas em que a pessoa é admin —
+   * aceitar membro e responder pedido é dele, não da tesouraria —, e
+   * Solicitações só onde o plano tem o módulo.
+   */
+  private async pendenciasDaIgreja(
+    igrejasDeAdmin: string[],
+    comSolicitacoes: string[],
+  ) {
+    if (!igrejasDeAdmin.length) return [];
+    const [igrejas, semResposta] = await Promise.all([
+      this.prisma.church.findMany({
+        where: { id: { in: igrejasDeAdmin } },
+        select: {
+          id: true,
+          name: true,
+          _count: { select: { membershipRequests: true } },
+        },
+      }),
+      comSolicitacoes.length
+        ? this.prisma.churchRequest.groupBy({
+            by: ['churchId'],
+            where: {
+              churchId: { in: comSolicitacoes },
+              status: {
+                in: [
+                  ChurchRequestStatus.REQUESTED,
+                  ChurchRequestStatus.IN_REVIEW,
+                ],
+              },
+            },
+            _count: { _all: true },
+          })
+        : [],
+    ]);
+
+    return igrejas.flatMap((igreja) => {
+      const tarefa = (kind: 'members' | 'requests', count: number) => ({
+        kind,
+        churchId: igreja.id,
+        churchName: igreja.name,
+        count,
+      });
+      return [
+        ...(igreja._count.membershipRequests
+          ? [tarefa('members', igreja._count.membershipRequests)]
+          : []),
+        ...semResposta
+          .filter((grupo) => grupo.churchId === igreja.id)
+          .map((grupo) => tarefa('requests', grupo._count._all)),
+      ];
+    });
   }
 
   /**
