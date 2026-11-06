@@ -55,6 +55,13 @@ só o que a rotina, como cron, decide sozinha:
 e nunca voltou a usar o código — o token expira sozinho, mas a linha só some
 do banco por esta rotina. Roda uma vez por dia, às 3h.
 
+### Limpeza de notificações antigas
+
+`purgeOldNotifications` apaga os destinatários (`NotificationRecipient`) lidos
+há mais de 90 dias e os não lidos com mais de 180. A `Notification` fica: é ela
+que impede a mesma origem de avisar de novo. Roda uma vez por dia, às 4h. Ver
+[notificacoes.md](notificacoes.md).
+
 ## Testes
 
 Não há `*.spec.ts` em `src/cron`.

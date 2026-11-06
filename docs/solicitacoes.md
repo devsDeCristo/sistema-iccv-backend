@@ -47,6 +47,9 @@ existem.
   `modulos`), ou `null` para quem não é membro de nenhuma igreja ativa. É por
   ele que a área do participante decide mostrar Solicitações.
 
+**Notificações:** a solicitação nova avisa os admins da igreja, e cada
+mudança de situação avisa quem pediu ([notificacoes.md](notificacoes.md)).
+
 ## Rotas
 
 | Método | Rota | Quem | O que faz |

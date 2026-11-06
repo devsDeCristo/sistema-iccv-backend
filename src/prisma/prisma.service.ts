@@ -317,11 +317,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       //
       // `PaymentLog` sai porque é log também: auditar a trilha do dinheiro
       // geraria uma linha genérica por linha financeira, em dobro.
+      //
+      // As notificações saem pelo mesmo motivo: uma notícia gera uma linha
+      // por membro, e ler é um clique no sininho — nada que alguém mudou.
       if (
         params.model === 'Log' ||
         params.model === 'PaymentLog' ||
         params.model === 'WhatsappAuth' ||
-        params.model === 'LoginAttempt'
+        params.model === 'LoginAttempt' ||
+        params.model === 'Notification' ||
+        params.model === 'NotificationRecipient'
       ) {
         return next(params);
       }

@@ -82,6 +82,7 @@ import {
 import { calculateAge } from 'src/utils/age';
 import { PaymentGatewayRegistry } from 'src/gateways/core/payment-gateway.registry';
 import { fileToDataUri } from 'src/utils/documentBase64';
+import { notificarEvento } from 'src/notificacoes/notificar';
 import {
   SELECT_MODULOS,
   cobraOnline,
@@ -1952,6 +1953,10 @@ export class EventService {
       });
 
       this.avisarEquipe(event.id, avisosDaEquipe);
+      // aberto ao público já na criação: os membros da igreja ficam sabendo
+      if (updatedEvent.status === EventStatus.ACTIVE) {
+        await notificarEvento(this.prisma, event.id, requesterId);
+      }
 
       return updatedEvent;
     } catch (error) {
@@ -2542,6 +2547,14 @@ export class EventService {
         })
       : { count: 0 };
 
+    if (dto.status === EventStatus.ACTIVE) {
+      for (const id of permitidos) {
+        if (porId.get(id)?.status !== EventStatus.ACTIVE) {
+          await notificarEvento(this.prisma, id, requesterId);
+        }
+      }
+    }
+
     return { atualizados: count, falhas };
   }
 
@@ -2905,6 +2918,12 @@ export class EventService {
       return this.gravarEquipe(tx, id, updateEvent, requesterId);
     });
     this.avisarEquipe(id, avisosDaEquipe);
+    if (
+      event.status !== EventStatus.ACTIVE &&
+      updateEvent.status === EventStatus.ACTIVE
+    ) {
+      await notificarEvento(this.prisma, id, requesterId);
+    }
 
     return this.findOneClear(id);
   }

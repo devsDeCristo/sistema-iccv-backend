@@ -70,7 +70,8 @@ export class SolicitacoesDaIgrejaController {
     @Param('churchId') churchId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MudarStatusDto,
+    @Req() req: any,
   ) {
-    return this.service.mudarStatus(churchId, id, dto);
+    return this.service.mudarStatus(churchId, id, dto, req.user?.userId);
   }
 }

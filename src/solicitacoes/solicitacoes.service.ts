@@ -11,6 +11,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { exigirModulo } from 'src/planos/modulos';
+import {
+  notificarRespostaDaSolicitacao,
+  notificarSolicitacao,
+} from 'src/notificacoes/notificar';
 import { CriarSolicitacaoDto, MudarStatusDto } from './solicitacoes.dto';
 
 const CAMPOS = {
@@ -70,7 +74,7 @@ export class SolicitacoesService {
     }
     await exigirModulo(this.prisma, igreja.id, ChurchModule.REQUESTS);
 
-    return this.prisma.churchRequest.create({
+    const criada = await this.prisma.churchRequest.create({
       data: {
         churchId: igreja.id,
         requesterId: userId,
@@ -88,6 +92,8 @@ export class SolicitacoesService {
       },
       select: CAMPOS,
     });
+    await notificarSolicitacao(this.prisma, criada.id);
+    return criada;
   }
 
   /** As solicitações da igreja, com quem pediu, as novas primeiro */
@@ -119,10 +125,15 @@ export class SolicitacoesService {
    * de `produtosAceitos`, que precisam ser deste pedido, e alguns — nem
    * nenhum (seria recusada) nem todos (seria aceita).
    */
-  async mudarStatus(churchId: string, id: string, dto: MudarStatusDto) {
+  async mudarStatus(
+    churchId: string,
+    id: string,
+    dto: MudarStatusDto,
+    actorId?: string,
+  ) {
     const atual = await this.prisma.churchRequest.findFirst({
       where: { id, churchId },
-      select: { id: true, items: { select: { id: true } } },
+      select: { id: true, status: true, items: { select: { id: true } } },
     });
     if (!atual) throw new NotFoundException('Solicitação não encontrada');
 
@@ -158,7 +169,7 @@ export class SolicitacoesService {
 
     // interativa: com a forma em array, o middleware de auditoria descarta as
     // escritas sem lançar erro
-    return this.prisma.$transaction(async (tx) => {
+    const salva = await this.prisma.$transaction(async (tx) => {
       for (const itemId of ids) {
         await tx.churchRequestItem.update({
           where: { id: itemId },
@@ -176,5 +187,10 @@ export class SolicitacoesService {
         select: CAMPOS,
       });
     });
+    // só quando a situação muda: corrigir a resposta não avisa de novo
+    if (atual.status !== dto.status) {
+      await notificarRespostaDaSolicitacao(this.prisma, id, actorId);
+    }
+    return salva;
   }
 }

@@ -319,4 +319,29 @@ export class CronService {
       }
     });
   }
+
+  /**
+   * O sininho não guarda tudo para sempre: some a notificação lida há mais de
+   * 90 dias e a não lida com mais de 180. Só o destinatário sai — a
+   * `Notification` fica, porque é ela que impede a mesma origem de avisar de
+   * novo (a notícia que se repete toda semana).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  purgeOldNotifications() {
+    return runAsJob('purgeOldNotifications', async () => {
+      const dias = (n: number) => new Date(Date.now() - n * 86_400_000);
+      const { count } = await this.prisma.notificationRecipient.deleteMany({
+        where: {
+          OR: [
+            { readAt: { lt: dias(90) } },
+            { readAt: null, createdAt: { lt: dias(180) } },
+          ],
+        },
+      });
+
+      if (count > 0) {
+        this.logger.log(`🧹 ${count} notificação(ões) antiga(s) removida(s)`);
+      }
+    });
+  }
 }

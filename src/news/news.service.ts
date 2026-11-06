@@ -37,6 +37,7 @@ import {
   validarAgendamento,
 } from './agendamento';
 import { exigirModulo, modulosDa, SELECT_MODULOS } from 'src/planos/modulos';
+import { notificarNoticia } from 'src/notificacoes/notificar';
 
 /**
  * Tamanho máximo da mensagem.
@@ -618,6 +619,8 @@ export class NewsService {
    * destino fica gravado em `news_on_group_roles`, que é o que a tela mostra.
    */
   private disparaEmSegundoPlano(newsId: string, origem: NewsDispatchOrigin) {
+    // os três caminhos para o ar passam aqui; repetir não avisa de novo
+    void notificarNoticia(this.prisma, newsId);
     this.disparaNoWhatsapp(newsId, origem).catch((erro) =>
       this.logger.error(`Disparo da notícia ${newsId} falhou: ${erro.message}`),
     );
