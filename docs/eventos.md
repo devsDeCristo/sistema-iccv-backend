@@ -10,6 +10,13 @@ Arquivos: `src/event/event.controller.ts`, `src/event/event.service.ts`,
 `src/event/event-modules.ts`, `src/event/event-quadrante.ts`,
 `src/event/event-terms.ts`.
 
+## Tipo do evento (`EventType`)
+
+`CURSILHO`, `RETIRO` ou `OUTRO`. O backend não muda nada por tipo: ele só decide
+o que o cadastro do front já traz pronto (Cursilho e Retiro nascem com os grupos
+de inscrição de cada um; Outro nasce sem grupo nenhum) e o selo do evento. Tipo
+fora da lista é `400` (`@IsEnum`), e não erro do banco.
+
 ## Status do evento (`EventStatus`)
 
 | Status | Efeito |

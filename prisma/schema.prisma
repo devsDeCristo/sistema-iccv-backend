@@ -1060,9 +1060,13 @@ enum CheckinStatus {
   DONE
 }
 
+/// Só muda o que o cadastro do evento já traz pronto (no front): Cursilho e
+/// Retiro nascem com os grupos de inscrição de cada um; Outro nasce sem nenhum,
+/// e o admin monta os grupos do zero.
 enum EventType {
   CURSILHO
   RETIRO
+  OUTRO
 }
 
 /// Em que pé a igreja está — a mesma régua do `EventStatus`, um andar acima.

@@ -378,9 +378,10 @@ export class EventDto {
   certificate?: ConfigurarCertificadoDto;
   @ApiProperty({
     example: 'CURSILHO',
+    enum: EventType,
     description: 'Tipo do evento',
   })
-  @IsString()
+  @IsEnum(EventType)
   type: EventType;
 
   @ApiProperty({
