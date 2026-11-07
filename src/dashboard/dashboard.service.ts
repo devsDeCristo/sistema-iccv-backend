@@ -243,7 +243,9 @@ export class DashboardService {
       igrejasDeAdmin
         ? this.pendenciasDaIgreja(
             igrejasDeAdmin,
-            comModulo(igrejasDeAdmin, ChurchModule.REQUESTS),
+            // solicitações: também as da tesouraria, que aprova junto com o
+            // pastor (o recorte já é de admin e tesouraria)
+            comModulo(churchIds ?? [], ChurchModule.REQUESTS),
           )
         : [],
     ]);
@@ -714,21 +716,24 @@ export class DashboardService {
   }
 
   /**
-   * O que espera o admin fora dos eventos, por igreja: gente pedindo para
+   * O que espera o painel fora dos eventos, por igreja: gente pedindo para
    * entrar como membro e solicitações dos ministérios ainda sem resposta
-   * (solicitadas, em análise ou esperando o pastor ou a tesouraria). Só nas
-   * igrejas em que a pessoa é admin — aceitar membro é dele, não da
-   * tesouraria —, e
-   * Solicitações só onde o plano tem o módulo.
+   * (solicitadas, em análise ou esperando o pastor ou a tesouraria). Pedido
+   * de membro, só nas igrejas em que a pessoa é admin — aceitar membro é dele,
+   * não da tesouraria. Solicitações, nas igrejas em que ela é admin **ou
+   * tesouraria** (`comSolicitacoes`), e só onde o plano tem o módulo: até
+   * 07/11/2026 a tesouraria, que entrou no módulo e aprova junto com o pastor,
+   * não via a tarefa.
    */
   private async pendenciasDaIgreja(
     igrejasDeAdmin: string[],
     comSolicitacoes: string[],
   ) {
-    if (!igrejasDeAdmin.length) return [];
+    const todas = [...new Set([...igrejasDeAdmin, ...comSolicitacoes])];
+    if (!todas.length) return [];
     const [igrejas, semResposta] = await Promise.all([
       this.prisma.church.findMany({
-        where: { id: { in: igrejasDeAdmin } },
+        where: { id: { in: todas } },
         select: {
           id: true,
           name: true,
@@ -763,7 +768,8 @@ export class DashboardService {
         count,
       });
       return [
-        ...(igreja._count.membershipRequests
+        ...(igrejasDeAdmin.includes(igreja.id) &&
+        igreja._count.membershipRequests
           ? [tarefa('members', igreja._count.membershipRequests)]
           : []),
         ...semResposta

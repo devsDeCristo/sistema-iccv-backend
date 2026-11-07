@@ -1865,6 +1865,9 @@ enum NotificationType {
   NEWS
   /// A situação da solicitação mudou (quem pediu)
   CHURCH_REQUEST_ANSWERED
+  /// Um dos dois aprovou e falta o outro: avisa quem falta (a tesouraria da
+  /// igreja, ou o pastor)
+  CHURCH_REQUEST_AWAITING
   /// O pedido para ser membro foi aceito ou recusado (a pessoa)
   MEMBERSHIP_ANSWERED
   /// Evento aberto ao público pela primeira vez (membros da igreja)

@@ -46,7 +46,7 @@ e a tesouraria da B via a B como admin: inscrições recentes e mural.
 | --- | --- | --- |
 | `churches` | quem tem recorte (`scope: church`) | igrejas da pessoa, cada uma com o perfil que ela tem lá (pode ser admin de uma e tesouraria de outra) |
 | `events` | quem tem recorte, exceto tesouraria na leitura de "abertos" (tesouraria recebe `eventosComSaldo`, ver abaixo) | eventos da igreja, todos do mesmo tamanho na tela |
-| `pending` | todos com recorte, exceto lista de espera, membros e solicitações para tesouraria | pendências acionáveis: pedidos para ser membro, solicitações sem resposta, comprovantes em análise e lista de espera com vaga livre |
+| `pending` | todos com recorte, exceto lista de espera e pedidos de membro para tesouraria | pendências acionáveis: pedidos para ser membro, solicitações sem resposta, comprovantes em análise e lista de espera com vaga livre |
 | `treasury` | só tesouraria | resumo de cobrança em aberto (ver "Métricas financeiras") |
 | `news` | quem tem recorte e não é tesouraria | mural: últimas 3 notícias publicadas + contagem de rascunhos |
 | `resumo` | quem tem recorte (`scope: church`) | um número por módulo, para os cards do topo (ver "Resumo dos módulos") |
@@ -69,10 +69,10 @@ Os blocos seguem o plano de cada igreja do recorte — **para qualquer um que ab
 
 ### Pendências (`pending`)
 
-Quatro categorias. As duas da igreja vêm primeiro (a home não é só eventos), com `churchId` e `churchName` e sem `eventId`; só nas igrejas em que a pessoa é admin (`pendenciasDaIgreja`):
+Quatro categorias. As duas da igreja vêm primeiro (a home não é só eventos), com `churchId` e `churchName` e sem `eventId` (`pendenciasDaIgreja`):
 
-- **`members`:** pessoas pedindo para entrar como membro (`User.requestedChurchId`). Não depende de plano: toda igreja tem Membros.
-- **`requests`:** solicitações dos ministérios ainda sem resposta (`REQUESTED` ou `IN_REVIEW`), só onde o plano tem `REQUESTS`.
+- **`members`:** pessoas pedindo para entrar como membro (`User.requestedChurchId`). Não depende de plano: toda igreja tem Membros. Só nas igrejas em que a pessoa é admin.
+- **`requests`:** solicitações dos ministérios ainda sem decisão final (`REQUESTED`, `IN_REVIEW`, `AWAITING_TREASURY` ou `AWAITING_PASTOR`), só onde o plano tem `REQUESTS`, nas igrejas em que a pessoa é admin **ou tesouraria** — a tesouraria aprova junto com o pastor (até 07/11/2026 ela não via esta tarefa). Teste em `perfil-por-igreja.spec.ts`.
 
 As outras duas, cada uma amarrada a um evento específico:
 

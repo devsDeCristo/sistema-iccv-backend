@@ -126,6 +126,15 @@ Só admin edita. Regras em `UserService.resolveVinculos`:
   admin de uma igreja não apaga, mesmo sem querer, a permissão que alguém tem
   na igreja vizinha. Admin sem nenhuma igreja administrada responde `403` ao
   tentar dar permissão.
+- **O líder espiritual segue admin da igreja que lidera**
+  (`assertLiderSegueAdmin`): tirar o admin dele nessa igreja — ou trocar por
+  tesouraria — responde `409` ("É o líder espiritual de …: troque o líder em
+  Igrejas antes"). É por esse vínculo que o pastor entra no painel e dá a
+  confirmação dele nas Solicitações; sem ele, as solicitações da igreja ficam
+  presas em "aguardando pastor". Vale para a edição individual e a em massa
+  (que volta a pessoa em `falhas`, com o motivo). Só barra a **perda**: o
+  líder que já estava sem o vínculo (dado antigo) não trava outras edições do
+  cadastro dele. Desde 07/11/2026; teste em `lider-segue-admin.spec.ts`.
 - Gravar `churchRoles` recalcula `User.role` (o perfil efetivo) na mesma
   transação.
 

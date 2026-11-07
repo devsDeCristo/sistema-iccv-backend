@@ -78,7 +78,10 @@ existem.
 (até 07/11/2026, só os admins: a tesouraria que entrou no módulo não ficava
 sabendo), e a mudança de
 situação avisa quem pediu — em análise e o fim (aceita, em parte, recusada);
-o "aguardando" é trâmite de dentro e não avisa ([notificacoes.md](notificacoes.md)).
+o "aguardando" não avisa o membro, e sim **quem falta decidir**: o pastor
+aprovou, a tesouraria da igreja recebe "Solicitação aguardando a tesouraria";
+a tesouraria aprovou, o pastor recebe "Solicitação aguardando o pastor"
+(`CHURCH_REQUEST_AWAITING`, [notificacoes.md](notificacoes.md)).
 Na home do painel, a tarefa de solicitações sem resposta conta também as que
 aguardam o pastor ou a tesouraria.
 

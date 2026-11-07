@@ -16,6 +16,7 @@ import { exigirModulo } from 'src/planos/modulos';
 import {
   notificarRespostaDaSolicitacao,
   notificarSolicitacao,
+  notificarVezNaSolicitacao,
 } from 'src/notificacoes/notificar';
 import {
   CriarSolicitacaoDto,
@@ -352,9 +353,12 @@ export class SolicitacoesService {
       });
     });
 
-    // o membro fica sabendo do fim; o "aguardando" é trâmite de dentro
+    // o membro fica sabendo do fim; o "aguardando" é trâmite de dentro, e
+    // avisa só quem falta decidir
     if (DECIDIDA.includes(salva.status)) {
       await notificarRespostaDaSolicitacao(this.prisma, id, userId);
+    } else {
+      await notificarVezNaSolicitacao(this.prisma, id, userId);
     }
     return salva;
   }

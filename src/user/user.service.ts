@@ -507,7 +507,15 @@ export class UserService {
       }
     }
 
-    if (isSuperAdmin(requester)) return limpos;
+    const atuais = await this.prisma.userChurchRole.findMany({
+      where: { userId: targetId },
+      select: { churchId: true, role: true },
+    });
+
+    if (isSuperAdmin(requester)) {
+      await this.assertLiderSegueAdmin(targetId, atuais, limpos);
+      return limpos;
+    }
 
     const minhas = churchIdsComPerfil(requester, [Role.ADMIN]);
 
@@ -524,16 +532,50 @@ export class UserService {
       );
     }
 
-    const atuais = await this.prisma.userChurchRole.findMany({
-      where: { userId: targetId },
-      select: { churchId: true, role: true },
-    });
-
     const preservados = atuais.filter(
       (vinculo) => !minhas.includes(vinculo.churchId),
     );
 
-    return [...preservados, ...limpos];
+    const final = [...preservados, ...limpos];
+    await this.assertLiderSegueAdmin(targetId, atuais, final);
+    return final;
+  }
+
+  /**
+   * O líder espiritual de uma igreja (o pastor, `Church.spiritualLeaderId`) é
+   * admin dela: o vínculo nasce com o cadastro do líder, e é por ele que o
+   * pastor entra no painel e dá a sua confirmação nas Solicitações. Sem ele,
+   * as solicitações da igreja ficam presas em "aguardando pastor".
+   *
+   * Por isso tirar o admin do líder — ou trocar por tesouraria — pede trocar
+   * o líder em Igrejas antes. Só barra a **perda**: o líder que já está sem o
+   * vínculo (dado antigo) não trava outras edições do cadastro dele.
+   */
+  private async assertLiderSegueAdmin(
+    targetId: string,
+    atuais: VinculoDeIgreja[],
+    final: VinculoDeIgreja[],
+  ) {
+    const eraAdmin = atuais
+      .filter((vinculo) => vinculo.role === Role.ADMIN)
+      .map((vinculo) => vinculo.churchId);
+    const segueAdmin = final
+      .filter((vinculo) => vinculo.role === Role.ADMIN)
+      .map((vinculo) => vinculo.churchId);
+    const perdidas = eraAdmin.filter(
+      (churchId) => !segueAdmin.includes(churchId),
+    );
+    if (!perdidas.length) return;
+
+    const liderada = await this.prisma.church.findFirst({
+      where: { id: { in: perdidas }, spiritualLeaderId: targetId },
+      select: { name: true },
+    });
+    if (liderada) {
+      throw new ConflictException(
+        `É o líder espiritual de ${liderada.name}: troque o líder em Igrejas antes de tirar o admin dele nessa igreja`,
+      );
+    }
   }
 
   private async assertChurchExists(churchId: string) {

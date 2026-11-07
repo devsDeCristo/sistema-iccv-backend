@@ -119,7 +119,7 @@ describe('DashboardService — perfil por igreja', () => {
     ]);
   });
 
-  it('pedidos de membro e solicitações: só onde é admin, e solicitações só com o módulo', async () => {
+  it('pedidos de membro só onde é admin; solicitações também onde é tesouraria, e só com o módulo', async () => {
     const { service } = montar({ A: ['REQUESTS'], B: ['REQUESTS'] });
     const daA = await service.overview('u', 'A');
     expect(daA.pending).toEqual([
@@ -127,9 +127,12 @@ describe('DashboardService — perfil por igreja', () => {
       { kind: 'requests', churchId: 'A', churchName: 'Igreja A', count: 3 },
     ]);
 
-    // na B é tesouraria: aceitar membro e responder pedido não é dele
+    // na B é tesouraria: aceitar membro não é dele; a solicitação, ele aprova
+    // junto com o pastor
     const daB = await service.overview('u', 'B');
-    expect(daB.pending).toEqual([]);
+    expect(daB.pending).toEqual([
+      { kind: 'requests', churchId: 'B', churchName: 'Igreja B', count: 3 },
+    ]);
 
     const semModulo = montar({ A: ['EVENTS'] });
     const home = await semModulo.service.overview('u', 'A');

@@ -14,7 +14,8 @@ minuto.
 | `MEMBERSHIP_REQUEST` — novo pedido de membro | admins da igreja pedida | cadastro com `requestedChurchId` (`UserService.create`) | o usuário |
 | `MEMBERSHIP_ANSWERED` — pedido aceito ou recusado | a pessoa | `MembrosService.recusar` e `tornarMembro` — este cobre aceitar, adicionar pela busca e a planilha de dízimos, quando a igreja é a que ela pediu | `<churchId>:<userId>` |
 | `CHURCH_REQUEST` — nova solicitação | admins **e tesouraria** da igreja (os dois entram no painel de Solicitações, e aprovar pede a tesouraria) | `SolicitacoesService.criar` | a solicitação |
-| `CHURCH_REQUEST_ANSWERED` — a situação da solicitação mudou | quem pediu | `SolicitacoesService.mudarStatus`, só quando a situação muda (voltar para "solicitada" não avisa) | `<id>:<status>` |
+| `CHURCH_REQUEST_ANSWERED` — a situação da solicitação mudou | quem pediu | `SolicitacoesService.mudarStatus` (em análise) e `decidir` (o fim: aceita, em parte, recusada), só quando a situação muda (voltar para "solicitada" e o "aguardando" não avisam quem pediu) | `<id>:<status>` |
+| `CHURCH_REQUEST_AWAITING` — é a sua vez de decidir | quem falta: a tesouraria da igreja (o pastor aprovou) ou o pastor, o líder espiritual (a tesouraria aprovou). Sem pastor cadastrado, ninguém | `SolicitacoesService.decidir`, quando a solicitação fica aguardando (`notificarVezNaSolicitacao`) | `<id>:<status>` |
 | `NEWS` — notícia no ar | membros da igreja que publicou; com evento de público, quem está nele (inscrito ou na lista de espera), de qualquer igreja — a regra do mural | `NewsService.disparaEmSegundoPlano` — criar publicada, publicar o rascunho e o disparo agendado passam por ali | `<id>:<publishedAt>` |
 | `EVENT` — evento aberto ao público | membros da igreja | evento que vira `ACTIVE` (ensaio, `TEST`, não conta): criar, editar e status em massa; e a igreja que sai da implantação (`ChurchService.update` → `notificarEventosDaIgreja`, eventos abertos que não acabaram) | o evento |
 

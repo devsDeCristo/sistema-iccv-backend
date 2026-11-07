@@ -72,6 +72,11 @@ Vincular alguém como `spiritualLeaderId`:
 - **Assina e-mails:** é o nome que aparece assinando os e-mails de confirmação
   dos eventos daquela igreja (substituiu uma assinatura fixa que saía igual
   para todas).
+- **O líder não perde o admin pela tela de usuários.** Enquanto for o líder,
+  tirar o admin dele na igreja responde `409`: é por esse vínculo que ele dá a
+  confirmação do pastor nas Solicitações (ver `docs/usuarios.md`). Para tirar,
+  troque o líder aqui antes. Igreja com o líder já sem o vínculo (dado antigo)
+  volta a tê-lo ao ser salva de novo com ele como líder.
 - **Trocar de líder não rebaixa o anterior.** Quem deixou de ser líder
   continua admin da igreja até alguém tirar essa permissão manualmente pela
   tela de usuários — perder acesso ao painel não é consequência automática de

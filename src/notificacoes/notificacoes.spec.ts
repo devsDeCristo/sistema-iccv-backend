@@ -10,6 +10,7 @@ import {
   notificarPedidoDeMembro,
   notificarRespostaDaSolicitacao,
   notificarSolicitacao,
+  notificarVezNaSolicitacao,
 } from './notificar';
 
 function montar({
@@ -53,6 +54,7 @@ function montar({
         response: null,
         requesterId: 'bia',
         requester: { fullName: 'Bia' },
+        church: { spiritualLeaderId: 'pastor-1' },
       })),
     },
     news: {
@@ -131,6 +133,34 @@ describe('notificar', () => {
     expect(criadas[0].sourceId).toBe('s1:REJECTED');
     expect(criadas[0].title).toBe('Solicitação recusada');
     expect(destinatarios()).toEqual([['bia']]);
+  });
+
+  it('o pastor aprovou: avisa a tesouraria da igreja que é a vez dela', async () => {
+    const { prisma, criadas, destinatarios } = montar({
+      status: 'AWAITING_TREASURY',
+    });
+    await notificarVezNaSolicitacao(prisma, 's1', 'pastor-1');
+    expect(criadas[0]).toMatchObject({
+      type: 'CHURCH_REQUEST_AWAITING',
+      sourceId: 's1:AWAITING_TREASURY',
+      title: 'Solicitação aguardando a tesouraria',
+    });
+    expect(destinatarios()).toEqual([['tes-1']]);
+  });
+
+  it('a tesouraria aprovou: avisa o pastor', async () => {
+    const { prisma, criadas, destinatarios } = montar({
+      status: 'AWAITING_PASTOR',
+    });
+    await notificarVezNaSolicitacao(prisma, 's1', 'tes-1');
+    expect(criadas[0].title).toBe('Solicitação aguardando o pastor');
+    expect(destinatarios()).toEqual([['pastor-1']]);
+  });
+
+  it('fora do "aguardando", ninguém tem vez a avisar', async () => {
+    const { prisma, criadas } = montar({ status: 'ACCEPTED' });
+    await notificarVezNaSolicitacao(prisma, 's1');
+    expect(criadas).toHaveLength(0);
   });
 
   it('voltar para solicitada não avisa', async () => {

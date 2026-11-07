@@ -210,6 +210,55 @@ export const notificarSolicitacao = (prisma: Prisma, requestId: string) =>
     );
   });
 
+/**
+ * Um dos dois aprovou e falta o outro: avisa quem falta — a tesouraria da
+ * igreja (`AWAITING_TREASURY`) ou o pastor, o líder espiritual dela
+ * (`AWAITING_PASTOR`). Uma vez por situação (`<id>:<status>`). Sem pastor
+ * cadastrado não há a quem avisar: a tela da solicitação já diz isso.
+ */
+export const notificarVezNaSolicitacao = (
+  prisma: Prisma,
+  requestId: string,
+  quemFez?: string,
+) =>
+  seguro(`vez na solicitação ${requestId}`, async () => {
+    const s = await prisma.churchRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        title: true,
+        status: true,
+        churchId: true,
+        church: { select: { spiritualLeaderId: true } },
+      },
+    });
+    if (!s) return;
+    const daTesouraria = s.status === ChurchRequestStatus.AWAITING_TREASURY;
+    if (!daTesouraria && s.status !== ChurchRequestStatus.AWAITING_PASTOR) {
+      return;
+    }
+    const pastor = s.church.spiritualLeaderId;
+    await notificar(
+      prisma,
+      {
+        type: NotificationType.CHURCH_REQUEST_AWAITING,
+        sourceId: `${requestId}:${s.status}`,
+        title: daTesouraria
+          ? 'Solicitação aguardando a tesouraria'
+          : 'Solicitação aguardando o pastor',
+        body: `${daTesouraria ? 'O pastor' : 'A tesouraria'} aprovou: ${
+          s.title
+        }`,
+        churchId: s.churchId,
+      },
+      daTesouraria
+        ? await vinculadosDa(prisma, s.churchId, [Role.TESOURARIA])
+        : pastor
+        ? [pastor]
+        : [],
+      quemFez,
+    );
+  });
+
 const TITULO_DA_RESPOSTA: Partial<Record<ChurchRequestStatus, string>> = {
   IN_REVIEW: 'Solicitação em análise',
   ACCEPTED: 'Solicitação aceita',
