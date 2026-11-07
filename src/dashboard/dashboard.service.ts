@@ -716,8 +716,9 @@ export class DashboardService {
   /**
    * O que espera o admin fora dos eventos, por igreja: gente pedindo para
    * entrar como membro e solicitações dos ministérios ainda sem resposta
-   * (solicitadas ou em análise). Só nas igrejas em que a pessoa é admin —
-   * aceitar membro e responder pedido é dele, não da tesouraria —, e
+   * (solicitadas, em análise ou esperando o pastor ou a tesouraria). Só nas
+   * igrejas em que a pessoa é admin — aceitar membro é dele, não da
+   * tesouraria —, e
    * Solicitações só onde o plano tem o módulo.
    */
   private async pendenciasDaIgreja(
@@ -743,6 +744,9 @@ export class DashboardService {
                 in: [
                   ChurchRequestStatus.REQUESTED,
                   ChurchRequestStatus.IN_REVIEW,
+                  // no meio do trâmite: falta o pastor ou a tesouraria
+                  ChurchRequestStatus.AWAITING_TREASURY,
+                  ChurchRequestStatus.AWAITING_PASTOR,
                 ],
               },
             },

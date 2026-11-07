@@ -19,7 +19,11 @@ import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
 import { SolicitacoesService } from './solicitacoes.service';
-import { CriarSolicitacaoDto, MudarStatusDto } from './solicitacoes.dto';
+import {
+  CriarSolicitacaoDto,
+  DecidirDto,
+  MudarStatusDto,
+} from './solicitacoes.dto';
 
 /**
  * O lado do membro: qualquer pessoa logada. Quem não é membro de nenhuma
@@ -66,7 +70,17 @@ export class SolicitacoesDaIgrejaController {
     return this.service.daIgreja(churchId);
   }
 
-  @ApiOperation({ summary: 'Muda a situação de uma solicitação' })
+  @ApiOperation({
+    summary: 'Como quem está logado decide aqui: pastor, tesouraria ou nenhum',
+  })
+  @Get('papel')
+  papel(@Param('churchId') churchId: string, @Req() req: any) {
+    return this.service.papel(churchId, req.user.userId);
+  }
+
+  @ApiOperation({
+    summary: 'Põe em análise (ou de volta a solicitada) e responde ao membro',
+  })
   @Patch(':id/status')
   mudarStatus(
     @Param('churchId') churchId: string,
@@ -75,5 +89,19 @@ export class SolicitacoesDaIgrejaController {
     @Req() req: any,
   ) {
     return this.service.mudarStatus(churchId, id, dto, req.user?.userId);
+  }
+
+  @ApiOperation({
+    summary:
+      'Aprova ou recusa como pastor ou tesouraria: aprovar pede os dois; recusar, um',
+  })
+  @Post(':id/decisao')
+  decidir(
+    @Param('churchId') churchId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DecidirDto,
+    @Req() req: any,
+  ) {
+    return this.service.decidir(churchId, id, req.user.userId, dto);
   }
 }

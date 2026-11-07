@@ -5,7 +5,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
-  IsEnum,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -89,10 +89,25 @@ export class CriarSolicitacaoDto {
   produtos: ProdutoDaSolicitacaoDto[];
 }
 
+/** As situações que o admin põe à mão: as de antes de qualquer decisão */
+export const SITUACOES_DO_ADMIN = [
+  ChurchRequestStatus.REQUESTED,
+  ChurchRequestStatus.IN_REVIEW,
+] as const;
+
+/**
+ * O que qualquer um do painel muda: a situação de antes da decisão
+ * (solicitada ou em análise) e a resposta ao membro. Aprovar e recusar não
+ * passam por aqui, e sim por `DecidirDto`: pedem o pastor e a tesouraria.
+ */
 export class MudarStatusDto {
-  @ApiProperty({ enum: ChurchRequestStatus })
-  @IsEnum(ChurchRequestStatus, { message: 'Situação inválida' })
-  status: ChurchRequestStatus;
+  @ApiPropertyOptional({ enum: SITUACOES_DO_ADMIN })
+  @IsOptional()
+  @IsIn(SITUACOES_DO_ADMIN, {
+    message:
+      'À mão, só solicitada ou em análise: aprovar é do pastor e da tesouraria',
+  })
+  status?: (typeof SITUACOES_DO_ADMIN)[number];
 
   @ApiPropertyOptional({
     description: 'O que o membro lê junto da situação: o motivo, o prazo',
@@ -101,14 +116,29 @@ export class MudarStatusDto {
   @IsString()
   @MaxLength(1000)
   resposta?: string;
+}
+
+/** A decisão do pastor ou da tesouraria (o lado sai de quem está logado) */
+export class DecidirDto {
+  @ApiProperty({ description: '`true` aprova; `false` recusa a solicitação' })
+  @IsBoolean()
+  aprova: boolean;
 
   @ApiPropertyOptional({
     type: [String],
     description:
-      'Só em PARTIALLY_ACCEPTED: os ids dos produtos aceitos (alguns, não todos)',
+      'Ao aprovar: os ids dos produtos que este lado aprova (ao menos um). Sem a lista, todos',
   })
   @IsOptional()
   @IsArray()
   @IsUUID('all', { each: true })
   produtosAceitos?: string[];
+
+  @ApiPropertyOptional({
+    description: 'A resposta ao membro, junto da decisão',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  resposta?: string;
 }

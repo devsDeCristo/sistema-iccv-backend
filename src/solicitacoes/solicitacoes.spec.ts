@@ -6,21 +6,12 @@ import { SolicitacoesService } from './solicitacoes.service';
 
 const ITENS = ['item-a', 'item-b', 'item-c'];
 
-/** O banco de mentira: uma igreja, um membro dela e uma solicitação de 3 produtos */
+/** O banco de mentira do pedido: uma igreja e um membro dela */
 function montar({
   igrejaDoMembro = { id: 'igreja-1', status: 'ACTIVE' } as any,
   modulos = [ChurchModule.REQUESTS] as ChurchModule[],
 } = {}) {
   const criadas: any[] = [];
-  const decisoes: Record<string, boolean | null> = {};
-  const tx = {
-    churchRequestItem: {
-      update: jest.fn(async ({ where, data }: any) => {
-        decisoes[where.id] = data.accepted;
-      }),
-    },
-    churchRequest: { update: jest.fn(async ({ data }: any) => data) },
-  };
   const prisma = {
     user: {
       findUnique: jest.fn(async () => ({ memberChurch: igrejaDoMembro })),
@@ -37,20 +28,9 @@ function montar({
         criadas.push(data);
         return data;
       }),
-      findFirst: jest.fn(async ({ where }: any) =>
-        where.id === 'sol-1' && where.churchId === 'igreja-1'
-          ? { id: 'sol-1', items: ITENS.map((id) => ({ id })) }
-          : null,
-      ),
     },
-    $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
-  return {
-    service: new SolicitacoesService(prisma as any),
-    criadas,
-    decisoes,
-    tx,
-  };
+  return { service: new SolicitacoesService(prisma as any), criadas };
 }
 
 const pedido = {
@@ -102,62 +82,237 @@ describe('SolicitacoesService', () => {
     });
     expect(criadas).toEqual([]);
   });
+});
 
-  it('o admin não responde solicitação de outra igreja', async () => {
-    const { service, tx } = montar();
+/**
+ * O trâmite das duas confirmações, num banco em memória: uma solicitação de 3
+ * produtos na igreja-1, com o pastor `pastor-1` e a tesouraria `tes-1` e
+ * `tes-2`. `admin-1` é admin sem ser nenhum dos dois.
+ */
+function montarTramite({
+  status = 'REQUESTED',
+  pastorAprovou = null as string[] | null,
+  tesourariaAprovou = null as string[] | null,
+  lider = 'pastor-1' as string | null,
+} = {}) {
+  const estado: any = {
+    status,
+    pastorDecision: pastorAprovou ? true : null,
+    treasuryDecision: tesourariaAprovou ? true : null,
+    response: null,
+  };
+  const itens = ITENS.map((id) => ({
+    id,
+    pastorAccepted: pastorAprovou ? pastorAprovou.includes(id) : null,
+    treasuryAccepted: tesourariaAprovou ? tesourariaAprovou.includes(id) : null,
+    accepted: null as boolean | null,
+  }));
+  const churchRequest = {
+    findFirst: jest.fn(async ({ where }: any) =>
+      where.id === 'sol-1' && where.churchId === 'igreja-1'
+        ? { ...estado, items: itens.map((item) => ({ ...item })) }
+        : null,
+    ),
+    update: jest.fn(async ({ data }: any) => Object.assign(estado, data)),
+    // a notificação do fim lê a solicitação; aqui ela não acha e não avisa
+    findUnique: jest.fn(async () => null),
+  };
+  const tx = {
+    $queryRaw: jest.fn(),
+    churchRequest,
+    churchRequestItem: {
+      update: jest.fn(async ({ where, data }: any) =>
+        Object.assign(
+          itens.find((item) => item.id === where.id),
+          data,
+        ),
+      ),
+    },
+  };
+  const prisma = {
+    church: { findUnique: jest.fn(async () => ({ spiritualLeaderId: lider })) },
+    userChurchRole: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        ['tes-1', 'tes-2'].includes(where.userId) &&
+        where.role === Role.TESOURARIA
+          ? { userId: where.userId }
+          : null,
+      ),
+    },
+    churchRequest,
+    $transaction: jest.fn(async (fn: any) => fn(tx)),
+  };
+  const resultado = () =>
+    Object.fromEntries(itens.map((item) => [item.id, item.accepted]));
+  return {
+    service: new SolicitacoesService(prisma as any),
+    estado,
+    itens,
+    resultado,
+  };
+}
+
+describe('SolicitacoesService.decidir — pastor e tesouraria', () => {
+  it('só o pastor e a tesouraria da igreja decidem', async () => {
+    const { service, estado } = montarTramite();
     await expect(
-      service.mudarStatus('igreja-2', 'sol-1', { status: 'ACCEPTED' }),
-    ).rejects.toMatchObject({ status: 404 });
-    expect(tx.churchRequest.update).not.toHaveBeenCalled();
+      service.decidir('igreja-1', 'sol-1', 'admin-1', { aprova: true }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(estado.status).toBe('REQUESTED');
   });
 
-  it('recusada: nenhum produto aceito, e guarda a resposta', async () => {
-    const { service, decisoes } = montar();
-    const feita = await service.mudarStatus('igreja-1', 'sol-1', {
-      status: 'REJECTED',
-      resposta: ' Sem verba este mês ',
+  it('o pastor aprova primeiro: fica aguardando a tesouraria, sem resultado ainda', async () => {
+    const { service, estado, itens, resultado } = montarTramite();
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', {
+      aprova: true,
+      produtosAceitos: ['item-a', 'item-b'],
     });
-    expect(feita).toEqual({
-      status: 'REJECTED',
-      response: 'Sem verba este mês',
+    expect(estado).toMatchObject({
+      status: 'AWAITING_TREASURY',
+      pastorDecision: true,
+      pastorId: 'pastor-1',
     });
-    expect(decisoes).toEqual({
+    expect(itens.map((item) => item.pastorAccepted)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(Object.values(resultado())).toEqual([null, null, null]);
+  });
+
+  it('a tesouraria aprova primeiro: fica aguardando o pastor', async () => {
+    const { service, estado } = montarTramite();
+    await service.decidir('igreja-1', 'sol-1', 'tes-2', { aprova: true });
+    expect(estado).toMatchObject({
+      status: 'AWAITING_PASTOR',
+      treasuryDecision: true,
+      treasurerId: 'tes-2',
+    });
+  });
+
+  it('o segundo fecha com o que os dois aprovaram em comum', async () => {
+    const { service, estado, resultado } = montarTramite({
+      status: 'AWAITING_TREASURY',
+      pastorAprovou: ['item-a', 'item-b'],
+    });
+    await service.decidir('igreja-1', 'sol-1', 'tes-1', {
+      aprova: true,
+      produtosAceitos: ['item-b', 'item-c'],
+    });
+    expect(estado.status).toBe('PARTIALLY_ACCEPTED');
+    expect(resultado()).toEqual({
       'item-a': false,
-      'item-b': false,
+      'item-b': true,
       'item-c': false,
     });
   });
 
-  it('aceita em parte: só os marcados', async () => {
-    const { service, decisoes } = montar();
-    await service.mudarStatus('igreja-1', 'sol-1', {
-      status: 'PARTIALLY_ACCEPTED',
-      produtosAceitos: ['item-a', 'item-c'],
+  it('os dois aprovando tudo: aceita', async () => {
+    const { service, estado, resultado } = montarTramite({
+      status: 'AWAITING_PASTOR',
+      tesourariaAprovou: ITENS,
     });
-    expect(decisoes).toEqual({
-      'item-a': true,
-      'item-b': false,
-      'item-c': true,
-    });
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: true });
+    expect(estado.status).toBe('ACCEPTED');
+    expect(Object.values(resultado())).toEqual([true, true, true]);
   });
 
-  it('aceita em parte com todos, nenhum ou produto de outro pedido: recusa', async () => {
-    const { service, tx } = montar();
-    for (const produtosAceitos of [[], ITENS, ['item-a', 'de-outro-pedido']]) {
+  it('aprovações sem nenhum produto em comum: recusada', async () => {
+    const { service, estado } = montarTramite({
+      status: 'AWAITING_TREASURY',
+      pastorAprovou: ['item-a'],
+    });
+    await service.decidir('igreja-1', 'sol-1', 'tes-1', {
+      aprova: true,
+      produtosAceitos: ['item-c'],
+    });
+    expect(estado.status).toBe('REJECTED');
+  });
+
+  it('basta um recusar, mesmo com o outro já tendo aprovado', async () => {
+    const { service, estado, resultado } = montarTramite({
+      status: 'AWAITING_PASTOR',
+      tesourariaAprovou: ITENS,
+    });
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', {
+      aprova: false,
+      resposta: ' Sem verba este mês ',
+    });
+    expect(estado).toMatchObject({
+      status: 'REJECTED',
+      pastorDecision: false,
+      response: 'Sem verba este mês',
+    });
+    expect(Object.values(resultado())).toEqual([false, false, false]);
+  });
+
+  it('cada lado decide uma vez — da tesouraria, basta uma pessoa', async () => {
+    const { service } = montarTramite({
+      status: 'AWAITING_PASTOR',
+      tesourariaAprovou: ITENS,
+    });
+    await expect(
+      service.decidir('igreja-1', 'sol-1', 'tes-2', { aprova: false }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('decidida não volta a ser decidida', async () => {
+    const { service } = montarTramite({ status: 'ACCEPTED' });
+    await expect(
+      service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: false }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('aprovar pede ao menos um produto, e só deste pedido', async () => {
+    const { service, estado } = montarTramite();
+    for (const produtosAceitos of [[], ['item-a', 'de-outro-pedido']]) {
       await expect(
-        service.mudarStatus('igreja-1', 'sol-1', {
-          status: 'PARTIALLY_ACCEPTED',
+        service.decidir('igreja-1', 'sol-1', 'pastor-1', {
+          aprova: true,
           produtosAceitos,
         }),
       ).rejects.toMatchObject({ status: 400 });
     }
-    expect(tx.churchRequest.update).not.toHaveBeenCalled();
+    expect(estado.status).toBe('REQUESTED');
   });
 
-  it('de volta a em análise: nenhum produto decidido', async () => {
-    const { service, decisoes } = montar();
+  it('solicitação de outra igreja não existe para esta', async () => {
+    const { service } = montarTramite();
+    await expect(
+      service.decidir('igreja-1', 'sol-2', 'pastor-1', { aprova: true }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('SolicitacoesService.mudarStatus — o que o admin faz à mão', () => {
+  it('põe em análise enquanto ninguém decidiu', async () => {
+    const { service, estado } = montarTramite();
     await service.mudarStatus('igreja-1', 'sol-1', { status: 'IN_REVIEW' });
-    expect(Object.values(decisoes)).toEqual([null, null, null]);
+    expect(estado.status).toBe('IN_REVIEW');
+  });
+
+  it('depois da primeira decisão, a situação não muda à mão; a resposta sim', async () => {
+    const { service, estado } = montarTramite({
+      status: 'AWAITING_TREASURY',
+      pastorAprovou: ITENS,
+    });
+    await expect(
+      service.mudarStatus('igreja-1', 'sol-1', { status: 'IN_REVIEW' }),
+    ).rejects.toMatchObject({ status: 409 });
+    await service.mudarStatus('igreja-1', 'sol-1', {
+      resposta: ' Compra na semana que vem ',
+    });
+    expect(estado).toMatchObject({
+      status: 'AWAITING_TREASURY',
+      response: 'Compra na semana que vem',
+    });
+  });
+
+  it('não mexe em solicitação de outra igreja', async () => {
+    const { service } = montarTramite();
+    await expect(
+      service.mudarStatus('igreja-2', 'sol-1', { status: 'IN_REVIEW' }),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
 

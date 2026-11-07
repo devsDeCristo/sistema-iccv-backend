@@ -274,6 +274,9 @@ model User {
   family            Family?         @relation(fields: [familyId], references: [id], onDelete: SetNull)
   /// O que a pessoa pediu à igreja de que é membro (módulo Solicitações)
   churchRequests    ChurchRequest[]
+  /// Solicitações em que deu a decisão do pastor / da tesouraria
+  pastorDecisions   ChurchRequest[] @relation("RequestPastor")
+  treasuryDecisions ChurchRequest[] @relation("RequestTreasurer")
 
   @@index([email])
   @@index([memberChurchId])
@@ -1606,16 +1609,24 @@ enum ChurchModule {
 }
 
 /// Em que pé está uma solicitação. O membro acompanha por aqui.
+/// Aprovar pede duas confirmações, em qualquer ordem: a do pastor (o líder
+/// espiritual da igreja, `Church.spiritualLeaderId`) e a de uma tesouraria
+/// dela. Recusar basta uma. Ver `SolicitacoesService.decidir`.
 enum ChurchRequestStatus {
   /// Acabou de chegar
   REQUESTED
   /// O admin está olhando
   IN_REVIEW
-  /// Indeferida
+  /// O pastor aprovou; falta a tesouraria
+  AWAITING_TREASURY
+  /// A tesouraria aprovou; falta o pastor
+  AWAITING_PASTOR
+  /// Indeferida: um dos dois recusou (ou os dois aprovaram produtos que não
+  /// coincidem)
   REJECTED
-  /// Aceita: todos os produtos
+  /// Aceita: os dois aprovaram todos os produtos
   ACCEPTED
-  /// Aceita em parte: alguns produtos sim, outros não (ver
+  /// Aceita em parte: entram só os produtos que os dois aprovaram (ver
   /// `ChurchRequestItem.accepted`)
   PARTIALLY_ACCEPTED
 }
@@ -1640,12 +1651,26 @@ model ChurchRequest {
   /// O que o admin respondeu: o motivo do indeferimento, o prazo da compra
   response    String?
 
+  /// A decisão do pastor: nula enquanto ele não decidiu; `true` aprovou (os
+  /// produtos que ele aprovou ficam em `ChurchRequestItem.pastorAccepted`),
+  /// `false` recusou
+  pastorDecision   Boolean?
+  pastorId         String?
+  pastorAt         DateTime?
+  /// A decisão da tesouraria, do mesmo jeito: basta uma pessoa da tesouraria
+  treasuryDecision Boolean?
+  treasurerId      String?
+  treasuryAt       DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   church    Church              @relation(fields: [churchId], references: [id], onDelete: Cascade)
   /// `Cascade`: apagar a conta apaga o que ela pediu, como o resto dos dados dela
   requester User                @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  /// `SetNull`: a conta apagada não desfaz a decisão, só some o nome
+  pastor    User?               @relation("RequestPastor", fields: [pastorId], references: [id], onDelete: SetNull)
+  treasurer User?               @relation("RequestTreasurer", fields: [treasurerId], references: [id], onDelete: SetNull)
   /// Os produtos pedidos: um pedido pode ter vários (dois microfones e um cabo)
   items     ChurchRequestItem[]
 
@@ -1656,20 +1681,23 @@ model ChurchRequest {
 
 /// Um produto de uma solicitação: o que é, quantos e onde ver.
 ///
-/// `accepted` é a decisão do admin por produto: nulo enquanto a solicitação
-/// não foi respondida; aceita, todos `true`; recusada, todos `false`; aceita
-/// parcialmente, uns e outros.
+/// `accepted` é o resultado por produto: nulo enquanto a solicitação não foi
+/// decidida; depois, `true` só se o pastor **e** a tesouraria aprovaram o
+/// produto. `pastorAccepted` e `treasuryAccepted` são o que cada um marcou —
+/// é o que a tela mostra ao segundo, para ele ver o que o primeiro liberou.
 model ChurchRequestItem {
-  id        String   @id @default(uuid())
-  requestId String
-  name      String
-  quantity  Int      @default(1)
+  id               String   @id @default(uuid())
+  requestId        String
+  name             String
+  quantity         Int      @default(1)
   /// Onde ver o produto (a loja, o anúncio). Opcional; só http(s), porque a
   /// tela mostra como link
-  link      String?
-  accepted  Boolean?
+  link             String?
+  accepted         Boolean?
+  pastorAccepted   Boolean?
+  treasuryAccepted Boolean?
   /// A ordem em que a pessoa listou
-  position  Int
+  position         Int
 
   request ChurchRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
