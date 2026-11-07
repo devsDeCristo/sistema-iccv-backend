@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Role } from '../auth/roles';
 import { DashboardService } from './dashboard.service';
 
@@ -105,6 +109,15 @@ describe('DashboardService — a igreja pedida na URL', () => {
     );
 
     expect(conferidas).toEqual([IGREJA_B]);
+  });
+
+  it('o super admin sem igreja escolhida não tem home do sistema: essa é só do dev', async () => {
+    const { service, conferidas } = montar();
+
+    await expect(service.overview('super')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(conferidas).toEqual([]);
   });
 
   it('igreja que não existe é 404, e não um painel vazio', async () => {

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CheckinStatus,
   ChurchModule,
@@ -151,6 +155,15 @@ export class DashboardService {
       }
     }
 
+    /**
+     * Sem igreja, a home é a do sistema — e essa é só do dev. O super admin
+     * escolhe uma igreja e vê a home do admin dela: até 07/11/2026 ele tinha
+     * aqui um panorama próprio (igrejas e base de pessoas), que saiu.
+     */
+    if (!churchId && requester?.role === Role.SUPER_ADMIN) {
+      throw new BadRequestException('Escolha uma igreja para ver o início');
+    }
+
     // `null` aqui é super admin/dev: nenhum recorte a aplicar. Lista vazia é
     // admin sem vínculo nenhum, que não alcança igreja alguma — e o `in: []`
     // logo abaixo é justamente o que fecha a porta para ele.
@@ -258,16 +271,6 @@ export class DashboardService {
     const insights = ehDev && todasAsIgrejas ? await this.indicadores() : null;
 
     /**
-     * O super admin não cuida do funcionamento: ele cuida do conjunto. O
-     * panorama responde as duas perguntas dele — como estão as igrejas e como
-     * está a base de pessoas.
-     */
-    const panorama =
-      perfil === Role.SUPER_ADMIN && todasAsIgrejas
-        ? await this.panoramaDoSistema()
-        : null;
-
-    /**
      * Os eventos da igreja, todos do mesmo tamanho.
      *
      * Nenhum ganha um cartão gigante: com um evento só ele ocupava meia tela
@@ -311,8 +314,8 @@ export class DashboardService {
        *
        * A lista de eventos abertos sai porque a de igrejas já mostra o evento
        * em foco de cada uma, e quem acabou de se inscrever numa igreja é
-       * assunto de quem administra aquela igreja. Super admin olha o conjunto
-       * — igrejas e pessoas —, e o dev, o funcionamento.
+       * assunto de quem administra aquela igreja. O dev, o único que vê o
+       * sistema inteiro, olha o funcionamento.
        *
        * `outros` continua sendo calculado acima: as pendências saem dele.
        */
@@ -321,7 +324,6 @@ export class DashboardService {
       news,
       resumo,
       byChurch: todasAsIgrejas ? await this.igrejasDoSistema() : null,
-      panorama,
       insights,
     };
   }
@@ -966,108 +968,6 @@ export class DashboardService {
       refunded: {
         count: estornado._count._all,
         amount: estornado._sum.amount ?? 0,
-      },
-    };
-  }
-
-  /**
-   * O panorama do super admin: as igrejas e a base de pessoas.
-   *
-   * Ele não opera evento nem cuida do funcionamento — o painel dele responde
-   * "quantas igrejas existem e como elas vão" e "quem são as pessoas do
-   * sistema". Por isso nada aqui é de um evento em particular.
-   */
-  private async panoramaDoSistema() {
-    const inicioDoMes = new Date();
-    inicioDoMes.setDate(1);
-    inicioDoMes.setHours(0, 0, 0, 0);
-
-    const primeiroMes = new Date(inicioDoMes);
-    primeiroMes.setMonth(primeiroMes.getMonth() - 11);
-
-    const trintaDias = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    const [
-      total,
-      novosNoMes,
-      porMes,
-      porPerfil,
-      semInscricao,
-      noPainel,
-      acoesPorIgreja,
-    ] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.user.count({ where: { createdAt: { gte: inicioDoMes } } }),
-      this.prisma.$queryRaw<{ mes: string; total: number }[]>`
-          SELECT to_char(date_trunc('month', ${emHoraLocal(
-            'createdAt',
-          )}), 'YYYY-MM') AS mes,
-                 count(*)::int AS total
-          FROM "users"
-          WHERE "createdAt" >= ${primeiroMes}
-          GROUP BY 1 ORDER BY 1
-        `,
-      this.prisma.user.groupBy({
-        by: ['role'],
-        _count: { _all: true },
-      }),
-      /**
-       * Cadastrou-se e nunca entrou em evento nenhum.
-       *
-       * É o número que diz se o cadastro está virando participação. Uma base
-       * que cresce sem que ninguém se inscreva não é crescimento — e é
-       * exatamente o tipo de coisa que só aparece olhando o sistema inteiro.
-       */
-      this.prisma.user.count({
-        where: { events: { none: {} }, waitlists: { none: {} } },
-      }),
-      /**
-       * Gente com vínculo de igreja — e não "gente que entra no painel".
-       *
-       * Super admin e dev não têm vínculo nenhum de propósito: eles
-       * atravessam todas as igrejas. Somar os dois grupos num número só daria
-       * um total que não bate com nenhuma das duas perguntas.
-       *
-       * Conta pessoas, não vínculos: quem é admin de duas igrejas é uma.
-       */
-      this.prisma.user.count({ where: { churchRoles: { some: {} } } }),
-      /**
-       * Ações do time de cada igreja: escritas feitas por quem tem vínculo
-       * com ela — admin e tesouraria.
-       *
-       * A igreja sai do **autor**, e não da coisa mexida. Tentar pelo alvo
-       * exigiria resolver o caminho até o evento model por model (equipe →
-       * evento, quarto → evento, cobrança → pagamento → evento…), e mesmo
-       * assim ficaria pela metade: `User` não pertence a igreja nenhuma.
-       *
-       * Quem não tem vínculo fica de fora, e isso é o esperado: super admin
-       * e dev atravessam todas as igrejas, então as ações deles não são de
-       * nenhuma. Rota pública (inscrição, redefinição de senha) idem.
-       */
-      this.prisma.$queryRaw<{ churchId: string; total: number }[]>`
-          SELECT v."churchId", count(*)::int AS total
-          FROM "logs" l
-          JOIN "user_church_roles" v ON v."userId" = l."userId"
-          WHERE l."createdAt" >= ${trintaDias}
-          GROUP BY v."churchId"
-        `,
-    ]);
-
-    return {
-      /** Ações registradas por igreja nos últimos 30 dias */
-      churchActivity: acoesPorIgreja,
-      activityWindowDays: 30,
-      users: {
-        total,
-        newThisMonth: novosNoMes,
-        byMonth: this.preencherMeses(porMes, primeiroMes),
-        byRole: porPerfil
-          .map((linha) => ({ role: linha.role, total: linha._count._all }))
-          .sort((a, b) => b.total - a.total),
-        /** Cadastrou-se e nunca entrou em evento nenhum, nem na lista de espera */
-        neverRegistered: semInscricao,
-        /** Vinculadas a alguma igreja. Super admin e dev ficam fora: não têm vínculo */
-        withChurchLink: noPainel,
       },
     };
   }

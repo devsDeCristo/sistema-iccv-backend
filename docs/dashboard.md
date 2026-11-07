@@ -23,7 +23,8 @@ Guardas: `JwtAuthGuard`, `RolesGuard`. Sem `EventTenantGuard` — o recorte por 
 O campo `scope` da resposta diz qual dos dois formatos veio:
 
 - **`church`:** quando há recorte por igreja — seja porque `churchId` foi passado, seja porque quem pediu (admin/tesouraria) só alcança as suas. Vem com `events`, `treasury` (se tesouraria), `news` (mural) e `resumo`.
-- **`system`:** quando quem pediu é super admin ou dev **sem** `churchId` (`tenantChurchIds` devolve `null`, ou seja, nenhum recorte). Vem com `byChurch` (leitura por igreja), e, dependendo do perfil, `panorama` (super admin) ou `insights` (dev). `events`, `news` e `resumo` saem `null` nesse modo.
+- **`system`:** só o **dev** sem `churchId` (`tenantChurchIds` devolve `null`, ou seja, nenhum recorte). Vem com `byChurch` (leitura por igreja) e `insights`. `events`, `news` e `resumo` saem `null` nesse modo.
+- **Super admin sem `churchId` é `400`** ("Escolha uma igreja para ver o início"): ele escolhe uma igreja e vê a home do admin dela. Até 07/11/2026 ele tinha uma home do sistema própria, com um `panorama` (base de usuários e atividade por igreja), que saiu junto. Teste em `dashboard.service.spec.ts`.
 
 ## Perfil por igreja (multitenant)
 
@@ -49,8 +50,7 @@ e a tesouraria da B via a B como admin: inscrições recentes e mural.
 | `treasury` | só tesouraria | resumo de cobrança em aberto (ver "Métricas financeiras") |
 | `news` | quem tem recorte e não é tesouraria | mural: últimas 3 notícias publicadas + contagem de rascunhos |
 | `resumo` | quem tem recorte (`scope: church`) | um número por módulo, para os cards do topo (ver "Resumo dos módulos") |
-| `byChurch` | super admin/dev sem `churchId` | uma linha por igreja: admins, total de eventos, inscrições históricas, eventos abertos, evento em destaque |
-| `panorama` | super admin sem `churchId` | base de usuários do sistema (ver "Panorama do super admin") |
+| `byChurch` | dev sem `churchId` | uma linha por igreja: admins, total de eventos, inscrições históricas, eventos abertos, evento em destaque |
 | `insights` | dev sem `churchId` | indicadores de funcionamento do sistema (ver "Indicadores do dev") |
 
 ### Módulos (`resumo`)
@@ -85,16 +85,6 @@ As outras duas, cada uma amarrada a um evento específico:
 - **`refunded`:** contagem e valor de pagamentos `REFUNDED`.
 - Limitação assumida no código: o sistema não registra despesa, só entrada (`Payment`). `refunded` é a única "saída" que existe — não há como montar um fluxo de caixa completo sem uma tabela de despesas.
 - `finance.expected` (dentro de cada evento detalhado) soma `PAID` + `IN_ANALYSIS` + `WAITING`: dinheiro pago ou a caminho. Recusado, cancelado e estornado ficam de fora.
-
-## Panorama do super admin (sem `churchId`)
-
-Só aparece para `Role.SUPER_ADMIN` no escopo `system`. Não fala de operação de evento — responde "quantas igrejas existem e como vão" e "quem são as pessoas do sistema":
-
-- `users.total`, `users.newThisMonth`, `users.byMonth` (12 meses, com meses vazios preenchidos com zero).
-- `users.byRole`: contagem por perfil.
-- `users.neverRegistered`: cadastrado que nunca entrou em evento nem em lista de espera.
-- `users.withChurchLink`: pessoas com algum vínculo de igreja (conta pessoa, não vínculo — quem administra duas igrejas conta uma vez). Super admin e dev não têm vínculo de propósito, então ficam fora desse número.
-- `churchActivity`: ações registradas (tabela `logs`) por igreja nos últimos 30 dias, atribuídas pela igreja de quem **agiu** (o autor), não pelo alvo da ação.
 
 ## Indicadores do dev (sem `churchId`)
 
