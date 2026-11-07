@@ -1,3 +1,6 @@
+import { ROLES_KEY } from 'src/decorators/roles.decorator';
+import { Role } from 'src/auth/roles';
+import { SolicitacoesDaIgrejaController } from './solicitacoes.controller';
 import { ChurchModule } from '@prisma/client';
 import { SolicitacoesService } from './solicitacoes.service';
 
@@ -155,5 +158,18 @@ describe('SolicitacoesService', () => {
     const { service, decisoes } = montar();
     await service.mudarStatus('igreja-1', 'sol-1', { status: 'IN_REVIEW' });
     expect(Object.values(decisoes)).toEqual([null, null, null]);
+  });
+});
+
+describe('SolicitacoesDaIgrejaController', () => {
+  it('o lado da igreja é do admin e da tesouraria dela', () => {
+    const roles = Reflect.getMetadata(
+      ROLES_KEY,
+      SolicitacoesDaIgrejaController,
+    );
+    expect(roles).toEqual(
+      expect.arrayContaining([Role.ADMIN, Role.TESOURARIA]),
+    );
+    expect(roles).not.toContain(Role.USER);
   });
 });

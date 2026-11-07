@@ -38,9 +38,13 @@ existem.
   aceita (`400` nos dois casos). A situação e as decisões mudam numa
   transação interativa (a forma em array é descartada pelo middleware de
   auditoria).
-- **Recorte por igreja:** a rota do admin passa pelo `ChurchTenantGuard`
-  (administra a igreja da URL?), e o service ainda confere que a solicitação é
-  dessa igreja: trocar o id na URL não responde pedido de outra.
+- **Quem responde:** o admin **e a tesouraria** da igreja (`ADMIN_AREA_ROLES`),
+  além de dev e super admin. A tesouraria entrou em 07/11/2026: o que se pede
+  (equipamento, melhoria) passa pelo caixa. Teste em `solicitacoes.spec.ts`.
+- **Recorte por igreja:** a rota da igreja passa pelo `ChurchTenantGuard`
+  (a pessoa é admin ou tesouraria **da igreja da URL**? a tesouraria de outra
+  igreja não entra), e o service ainda confere que a solicitação é dessa
+  igreja: trocar o id na URL não responde pedido de outra.
 - **Saída da igreja:** quem deixa de ser membro continua vendo o que pediu; o
   pedido fica com a igreja a que foi feito.
 - **Sessão:** `/auth/validate` devolve `memberChurch` (`id`, `name`,
@@ -56,8 +60,8 @@ mudança de situação avisa quem pediu ([notificacoes.md](notificacoes.md)).
 | --- | --- | --- | --- |
 | `GET` | `/solicitacoes/minhas` | qualquer logado | as solicitações da pessoa, com a igreja |
 | `POST` | `/solicitacoes` | membro de uma igreja com o módulo | `{ ministerio, titulo, descricao, produtos: [{ nome, quantidade, link? }] }` |
-| `GET` | `/churches/:churchId/solicitacoes` | admin da igreja | as solicitações da igreja, com quem pediu |
-| `PATCH` | `/churches/:churchId/solicitacoes/:id/status` | admin da igreja | `{ status, resposta?, produtosAceitos? }` (os ids, só na parcial) |
+| `GET` | `/churches/:churchId/solicitacoes` | admin ou tesouraria da igreja | as solicitações da igreja, com quem pediu |
+| `PATCH` | `/churches/:churchId/solicitacoes/:id/status` | admin ou tesouraria da igreja | `{ status, resposta?, produtosAceitos? }` (os ids, só na parcial) |
 
 ## Banco
 

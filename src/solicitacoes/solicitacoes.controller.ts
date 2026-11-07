@@ -15,7 +15,7 @@ import { JwtAuthGuard } from 'src/decorators/auth.guard';
 import { RolesGuard } from 'src/decorators/roles.guard';
 import { ChurchTenantGuard } from 'src/decorators/church-tenant.guard';
 import { Roles } from 'src/decorators/roles.decorator';
-import { ADMIN_ROLES } from 'src/auth/roles';
+import { ADMIN_AREA_ROLES } from 'src/auth/roles';
 import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
 import { SolicitacoesService } from './solicitacoes.service';
@@ -46,13 +46,15 @@ export class SolicitacoesController {
 }
 
 /**
- * O lado da igreja: só o admin dela (`ChurchTenantGuard` cobra o perfil
- * **nesta** igreja) e só com Solicitações no plano (`ModuloGuard`).
+ * O lado da igreja: o admin e a tesouraria dela (`ChurchTenantGuard` cobra o
+ * perfil **nesta** igreja — a tesouraria de outra igreja não entra) e só com
+ * Solicitações no plano (`ModuloGuard`). A tesouraria entra porque o que se
+ * pede (equipamento, melhoria) passa pelo caixa.
  */
 @ApiTags('solicitacoes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, ChurchTenantGuard, ModuloGuard)
-@Roles(...ADMIN_ROLES)
+@Roles(...ADMIN_AREA_ROLES)
 @Modulo(ChurchModule.REQUESTS)
 @Controller('churches/:churchId/solicitacoes')
 export class SolicitacoesDaIgrejaController {
