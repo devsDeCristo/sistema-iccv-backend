@@ -70,10 +70,15 @@ async function notificar(
   }
 }
 
-const adminsDa = async (prisma: Prisma, churchId: string) =>
+/** Quem tem um destes vínculos na igreja (o pastor é admin dela) */
+const vinculadosDa = async (
+  prisma: Prisma,
+  churchId: string,
+  roles: Role[] = [Role.ADMIN],
+) =>
   (
     await prisma.userChurchRole.findMany({
-      where: { churchId, role: Role.ADMIN },
+      where: { churchId, role: { in: roles } },
       select: { userId: true },
     })
   ).map((v) => v.userId);
@@ -123,7 +128,7 @@ export const notificarPedidoDeMembro = (
         body: `${pessoa?.fullName} pediu para ser membro de ${igreja?.name}`,
         churchId,
       },
-      await adminsDa(prisma, churchId),
+      await vinculadosDa(prisma, churchId),
       userId,
     );
   });
@@ -174,7 +179,11 @@ export const notificarRespostaDoPedido = (
     );
   });
 
-/** Nova solicitação: avisa os admins da igreja */
+/**
+ * Nova solicitação: avisa os admins e a tesouraria da igreja — os dois
+ * entram no painel de Solicitações, e aprovar pede o pastor (admin) e a
+ * tesouraria.
+ */
 export const notificarSolicitacao = (prisma: Prisma, requestId: string) =>
   seguro(`solicitação ${requestId}`, async () => {
     const s = await prisma.churchRequest.findUnique({
@@ -196,7 +205,7 @@ export const notificarSolicitacao = (prisma: Prisma, requestId: string) =>
         body: `${s.requester.fullName}: ${s.title}`,
         churchId: s.churchId,
       },
-      await adminsDa(prisma, s.churchId),
+      await vinculadosDa(prisma, s.churchId, [Role.ADMIN, Role.TESOURARIA]),
       s.requesterId,
     );
   });

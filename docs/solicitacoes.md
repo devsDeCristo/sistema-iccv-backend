@@ -74,7 +74,9 @@ existem.
   `modulos`), ou `null` para quem não é membro de nenhuma igreja ativa. É por
   ele que a área do participante decide mostrar Solicitações.
 
-**Notificações:** a solicitação nova avisa os admins da igreja, e a mudança de
+**Notificações:** a solicitação nova avisa os admins e a tesouraria da igreja
+(até 07/11/2026, só os admins: a tesouraria que entrou no módulo não ficava
+sabendo), e a mudança de
 situação avisa quem pediu — em análise e o fim (aceita, em parte, recusada);
 o "aguardando" é trâmite de dentro e não avisa ([notificacoes.md](notificacoes.md)).
 Na home do painel, a tarefa de solicitações sem resposta conta também as que

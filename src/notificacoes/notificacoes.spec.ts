@@ -32,8 +32,12 @@ function montar({
     },
     notificationRecipient: { deleteMany: jest.fn() },
     userChurchRole: {
+      // um admin e uma tesouraria na igreja; devolve os dos perfis pedidos
       findMany: jest.fn(async ({ where }: any) =>
-        where.role === Role.ADMIN ? [{ userId: 'admin-1' }] : [],
+        [
+          { userId: 'admin-1', role: Role.ADMIN },
+          { userId: 'tes-1', role: Role.TESOURARIA },
+        ].filter((v) => where.role.in.includes(v.role)),
       ),
     },
     user: {
@@ -78,19 +82,22 @@ function montar({
 }
 
 describe('notificar', () => {
-  it('pedido de membro e solicitação vão só para os admins da igreja', async () => {
+  it('pedido de membro vai só para os admins da igreja', async () => {
     const { prisma, criadas, destinatarios } = montar();
     await notificarPedidoDeMembro(prisma, 'u1', 'ig1');
-    await notificarSolicitacao(prisma, 's1');
-    expect(criadas.map((c) => c.type)).toEqual([
-      'MEMBERSHIP_REQUEST',
-      'CHURCH_REQUEST',
-    ]);
-    expect(destinatarios()).toEqual([['admin-1'], ['admin-1']]);
+    expect(criadas.map((c) => c.type)).toEqual(['MEMBERSHIP_REQUEST']);
+    expect(destinatarios()).toEqual([['admin-1']]);
     expect(prisma.userChurchRole.findMany.mock.calls[0][0].where).toEqual({
       churchId: 'ig1',
-      role: Role.ADMIN,
+      role: { in: [Role.ADMIN] },
     });
+  });
+
+  it('solicitação nova vai para os admins e a tesouraria da igreja', async () => {
+    const { prisma, criadas, destinatarios } = montar();
+    await notificarSolicitacao(prisma, 's1');
+    expect(criadas.map((c) => c.type)).toEqual(['CHURCH_REQUEST']);
+    expect(destinatarios()).toEqual([['admin-1', 'tes-1']]);
   });
 
   it('notícia vai para os membros da igreja', async () => {
