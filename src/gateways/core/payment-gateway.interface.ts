@@ -44,10 +44,14 @@ export interface PaymentGateway {
    * referência — e não devolve lista vazia: "nunca virou cobrança" e "virou
    * cobrança nenhuma vez" são a mesma coisa aqui, mas quem chama precisa poder
    * distinguir isso de uma casa fora do ar.
+   *
+   * @param checkoutId o id que `createCheckout` devolveu. Só o PayPal usa: a
+   * API de Orders não busca por referência, só pelo id do pedido.
    */
   listCharges(
     referenceId: string,
     ctx: GatewayContext,
+    checkoutId?: string,
   ): Promise<GatewayCharge[]>;
 
   /**

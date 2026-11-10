@@ -363,6 +363,7 @@ export class PaymentService {
             const charges = await casa.gateway.listCharges(
               checkout.referenceId,
               casa.context,
+              checkout.checkoutId,
             );
 
             // Lista vazia é o mesmo caso do "não encontrado": o checkout saiu

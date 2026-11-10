@@ -1105,6 +1105,8 @@ enum PaymentProvider {
   INFINITEPAY
   /// Ton é Stone: o checkout hospedado vem da API do grupo (Pagar.me v5)
   TON
+  /// Orders v2: o comprador aprova no PayPal e quem captura é o servidor
+  PAYPAL
 }
 
 /// Ambiente da credencial. Não é preferência de tela: sandbox e produção têm

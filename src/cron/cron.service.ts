@@ -27,6 +27,8 @@ export interface ResumoDaReconciliacao {
 /** Uma cobrança pendente e a casa a quem perguntar por ela */
 interface CobrancaPendente {
   referenceId: string;
+  /** O id na casa — o PayPal só consulta por ele, não pela referência */
+  checkoutId: string;
   provider: PaymentProvider;
   configId: string | null;
   /** O que foi pedido à casa, para conferir o que voltou pago */
@@ -85,6 +87,7 @@ export class CronService {
           take: 1,
           select: {
             referenceId: true,
+            checkoutId: true,
             provider: true,
             configId: true,
             chargedAmountCents: true,
@@ -138,6 +141,7 @@ export class CronService {
         const charges = await casa.gateway.listCharges(
           cobranca.referenceId,
           casa.context,
+          cobranca.checkoutId,
         );
 
         if (charges.length === 0) continue;

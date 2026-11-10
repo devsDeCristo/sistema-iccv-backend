@@ -5,8 +5,8 @@ conta o que ele faz; aqui ficam as alternativas descartadas, as armadilhas já
 pisadas e o que continua em aberto — que é o que não dá para deduzir lendo os
 arquivos.
 
-Para os detalhes de uma casa específica, ver [`pagbank.md`](./pagbank.md) e
-[`mercadopago.md`](./mercadopago.md).
+Para os detalhes de uma casa específica, ver [`pagbank.md`](./pagbank.md),
+[`mercadopago.md`](./mercadopago.md) e [`paypal.md`](./paypal.md).
 
 ---
 
@@ -25,11 +25,12 @@ coisas não cabiam nesse desenho:
 
 ---
 
-## 2. Uma interface, quatro casas
+## 2. Uma interface, cinco gateways
 
 Cada casa de pagamento é um **adapter** que implementa `PaymentGateway`
 (`src/gateways/core/payment-gateway.interface.ts`). O resto do sistema nunca
-fala com PagBank, Mercado Pago, InfinitePay ou Ton — fala com a interface.
+fala com PagBank, Mercado Pago, InfinitePay, Ton ou PayPal — fala com a
+interface.
 
 ```
 src/gateways/
@@ -37,7 +38,8 @@ src/gateways/
   pagbank/       ┐
   mercadopago/   │ um diretório por casa: client (HTTP) + gateway (tradução)
   infinitepay/   │
-  ton/           ┘
+  ton/           │
+  paypal/        ┘
   gateways.module.ts   ← o único arquivo a editar para acrescentar uma casa
 ```
 
@@ -183,6 +185,10 @@ painel nenhum.
 O **Ton** exige cadastro na conta: a API v5 da Pagar.me resolve webhook por
 conta, não por pedido.
 
+O **PayPal** também exige cadastro: webhook pertence à aplicação, não ao
+pedido. Sem ele a baixa ainda chega, só mais devagar (pela reconciliação) —
+ver [`paypal.md`](./paypal.md).
+
 O **Mercado Pago** é os dois. Ele aceita `notification_url` na preferência, mas
 o painel tem uma URL separada para modo de teste, e em sandbox é só ela que
 recebe qualquer coisa — ver [`mercadopago.md`](./mercadopago.md). Por isso ele é
@@ -238,6 +244,9 @@ quando a notificação não chega.
 
 Duas decisões que valem registro:
 
+- **O PayPal só consulta pelo id do pedido**, nunca pela referência. Por isso
+  `listCharges` recebe também o `checkoutId`, e a rotina o seleciona junto. Os
+  outros adapters ignoram o parâmetro.
 - **A credencial é a que gerou o checkout** (`configId`), não a que a igreja usa
   hoje. Perguntar o status com a credencial de hoje sobre uma cobrança nascida
   na credencial de ontem daria "não existe", e o pagamento ficaria parado.
@@ -315,3 +324,5 @@ Hoje o campo não existe no DTO, e o `ValidationPipe`
   fica `WAITING` para sempre e é consultada a cada 3 horas, indefinidamente.
 - **O Ton não recebe notificação até alguém cadastrar a URL** na conta
   Pagar.me. Nenhuma igreja usa o Ton hoje, então não quebra nada agora.
+- **No PayPal, o link substituído não é cancelado** (o Orders v2 não oferece) e
+  expira sozinho em 6 h. Ver [`paypal.md`](./paypal.md#em-aberto).

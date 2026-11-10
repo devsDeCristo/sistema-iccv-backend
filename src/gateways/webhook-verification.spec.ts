@@ -8,6 +8,7 @@ import { PagbankGateway } from './pagbank/pagbank.gateway';
 import { MercadoPagoGateway } from './mercadopago/mercadopago.gateway';
 import { InfinitePayGateway } from './infinitepay/infinitepay.gateway';
 import { TonGateway } from './ton/ton.gateway';
+import { PayPalGateway } from './paypal/paypal.gateway';
 import { GatewayContext, WebhookRequest } from './core/gateway.types';
 
 /**
@@ -258,6 +259,119 @@ describe('Ton — X-Hub-Signature-256', () => {
     const semSegredo = contexto(PaymentProvider.TON, { secretKey: 'sk_x' });
 
     expect(gateway.verifyWebhook(requisicao(corpo), semSegredo)).toBe(true);
+  });
+});
+
+describe('PayPal — a prova é a API, não o corpo', () => {
+  const ctx = contexto(PaymentProvider.PAYPAL, {
+    clientId: 'cid',
+    clientSecret: 'sec',
+  });
+
+  const pedido = (status: string, captura?: string) => ({
+    id: 'ORDER-1',
+    status,
+    purchase_units: [
+      {
+        reference_id: 'ref-1',
+        payments: captura
+          ? {
+              captures: [
+                {
+                  id: 'CAP-1',
+                  status: captura,
+                  amount: { currency_code: 'BRL', value: '280.00' },
+                },
+              ],
+            }
+          : undefined,
+      },
+    ],
+  });
+
+  const cliente = (...respostas: any[]) => {
+    const getOrder = jest.fn();
+    respostas.forEach((r) => getOrder.mockResolvedValueOnce(r));
+    return { getOrder, captureOrder: jest.fn().mockResolvedValue(undefined) };
+  };
+
+  it('usa o estado que a API devolve, não o que o corpo diz', async () => {
+    const client = cliente(pedido('PAYER_ACTION_REQUIRED'));
+    const gateway = new PayPalGateway(client as any);
+
+    // o corpo alega captura concluída; a API diz que nem foi aprovado
+    const evento = await gateway.parseWebhook(
+      requisicao({
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          status: 'COMPLETED',
+          amount: { value: '280.00' },
+          supplementary_data: { related_ids: { order_id: 'ORDER-1' } },
+        },
+      }),
+      ctx,
+    );
+
+    expect(client.getOrder).toHaveBeenCalledWith(
+      'ORDER-1',
+      expect.objectContaining({ clientSecret: 'sec' }),
+      ctx.mode,
+    );
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      referenceId: 'ref-1',
+      status: PaymentStatus.WAITING,
+    });
+  });
+
+  it('captura quando o aviso é de aprovação, e só então dá baixa', async () => {
+    const client = cliente(
+      pedido('APPROVED'),
+      pedido('COMPLETED', 'COMPLETED'),
+    );
+    const gateway = new PayPalGateway(client as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({
+        event_type: 'CHECKOUT.ORDER.APPROVED',
+        resource: { id: 'ORDER-1' },
+      }),
+      ctx,
+    );
+
+    expect(client.captureOrder).toHaveBeenCalledTimes(1);
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      status: PaymentStatus.PAID,
+      paidAmountCents: 28000,
+    });
+  });
+
+  it('ignora pedido que a conta da igreja não conhece', async () => {
+    const gateway = new PayPalGateway(cliente(null) as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({
+        event_type: 'CHECKOUT.ORDER.APPROVED',
+        resource: { id: 'ORDER-DE-OUTRA-CONTA' },
+      }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({ kind: 'ignored' });
+  });
+
+  it('ignora outros tipos de aviso sem falar com a API', async () => {
+    const client = cliente();
+    const gateway = new PayPalGateway(client as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({ event_type: 'CUSTOMER.DISPUTE.CREATED', resource: {} }),
+      ctx,
+    );
+
+    expect(evento).toMatchObject({ kind: 'ignored' });
+    expect(client.getOrder).not.toHaveBeenCalled();
   });
 });
 

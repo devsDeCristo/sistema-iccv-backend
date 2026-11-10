@@ -13,6 +13,7 @@ const SLUGS: Record<PaymentProvider, string> = {
   MERCADO_PAGO: 'mercadopago',
   INFINITEPAY: 'infinitepay',
   TON: 'ton',
+  PAYPAL: 'paypal',
 };
 
 const POR_SLUG = new Map(

@@ -7,6 +7,8 @@ import { InfinitePayClient } from './infinitepay/infinitepay.client';
 import { InfinitePayGateway } from './infinitepay/infinitepay.gateway';
 import { TonClient } from './ton/ton.client';
 import { TonGateway } from './ton/ton.gateway';
+import { PayPalClient } from './paypal/paypal.client';
+import { PayPalGateway } from './paypal/paypal.gateway';
 import {
   PAYMENT_GATEWAYS,
   PaymentGateway,
@@ -33,6 +35,8 @@ import { PaymentGatewayRegistry } from './core/payment-gateway.registry';
     InfinitePayGateway,
     TonClient,
     TonGateway,
+    PayPalClient,
+    PayPalGateway,
     {
       provide: PAYMENT_GATEWAYS,
       useFactory: (...gateways: PaymentGateway[]) => gateways,
@@ -41,6 +45,7 @@ import { PaymentGatewayRegistry } from './core/payment-gateway.registry';
         MercadoPagoGateway,
         InfinitePayGateway,
         TonGateway,
+        PayPalGateway,
       ],
     },
     PaymentGatewayRegistry,
