@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsUUID } from 'class-validator';
+import { PaymentMethod } from '@prisma/client';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 
 export class CreatePaymentCheckoutDto {
   @ApiProperty()
@@ -19,6 +20,11 @@ export class CreatePaymentCheckoutDto {
   @IsOptional()
   @IsUUID('4', { each: true })
   paymentIds?: string[];
+
+  /** A forma escolhida, quando o gateway da igreja pede a escolha antes */
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
 }
 export class payloadCreatePaymentCheckoutDto {
   @ApiProperty({
@@ -38,4 +44,14 @@ export class payloadCreatePaymentCheckoutDto {
   @IsOptional()
   @IsUUID('4', { each: true })
   paymentIds?: string[];
+
+  @ApiProperty({
+    enum: PaymentMethod,
+    required: false,
+    description:
+      'A forma de pagamento escolhida pelo inscrito. Só tem efeito no gateway que pede a escolha antes de criar o checkout (hoje o PayPal: PIX ou CREDIT_CARD). Sem ela, nesse gateway, a resposta traz `choice` em vez de `link`.',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
 }

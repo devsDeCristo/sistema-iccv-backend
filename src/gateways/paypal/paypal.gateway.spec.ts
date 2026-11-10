@@ -36,41 +36,41 @@ const capturaPaga = {
   amount: { currency_code: 'BRL', value: '120.00' },
 };
 
-describe('PayPal — criação do pedido', () => {
-  const request: HostedCheckoutRequest = {
-    referenceId: 'ref-1',
-    eventId: 'ev-1',
-    eventName: 'Retiro',
-    customer: {
-      name: 'Fulano',
-      email: 'f@x.com',
-      taxId: '000',
-      phone: { country: '55', area: '11', number: '999999999' },
+const request: HostedCheckoutRequest = {
+  referenceId: 'ref-1',
+  eventId: 'ev-1',
+  eventName: 'Retiro',
+  customer: {
+    name: 'Fulano',
+    email: 'f@x.com',
+    taxId: '000',
+    phone: { country: '55', area: '11', number: '999999999' },
+  },
+  items: [
+    {
+      referenceId: 'a',
+      name: 'Ingresso',
+      description: 'Ingresso',
+      quantity: 1,
+      unitAmountCents: 10000,
     },
-    items: [
-      {
-        referenceId: 'a',
-        name: 'Ingresso',
-        description: 'Ingresso',
-        quantity: 1,
-        unitAmountCents: 10000,
-      },
-      {
-        referenceId: 'b',
-        name: 'Camiseta',
-        description: 'Camiseta',
-        quantity: 2,
-        unitAmountCents: 2500,
-      },
-    ],
-    discountCents: 3000,
-    expiresAt: new Date(),
-    paymentNotificationUrl: 'https://api/x',
-    checkoutNotificationUrl: 'https://api/y',
-    redirectUrl: 'https://front/events/ev-1',
-    softDescriptor: 'Igreja de cristo',
-  };
+    {
+      referenceId: 'b',
+      name: 'Camiseta',
+      description: 'Camiseta',
+      quantity: 2,
+      unitAmountCents: 2500,
+    },
+  ],
+  discountCents: 3000,
+  expiresAt: new Date(),
+  paymentNotificationUrl: 'https://api/x',
+  checkoutNotificationUrl: 'https://api/y',
+  redirectUrl: 'https://front/events/ev-1',
+  softDescriptor: 'Igreja de cristo',
+};
 
+describe('PayPal — criação do pedido', () => {
   it('manda o total igual à soma dos itens, já com desconto, em reais', async () => {
     const client = {
       createOrder: jest.fn().mockResolvedValue({
@@ -104,6 +104,149 @@ describe('PayPal — criação do pedido', () => {
     expect(resultado).toMatchObject({
       checkoutId: 'ORDER-1',
       payUrl: 'https://paypal/checkoutnow?token=1',
+    });
+  });
+});
+
+describe('PayPal — Pix na tela do sistema', () => {
+  const comPix = { ...ctx, credentials: { ...ctx.credentials, pix: 'true' } };
+
+  it('só pergunta a forma de pagamento quando a igreja ligou o Pix', () => {
+    const gateway = new PayPalGateway({} as any);
+
+    // Desligado é o padrão: a conta PayPal precisa ter o Pix habilitado, e
+    // oferecer sem isso é oferecer um botão que dá erro.
+    expect(gateway.paymentMethodChoices(ctx)).toEqual([]);
+    expect(gateway.paymentMethodChoices(comPix)).toEqual([
+      PaymentMethod.PIX,
+      PaymentMethod.CREDIT_CARD,
+    ]);
+  });
+
+  it('cria o pedido de Pix e devolve o copia e cola, sem link', async () => {
+    const client = {
+      createOrder: jest.fn().mockResolvedValue({
+        id: 'ORDER-PIX',
+        status: 'PAYER_ACTION_REQUIRED',
+        payment_source: {
+          pix: { qr_payload: '00020101...6304E7DB', qr_expiry: '3600' },
+        },
+        links: [{ rel: 'self', href: 'https://api/self' }],
+      }),
+    };
+    const gateway = new PayPalGateway(client as any);
+    const antes = Date.now();
+
+    const resultado = await gateway.createCheckout(
+      {
+        ...request,
+        paymentMethod: PaymentMethod.PIX,
+        customer: { ...request.customer, taxId: '123.456.789-09' },
+        expiresAt: new Date(antes + 60 * 60 * 1000),
+      },
+      comPix,
+    );
+
+    const [payload] = client.createOrder.mock.calls[0];
+
+    expect(payload.payment_source.paypal).toBeUndefined();
+    expect(payload.payment_source.pix).toMatchObject({
+      country_code: 'BR',
+      currency_code: 'BRL',
+      // só dígitos: o PayPal recusa CPF com pontuação
+      tax_info: { tax_id: '12345678909', tax_id_type: 'CPF' },
+      phone_number: '11999999999',
+    });
+    // captura automática: Pix pago não espera o servidor
+    expect(payload.processing_instruction).toBe(
+      'ORDER_COMPLETE_ON_PAYMENT_APPROVAL',
+    );
+    // o valor é o mesmo do cartão — a forma não muda a conta
+    expect(payload.purchase_units[0].amount.value).toBe('120.00');
+
+    expect(resultado.checkoutId).toBe('ORDER-PIX');
+    expect(resultado.payUrl).toBe('');
+    expect(resultado.pix?.code).toBe('00020101...6304E7DB');
+    expect(resultado.pix?.expiresAt.getTime()).toBeGreaterThanOrEqual(
+      antes + 3600 * 1000,
+    );
+  });
+
+  it('respeita o mínimo de 10 minutos de validade do PayPal', async () => {
+    const client = { createOrder: jest.fn().mockResolvedValue({ id: 'X' }) };
+    const gateway = new PayPalGateway(client as any);
+
+    await gateway.createCheckout(
+      {
+        ...request,
+        paymentMethod: PaymentMethod.PIX,
+        expiresAt: new Date(Date.now() + 60 * 1000),
+      },
+      comPix,
+    );
+
+    expect(
+      client.createOrder.mock.calls[0][0].payment_source.pix.qr_expiry,
+    ).toBe('600');
+  });
+
+  it('pedido que volta sem o código não vira Pix nem link', async () => {
+    const client = {
+      createOrder: jest.fn().mockResolvedValue({ id: 'ORDER-PIX' }),
+    };
+    const gateway = new PayPalGateway(client as any);
+
+    const resultado = await gateway.createCheckout(
+      { ...request, paymentMethod: PaymentMethod.PIX },
+      comPix,
+    );
+
+    // sem os dois, o serviço de pagamento recusa em vez de abrir um QR vazio
+    expect(resultado.pix).toBeUndefined();
+    expect(resultado.payUrl).toBe('');
+  });
+
+  it('sem a escolha, o pedido continua sendo o do checkout do PayPal', async () => {
+    const client = {
+      createOrder: jest.fn().mockResolvedValue({
+        id: 'ORDER-1',
+        links: [{ rel: 'payer-action', href: 'https://paypal/x' }],
+      }),
+    };
+    const gateway = new PayPalGateway(client as any);
+
+    const resultado = await gateway.createCheckout(request, comPix);
+    const [payload] = client.createOrder.mock.calls[0];
+
+    expect(payload.payment_source.pix).toBeUndefined();
+    expect(payload.processing_instruction).toBeUndefined();
+    expect(resultado.pix).toBeUndefined();
+    expect(resultado.payUrl).toBe('https://paypal/x');
+  });
+
+  it('Pix pago volta como Pix; sem captura, a forma fica em aberto', async () => {
+    const pix = (status: string, captura?: Record<string, unknown>) => ({
+      ...pedido(status, captura),
+      payment_source: { pix: {} },
+    });
+    const getOrder = jest
+      .fn()
+      .mockResolvedValueOnce(pix('COMPLETED', capturaPaga))
+      .mockResolvedValueOnce(pix('PAYER_ACTION_REQUIRED'));
+    const gateway = new PayPalGateway({ getOrder } as any);
+
+    const [pago] = await gateway.listCharges('ref-1', comPix, 'ORDER-1');
+    const [aguardando] = await gateway.listCharges('ref-1', comPix, 'ORDER-1');
+
+    expect(pago).toMatchObject({
+      status: PaymentStatus.PAID,
+      method: PaymentMethod.PIX,
+    });
+    // "aguardando" com forma definida trava o botão de pagar na tela, e é
+    // por ele que o inscrito volta ao QR
+    expect(aguardando).toMatchObject({
+      status: PaymentStatus.WAITING,
+      method: PaymentMethod.OTHER,
     });
   });
 });

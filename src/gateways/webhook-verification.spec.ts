@@ -361,6 +361,59 @@ describe('PayPal — a prova é a API, não o corpo', () => {
     expect(evento).toMatchObject({ kind: 'ignored' });
   });
 
+  it('acha o pedido do Pix pelo link "up", que é onde o aviso de captura o traz', async () => {
+    const client = cliente(pedido('COMPLETED', 'COMPLETED'));
+    const gateway = new PayPalGateway(client as any);
+
+    // o aviso de captura do Pix não tem `supplementary_data`
+    const evento = await gateway.parseWebhook(
+      requisicao({
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAP-1',
+          links: [
+            { rel: 'self', href: 'https://api/v2/payments/captures/CAP-1' },
+            { rel: 'up', href: 'https://api/v2/checkout/orders/ORDER-1' },
+          ],
+        },
+      }),
+      ctx,
+    );
+
+    expect(client.getOrder).toHaveBeenCalledWith(
+      'ORDER-1',
+      expect.anything(),
+      ctx.mode,
+    );
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      status: PaymentStatus.PAID,
+    });
+  });
+
+  it('Pix expirado ou cancelado é conferido na API, não aceito pelo corpo', async () => {
+    const client = cliente(pedido('PAYER_ACTION_REQUIRED'));
+    const gateway = new PayPalGateway(client as any);
+
+    const evento = await gateway.parseWebhook(
+      requisicao({
+        event_type: 'CHECKOUT.PAYMENT-APPROVAL.REVERSED',
+        resource: { order_id: 'ORDER-1' },
+      }),
+      ctx,
+    );
+
+    expect(client.getOrder).toHaveBeenCalledWith(
+      'ORDER-1',
+      expect.anything(),
+      ctx.mode,
+    );
+    expect(evento).toMatchObject({
+      kind: 'payment',
+      status: PaymentStatus.WAITING,
+    });
+  });
+
   it('ignora outros tipos de aviso sem falar com a API', async () => {
     const client = cliente();
     const gateway = new PayPalGateway(client as any);

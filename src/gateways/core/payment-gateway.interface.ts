@@ -1,3 +1,4 @@
+import { PaymentMethod } from '@prisma/client';
 import {
   GatewayCharge,
   GatewayContext,
@@ -30,6 +31,18 @@ export const PAYMENT_GATEWAYS = Symbol('PAYMENT_GATEWAYS');
  */
 export interface PaymentGateway {
   readonly descriptor: PaymentGatewayDescriptor;
+
+  /**
+   * As formas entre as quais o inscrito escolhe **antes** de o checkout ser
+   * criado. Ausente, ou com menos de duas, não há o que perguntar — que é o
+   * caso de todo gateway cuja página já oferece as formas lado a lado.
+   *
+   * Existe por causa do PayPal: lá o Pix e a carteira/cartão são pedidos
+   * diferentes, e o tipo do pedido tem que ser decidido na criação. Recebe o
+   * contexto porque a resposta depende da configuração da igreja (a conta
+   * precisa ter o Pix habilitado).
+   */
+  paymentMethodChoices?(ctx: GatewayContext): PaymentMethod[];
 
   /** Cria o link de pagamento. */
   createCheckout(

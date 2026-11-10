@@ -48,6 +48,15 @@ monta o pedido, recebe um link e manda o inscrito para o site da casa. Isso tira
 o sistema do caminho do número do cartão — e, com ele, todo um capítulo de
 responsabilidade.
 
+**Uma exceção, e ela não envolve cartão: o Pix do PayPal.** O PayPal não hospeda
+o Pix — devolve o copia e cola —, então o QR é mostrado numa tela do próprio
+sistema, e o inscrito escolhe entre Pix e cartão antes de o checkout ser criado.
+Três peças do contrato existem só por isso, todas opcionais e ignoradas pelos
+outros quatro gateways: `paymentMethodChoices` (o adapter diz que há escolha),
+`HostedCheckoutRequest.paymentMethod` (a forma escolhida) e
+`HostedCheckoutResult.pix` (o código, no lugar do link). Ver
+[`paypal.md`](./paypal.md#pix-na-tela-do-sistema).
+
 ### O adapter declara, a tela obedece
 
 `PaymentGatewayDescriptor` carrega os campos de credencial que a casa exige,
@@ -57,6 +66,10 @@ a partir dessa lista**, e o backend valida contra a mesma lista.
 O motivo é manutenção: uma casa nova entra no ar com os campos certos sem tocar
 no front nem em DTO nenhum. E a validação não pode divergir do formulário,
 porque as duas leem a mesma fonte.
+
+Um campo pode ser `toggle`: vira chave de liga/desliga na tela, vale `'true'`
+ou fica ausente, e o backend recusa qualquer outro valor. Hoje só o "Aceitar
+Pix" do PayPal.
 
 ### `allowedHostSuffixes` não é capricho
 

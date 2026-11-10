@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Query,
   Patch,
@@ -79,7 +80,55 @@ export class PaymentController {
       eventId,
       roleRegistrationId: body.roleRegistrationId ?? [],
       paymentIds: body.paymentIds ?? [],
+      method: body.method,
     });
+  }
+
+  // ===============================
+  // Pix na nossa tela (PayPal)
+  // ===============================
+  /**
+   * A tela do QR lê daqui. Mesmo caminho e mesmas regras de acesso da criação
+   * do checkout, logo acima: o inscrito alcança o próprio pagamento, e quem
+   * administra, o de um inscrito do evento dele.
+   */
+  @ApiOperation({
+    summary: 'Código Pix e estado de um checkout pago na tela do sistema',
+  })
+  @Get('events/:idEvent/users/:idUser/payments/pix/:referenceId')
+  async pix(
+    @Param('idEvent') eventId: string,
+    @Param('idUser') userId: string,
+    @Param('referenceId') referenceId: string,
+    @Req() req: any,
+  ) {
+    await this.paymentService.assertCanSeePayments(
+      req.user?.userId,
+      userId,
+      eventId,
+    );
+
+    return this.paymentService.pixDoCheckout(eventId, userId, referenceId);
+  }
+
+  @ApiOperation({
+    summary: 'Conferir no gateway, agora, se o Pix deste checkout foi pago',
+  })
+  @Post('events/:idEvent/users/:idUser/payments/pix/:referenceId/check')
+  @HttpCode(200)
+  async conferirPix(
+    @Param('idEvent') eventId: string,
+    @Param('idUser') userId: string,
+    @Param('referenceId') referenceId: string,
+    @Req() req: any,
+  ) {
+    await this.paymentService.assertCanSeePayments(
+      req.user?.userId,
+      userId,
+      eventId,
+    );
+
+    return this.paymentService.conferirPix(eventId, userId, referenceId);
   }
 
   // ===============================

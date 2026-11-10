@@ -664,6 +664,13 @@ model PaymentCheckout {
   /// valor enviado, e recusar o que é antigo derrubaria pagamento em curso.
   chargedAmountCents Int?
 
+  /// Pix pago na nossa tela, e não num link do gateway — hoje só o PayPal, que
+  /// devolve o copia e cola em vez de uma página. Guardado aqui porque a tela
+  /// do QR só pode ler o código do servidor: um código vindo da URL ou montado
+  /// no navegador é um código que alguém troca. Nulos em todo checkout por link.
+  pixCode      String?
+  pixExpiresAt DateTime?
+
   @@index([paymentId])
   /// Atende a rota de webhook e a reconciliação, que chegam pelo par
   /// referência + casa

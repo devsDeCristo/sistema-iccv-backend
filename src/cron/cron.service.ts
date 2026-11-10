@@ -27,7 +27,7 @@ export interface ResumoDaReconciliacao {
 /** Uma cobrança pendente e a casa a quem perguntar por ela */
 interface CobrancaPendente {
   referenceId: string;
-  /** O id na casa — o PayPal só consulta por ele, não pela referência */
+  /** O id no gateway — o PayPal só consulta por ele, não pela referência */
   checkoutId: string;
   provider: PaymentProvider;
   configId: string | null;

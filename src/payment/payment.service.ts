@@ -308,6 +308,28 @@ export class PaymentService {
       }
 
       /**
+       * O gateway pede que o inscrito escolha a forma antes? Só o PayPal: lá o
+       * Pix e o cartão são pedidos diferentes. Sem a escolha (ou com uma que o
+       * gateway não ofereceu), a resposta é a pergunta, e não um link — e sai
+       * daqui, antes de qualquer escrita. Nos outros gateways a lista vem
+       * vazia e nada disto acontece.
+       */
+      const formas =
+        casaDaIgreja.gateway.paymentMethodChoices?.(casaDaIgreja.context) ?? [];
+      const formaEscolhida = formas.find((forma) => forma === dto.method);
+
+      if (formas.length > 1 && !formaEscolhida) {
+        return {
+          message: 'payment method required',
+          choice: {
+            provider: casaDaIgreja.config.provider,
+            label: casaDaIgreja.gateway.descriptor.label,
+            methods: formas,
+          },
+        };
+      }
+
+      /**
        * Compra cancelada devolveu as unidades: pagar de novo é pegá-las outra
        * vez. Conferir e voltar para "aguardando" é uma coisa só, serializável
        * — a compra nova lê o estoque do mesmo jeito, e das duas que disputam
@@ -447,7 +469,22 @@ export class PaymentService {
           const checkoutCreatedAt = activeCheckouts[0].createdAt || new Date();
           const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
-          if (usedByOthers.length === 0 && checkoutCreatedAt > oneHourAgo) {
+          // O checkout que já existe só serve se for da forma pedida agora
+          // (quem gerou um Pix e voltou escolhendo cartão precisa de outro
+          // pedido) — e, sendo Pix, se ainda sobrar tempo para pagar.
+          const ativo = activeCheckouts[0];
+          const mesmaForma =
+            !!ativo.pixCode === (formaEscolhida === PaymentMethod.PIX);
+          const pixComTempo =
+            !ativo.pixExpiresAt ||
+            ativo.pixExpiresAt.getTime() > Date.now() + 5 * 60 * 1000;
+
+          if (
+            usedByOthers.length === 0 &&
+            checkoutCreatedAt > oneHourAgo &&
+            mesmaForma &&
+            pixComTempo
+          ) {
             // Atualiza pagamentos para WAITING
             await this.prisma.payment.updateMany({
               where: {
@@ -542,6 +579,7 @@ export class PaymentService {
         eventId,
         eventName: event.name,
         softDescriptor: 'Igreja de cristo',
+        paymentMethod: formaEscolhida,
         expiresAt: dateExpiration,
         paymentNotificationUrl: montarUrlDeWebhook(
           config.provider,
@@ -595,7 +633,11 @@ export class PaymentService {
       // ============================
       const result = await gateway.createCheckout(pedido, context);
 
-      const linkPay = result.payUrl;
+      // Pix sem página no gateway (PayPal): o link é a nossa tela do QR, que
+      // busca o código no servidor pela referência
+      const linkPay = result.pix
+        ? `${frontendUrl}/eventos/${eventId}/pagamento/pix/${pedido.referenceId}`
+        : result.payUrl;
 
       if (!linkPay) {
         throw new BadRequestException(
@@ -666,6 +708,8 @@ export class PaymentService {
               // reconciliação teriam que adivinhar a quem perguntar.
               provider: config.provider,
               configId: config.id,
+              pixCode: result.pix?.code ?? null,
+              pixExpiresAt: result.pix?.expiresAt ?? null,
             })),
           });
 
@@ -694,6 +738,117 @@ export class PaymentService {
       console.log(error);
       throw error;
     }
+  }
+
+  /**
+   * O que a tela do QR mostra: o código, a validade e o estado da cobrança.
+   *
+   * Só leitura do banco — a tela consulta isto a cada poucos segundos, e
+   * perguntar ao gateway em cada consulta estouraria o limite de chamadas da
+   * conta da igreja. Quem atualiza o estado é o aviso do gateway, a
+   * reconciliação ou `conferirPix`.
+   *
+   * O recorte é o inscrito e o evento da rota: a referência de outra pessoa
+   * responde 404, igual a uma que não existe.
+   */
+  async pixDoCheckout(eventId: string, userId: string, referenceId: string) {
+    const checkout = await this.checkoutPix(eventId, userId, referenceId);
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { name: true },
+    });
+
+    return {
+      provider: checkout.provider,
+      providerLabel: this.registry.descriptor(checkout.provider).label,
+      eventName: event?.name ?? '',
+      amountCents: checkout.chargedAmountCents,
+      code: checkout.pixCode,
+      expiresAt: checkout.pixExpiresAt,
+      status: checkout.payment.status,
+      // `false` quando um checkout novo tomou o lugar deste: o código antigo
+      // ainda seria aceito pelo banco, e a tela precisa parar de oferecê-lo
+      active: checkout.status === CheckoutStatus.ACTIVE,
+    };
+  }
+
+  /**
+   * "Já paguei": pergunta ao gateway agora, em vez de esperar o aviso dele.
+   *
+   * É o que resolve o caso do aviso que não chega (endereço não cadastrado no
+   * painel, sandbox) com o inscrito olhando para a tela. A baixa passa por
+   * `updatePaymentWebhook`, o mesmo caminho do aviso — então a conferência de
+   * valor e o recorte por gateway valem aqui também.
+   *
+   * ponytail: sem limite de frequência no servidor; cada clique são duas ou
+   * três chamadas na conta da igreja. Pôr um throttle por checkout se alguém
+   * abusar do botão.
+   */
+  async conferirPix(eventId: string, userId: string, referenceId: string) {
+    const checkout = await this.checkoutPix(eventId, userId, referenceId);
+
+    if (checkout.payment.status !== PaymentStatus.PAID) {
+      const event = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { churchId: true },
+      });
+      if (!event) throw new NotFoundException('Event not found');
+
+      const resolvido = await this.casaDoCheckout(checkout, event.churchId);
+
+      try {
+        const charges = await resolvido.gateway.listCharges(
+          referenceId,
+          resolvido.context,
+          checkout.checkoutId,
+        );
+        const recente = charges.reduce((atual, item) =>
+          item.createdAt > atual.createdAt ? item : atual,
+        );
+
+        // "aguardando" não é novidade: gravar seria só carimbar a cobrança
+        if (recente.status !== PaymentStatus.WAITING) {
+          await this.updatePaymentWebhook(
+            referenceId,
+            recente.status,
+            recente.method,
+            recente.payload,
+            {
+              provider: resolvido.config.provider,
+              configId: resolvido.config.id,
+              churchId: resolvido.config.churchId,
+            },
+            recente.paidAmountCents,
+          );
+        }
+      } catch (error) {
+        // o gateway não conhece (mais) o pedido: nada a aplicar, a tela segue
+        // com o que está no banco
+        if (!(error instanceof GatewayResourceNotFoundError)) throw error;
+      }
+    }
+
+    return this.pixDoCheckout(eventId, userId, referenceId);
+  }
+
+  private async checkoutPix(
+    eventId: string,
+    userId: string,
+    referenceId: string,
+  ) {
+    const checkout = await this.prisma.paymentCheckout.findFirst({
+      where: {
+        referenceId,
+        pixCode: { not: null },
+        payment: { userId, eventId },
+      },
+      include: { payment: { select: { status: true } } },
+    });
+
+    if (!checkout) throw new NotFoundException('Pagamento Pix não encontrado');
+
+    return checkout;
   }
 
   /**

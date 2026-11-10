@@ -20,6 +20,10 @@ import {
   WebhookRequest,
 } from '../core/gateway.types';
 
+/** Limites do `qr_expiry` do PayPal, em segundos: de 10 minutos a 72 horas */
+const PIX_VALIDADE_MINIMA = 600;
+const PIX_VALIDADE_MAXIMA = 259200;
+
 /**
  * PayPal — Orders v2 com redirecionamento.
  *
@@ -32,6 +36,14 @@ import {
  * no webhook de aprovação, na reconciliação de 3 em 3 horas e na conferência
  * que antecede um checkout novo. Os três caem na mesma função, e captura
  * repetida é inofensiva (o PayPal responde 422 e o pedido é relido).
+ *
+ * **Pix é outro pedido.** O PayPal não mostra Pix na página dele: o pedido
+ * nasce com `payment_source.pix` e devolve o copia e cola, que o sistema
+ * exibe na própria tela. Como o tipo do pedido é decidido na criação, o
+ * inscrito escolhe antes (`paymentMethodChoices`) — e só quando a igreja
+ * ligou o Pix na configuração, porque a conta PayPal precisa tê-lo
+ * habilitado. É o único gateway com essa escolha; os outros oferecem as
+ * formas lado a lado na página deles.
  */
 @Injectable()
 export class PayPalGateway implements PaymentGateway {
@@ -41,8 +53,8 @@ export class PayPalGateway implements PaymentGateway {
     provider: PaymentProvider.PAYPAL,
     label: 'PayPal',
     summary:
-      'Checkout do PayPal: o inscrito paga com o saldo da conta PayPal ou com cartão de crédito.',
-    paymentMethods: [PaymentMethod.CREDIT_CARD],
+      'Cartão de crédito ou saldo da conta no site do PayPal. Com o Pix habilitado na conta, o inscrito também paga por QR Code, sem sair do sistema.',
+    paymentMethods: [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD],
     fields: [
       {
         key: 'clientId',
@@ -60,6 +72,14 @@ export class PayPalGateway implements PaymentGateway {
         secret: true,
         help: 'Na mesma tela do Client ID, em "Secret key".',
       },
+      {
+        key: 'pix',
+        label: 'Aceitar Pix',
+        required: false,
+        secret: false,
+        toggle: true,
+        help: 'Ligue só depois de ativar o Pix na conta PayPal (Configurações da conta › Produtos e serviços › Formas de pagamento). Sem isso, quem escolher Pix recebe erro.',
+      },
     ],
     docsUrl: 'https://developer.paypal.com/docs/api/orders/v2/',
     // O PayPal assina, mas a assinatura não é o que segura a baixa: ver
@@ -68,6 +88,12 @@ export class PayPalGateway implements PaymentGateway {
     signsWebhook: true,
     webhookChannels: [{ key: 'payments', label: 'Notificação de pagamento' }],
   };
+
+  paymentMethodChoices(ctx: GatewayContext): PaymentMethod[] {
+    return ctx.credentials.pix === 'true'
+      ? [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD]
+      : [];
+  }
 
   async createCheckout(
     pedido: HostedCheckoutRequest,
@@ -78,9 +104,27 @@ export class PayPalGateway implements PaymentGateway {
     // a mesma conta evita dois números diferentes para a mesma cobrança.
     const itens = aplicarDesconto(pedido.items, pedido.discountCents);
     const total = reais(totalEmCentavos(itens));
+    const querPix = pedido.paymentMethod === PaymentMethod.PIX;
+    const retorno = {
+      return_url: pedido.redirectUrl,
+      cancel_url: pedido.redirectUrl,
+    };
+
+    const segundos = Math.round(
+      (pedido.expiresAt.getTime() - Date.now()) / 1000,
+    );
+    const validadeDoPix = Math.min(
+      PIX_VALIDADE_MAXIMA,
+      Math.max(PIX_VALIDADE_MINIMA, segundos),
+    );
 
     const payload = {
       intent: 'CAPTURE',
+      // No Pix o dinheiro já saiu da conta de quem pagou: não há o que revisar,
+      // e o PayPal captura sozinho. No cartão a captura continua sendo nossa.
+      ...(querPix && {
+        processing_instruction: 'ORDER_COMPLETE_ON_PAYMENT_APPROVAL',
+      }),
       purchase_units: [
         {
           // o PayPal devolve os dois no GET do pedido; `reference_id` é por
@@ -108,19 +152,37 @@ export class PayPalGateway implements PaymentGateway {
           })),
         },
       ],
-      payment_source: {
-        paypal: {
-          experience_context: {
-            locale: 'pt-BR',
-            shipping_preference: 'NO_SHIPPING',
-            // "Pagar agora" em vez de "Continuar": não há tela de revisão
-            // nossa depois do PayPal
-            user_action: 'PAY_NOW',
-            return_url: pedido.redirectUrl,
-            cancel_url: pedido.redirectUrl,
+      payment_source: querPix
+        ? {
+            pix: {
+              name: pedido.customer.name,
+              country_code: 'BR',
+              currency_code: 'BRL',
+              phone_number: `${pedido.customer.phone.area}${pedido.customer.phone.number}`,
+              email_id: pedido.customer.email,
+              tax_info: {
+                tax_id: pedido.customer.taxId.replace(/\D/g, ''),
+                tax_id_type: 'CPF',
+              },
+              qr_expiry: String(validadeDoPix),
+              experience_context: {
+                shipping_preference: 'NO_SHIPPING',
+                ...retorno,
+              },
+            },
+          }
+        : {
+            paypal: {
+              experience_context: {
+                locale: 'pt-BR',
+                shipping_preference: 'NO_SHIPPING',
+                // "Pagar agora" em vez de "Continuar": não há tela de revisão
+                // nossa depois do PayPal
+                user_action: 'PAY_NOW',
+                ...retorno,
+              },
+            },
           },
-        },
-      },
     };
 
     const criado = await this.client.createOrder(
@@ -129,6 +191,29 @@ export class PayPalGateway implements PaymentGateway {
       ctx.mode,
       pedido.referenceId,
     );
+
+    if (querPix) {
+      const pix = criado?.payment_source?.pix;
+
+      return {
+        checkoutId: criado?.id,
+        // sem página do lado de lá: o link passa a ser a nossa tela do QR.
+        // Pedido que voltou sem o código fica sem `pix` e sem link, e quem
+        // chama recusa — melhor que mandar o inscrito para um QR vazio.
+        payUrl: '',
+        pix: pix?.qr_payload
+          ? {
+              // `qr_payload` é o copia e cola no padrão do Banco Central; o
+              // QR é desenhado a partir do mesmo texto
+              code: pix.qr_payload,
+              expiresAt: new Date(
+                Date.now() + (Number(pix.qr_expiry) || validadeDoPix) * 1000,
+              ),
+            }
+          : undefined,
+        raw: criado,
+      };
+    }
 
     const link = (criado?.links ?? []).find(
       (l: any) => l.rel === 'payer-action' || l.rel === 'approve',
@@ -182,13 +267,7 @@ export class PayPalGateway implements PaymentGateway {
     const tipo: string = req.body?.event_type ?? '';
     const recurso = req.body?.resource ?? {};
 
-    // Aprovação traz o pedido; captura traz a captura, com o pedido ao lado
-    const orderId =
-      tipo === 'CHECKOUT.ORDER.APPROVED'
-        ? recurso.id
-        : tipo.startsWith('PAYMENT.CAPTURE.')
-        ? recurso.supplementary_data?.related_ids?.order_id
-        : undefined;
+    const orderId = pedidoCitado(tipo, recurso);
 
     if (!orderId) {
       return { kind: 'ignored', reason: `notificação do tipo ${tipo}` };
@@ -268,8 +347,11 @@ export class PayPalGateway implements PaymentGateway {
       status: captura
         ? statusDaCaptura(captura.status)
         : statusDoPedido(pedido.status),
-      method:
-        fonte === 'card' ? PaymentMethod.CREDIT_CARD : PaymentMethod.OTHER,
+      // Sem captura a forma fica em aberto de propósito: a tela trata
+      // "aguardando com forma definida" como cobrança em andamento e trava o
+      // botão de pagar — e é por ele que o inscrito volta ao QR que fechou, ou
+      // tenta de novo depois de um cartão recusado.
+      method: captura ? metodoDaFonte(fonte) : PaymentMethod.OTHER,
       createdAt: new Date(
         captura?.create_time ?? pedido.create_time ?? Date.now(),
       ),
@@ -299,6 +381,40 @@ function reais(centavos: number): string {
 
 function referenciaDo(pedido: any): string | undefined {
   return pedido?.purchase_units?.[0]?.reference_id;
+}
+
+/**
+ * O pedido que a notificação cita. Cada família de aviso guarda num lugar: os
+ * de pedido trazem o próprio pedido (`CHECKOUT.PAYMENT-APPROVAL.REVERSED`, do
+ * Pix expirado ou cancelado, em `order_id`); os de captura trazem a captura,
+ * com o pedido em `related_ids` no cartão e só no link `up` no Pix.
+ */
+function pedidoCitado(tipo: string, recurso: any): string | undefined {
+  if (tipo.startsWith('CHECKOUT.')) return recurso.order_id ?? recurso.id;
+
+  if (tipo.startsWith('PAYMENT.CAPTURE.')) {
+    return (
+      recurso.supplementary_data?.related_ids?.order_id ??
+      (recurso.links ?? [])
+        .find((l: any) => l.rel === 'up')
+        ?.href?.split('/')
+        .pop()
+    );
+  }
+
+  return undefined;
+}
+
+function metodoDaFonte(fonte: string): PaymentMethod {
+  switch (fonte) {
+    case 'pix':
+      return PaymentMethod.PIX;
+    case 'card':
+      return PaymentMethod.CREDIT_CARD;
+    // carteira PayPal: saldo ou o que estiver cadastrado na conta
+    default:
+      return PaymentMethod.OTHER;
+  }
 }
 
 function statusDaCaptura(status?: string): PaymentStatus {

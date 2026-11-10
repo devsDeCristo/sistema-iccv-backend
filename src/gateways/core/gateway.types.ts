@@ -28,6 +28,11 @@ export interface CredentialField {
   help?: string;
   placeholder?: string;
   /**
+   * Liga/desliga em vez de texto: a tela desenha uma chave, e o valor gravado
+   * é `'true'` ou nada.
+   */
+  toggle?: boolean;
+  /**
    * Quando o campo é uma URL de API, os únicos domínios aceitos.
    *
    * Sem isto, um admin (ou quem tomasse a conta de um) apontaria a integração
@@ -113,6 +118,12 @@ export interface HostedCheckoutRequest {
   /** Para onde o inscrito volta depois de pagar */
   redirectUrl: string;
   softDescriptor: string;
+  /**
+   * A forma que o inscrito escolheu, quando o gateway pede a escolha antes de
+   * criar o checkout (ver `PaymentGateway.paymentMethodChoices`). Só chega
+   * aqui se estiver entre as que o próprio gateway ofereceu.
+   */
+  paymentMethod?: PaymentMethod;
 }
 
 export interface HostedCheckoutResult {
@@ -120,6 +131,12 @@ export interface HostedCheckoutResult {
   checkoutId: string;
   /** O link que o inscrito abre */
   payUrl: string;
+  /**
+   * Pix sem página do lado de lá: o gateway devolve o copia e cola e quem
+   * mostra o QR é o sistema. Com isto preenchido, `payUrl` não é usado — o
+   * link do checkout passa a ser a nossa tela do QR.
+   */
+  pix?: { code: string; expiresAt: Date };
   /** A resposta crua, para o `payload` do pagamento e para depuração */
   raw: unknown;
 }

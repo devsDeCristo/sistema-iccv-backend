@@ -391,6 +391,13 @@ export class PaymentProviderService {
         this.validarUrl(campo, valor);
       }
 
+      // chave de liga/desliga: ligada é `true`, desligada é o campo ausente
+      if (campo.toggle && valor !== 'true') {
+        throw new BadRequestException(
+          `${campo.label} aceita só ligado ou desligado`,
+        );
+      }
+
       resultado[campo.key] = valor;
     }
 
