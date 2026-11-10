@@ -325,6 +325,15 @@ igreja e no corpo o de outra.
 Hoje o campo não existe no DTO, e o `ValidationPipe`
 (`forbidNonWhitelisted: true`) recusa a requisição inteira com 400.
 
+### 6. Retorno do gateway para uma rota que não existe
+
+O `redirectUrl` do checkout — para onde o gateway devolve o inscrito depois de
+pagar — era `<front>/events/<id>`. A rota do front é `/eventos/<id>`, e o
+coringa do roteador manda o que não existe para o login: todo inscrito que
+pagava, em qualquer gateway, voltava para a tela de login em vez do evento.
+Corrigido em 10/11/2026. Os outros endereços do front que o backend monta
+(`/certificado/<código>` e `/admin/eventos`) foram conferidos contra as rotas.
+
 ---
 
 ## 10. Em aberto

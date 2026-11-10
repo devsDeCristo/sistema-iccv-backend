@@ -66,7 +66,7 @@ const request: HostedCheckoutRequest = {
   expiresAt: new Date(),
   paymentNotificationUrl: 'https://api/x',
   checkoutNotificationUrl: 'https://api/y',
-  redirectUrl: 'https://front/events/ev-1',
+  redirectUrl: 'https://front/eventos/ev-1',
   softDescriptor: 'Igreja de cristo',
 };
 

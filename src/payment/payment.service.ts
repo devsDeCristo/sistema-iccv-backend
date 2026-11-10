@@ -591,7 +591,9 @@ export class PaymentService {
           webhookSecret,
           CANAL_DE_CHECKOUT,
         ),
-        redirectUrl: `${frontendUrl}/events/${eventId}`,
+        // `/eventos`, como a rota do front: com `/events` o inscrito voltava
+        // do gateway para uma página que não existe e caía no login
+        redirectUrl: `${frontendUrl}/eventos/${eventId}`,
         customer: {
           name: user.fullName,
           email: user.email,
