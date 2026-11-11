@@ -167,6 +167,13 @@ naquele evento:
 - `TeamOnUsers` do evento, `Waitlist` do usuário, e por fim
   `EventOnUsersRolesRegistration`/`EventOnUsers`.
 
+A remoção **não confere pagamento**: quem já pagou também pode ser removido, e
+o `Payment` pago do ingresso some junto (a trilha em `payment_logs` fica). O
+aviso é da tela: `GET :idEvent/users` devolve o status do pagamento de cada
+ingresso em `groupsRegistration[].roles[].paymentStatus` (só o status, para
+quem já vê a Tesouraria), e a confirmação muda quando algum está pago ou em
+análise — ver `ic-front docs/admin-inscritos.md`.
+
 A resposta traz a contagem de cada apagamento. Existe também `removeRelation`,
 que apaga só a `EventOnUsers` — sem rota no controller chamando-a hoje.
 

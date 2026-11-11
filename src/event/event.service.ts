@@ -1182,6 +1182,8 @@ export class EventService {
           id: role.id,
           description: role.description,
           price: role.price,
+          /** status do pagamento deste ingresso; nulo quando não há cobrança */
+          paymentStatus: rr.payment?.status ?? null,
         });
       }
 
@@ -3445,6 +3447,9 @@ export class EventService {
                   group: true,
                 },
               },
+              // só o status: a tela avisa antes de remover quem já pagou
+              // (a remoção apaga o pagamento do ingresso junto)
+              payment: { select: { status: true } },
             },
           },
         },
