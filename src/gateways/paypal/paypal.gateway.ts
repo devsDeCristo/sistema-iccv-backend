@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import {
   PaymentMethod,
   PaymentProvider,
@@ -8,7 +8,10 @@ import {
 import { PayPalClient, PayPalCredenciais } from './paypal.client';
 import { PaymentGateway } from '../core/payment-gateway.interface';
 import { metodoNaoMapeado } from '../core/gateway-http';
-import { GatewayResourceNotFoundError } from '../core/gateway.errors';
+import {
+  GatewayRequestError,
+  GatewayResourceNotFoundError,
+} from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
   GatewayCharge,
@@ -155,15 +158,26 @@ export class PayPalGateway implements PaymentGateway {
       ],
       payment_source: querPix
         ? {
+            /**
+             * Os nomes são os que a API aceita, e não os da documentação do
+             * Pix: ela fala em `email_id`, `phone_number` e `tax_id_type:
+             * "CPF"`, e a API recusou os três (400, produção, 11/11/2026),
+             * pedindo `email`, `phone` e o `BR_CPF` do `tax_info` padrão.
+             * O `phone` segue o tipo `phone` padrão da API (código do país +
+             * número nacional) — o único dos três que o erro não detalhou.
+             */
             pix: {
               name: pedido.customer.name,
               country_code: 'BR',
               currency_code: 'BRL',
-              phone_number: `${pedido.customer.phone.area}${pedido.customer.phone.number}`,
-              email_id: pedido.customer.email,
+              phone: {
+                country_code: pedido.customer.phone.country || '55',
+                national_number: `${pedido.customer.phone.area}${pedido.customer.phone.number}`,
+              },
+              email: pedido.customer.email,
               tax_info: {
                 tax_id: pedido.customer.taxId.replace(/\D/g, ''),
-                tax_id_type: 'CPF',
+                tax_id_type: 'BR_CPF',
               },
               qr_expiry: String(validadeDoPix),
               experience_context: {
@@ -193,12 +207,11 @@ export class PayPalGateway implements PaymentGateway {
           },
     };
 
-    const criado = await this.client.createOrder(
-      payload,
-      this.cred(ctx),
-      ctx.mode,
-      pedido.referenceId,
-    );
+    const criado = await this.client
+      .createOrder(payload, this.cred(ctx), ctx.mode, pedido.referenceId)
+      .catch((erro) => {
+        throw querPix ? pixRecusado(erro) : erro;
+      });
 
     if (querPix) {
       const pix = criado?.payment_source?.pix;
@@ -397,6 +410,37 @@ export class PayPalGateway implements PaymentGateway {
       clientSecret: ctx.credentials.clientSecret,
     };
   }
+}
+
+/**
+ * O PayPal recebeu o pedido de Pix e disse não — dado inválido, conta sem Pix
+ * habilitado, aplicação sem acesso. Para o inscrito isso não é "o PayPal está
+ * fora do ar", que é o que a mensagem genérica dá a entender: é "o Pix não
+ * está disponível, pague com cartão". O detalhe continua no log, escrito por
+ * `falhaDoGateway` no cliente.
+ *
+ * Falha de rede e erro 5xx do PayPal seguem com a mensagem genérica: ali
+ * tentar de novo em alguns minutos é mesmo a saída.
+ */
+const RECUSAS_DO_PAYPAL = new Set([
+  'INVALID_REQUEST',
+  'UNPROCESSABLE_ENTITY',
+  'NOT_AUTHORIZED',
+  'PERMISSION_DENIED',
+]);
+
+function pixRecusado(erro: unknown) {
+  if (!(erro instanceof GatewayRequestError)) return erro;
+
+  const resposta = erro.detalhes as { name?: string } | undefined;
+
+  if (RECUSAS_DO_PAYPAL.has(resposta?.name ?? '')) {
+    return new UnprocessableEntityException(
+      'O Pix não está disponível agora. Escolha cartão ou conta PayPal.',
+    );
+  }
+
+  return erro;
 }
 
 /** Centavos para o texto que o PayPal pede: 15000 → "150.00" */

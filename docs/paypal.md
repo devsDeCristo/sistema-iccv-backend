@@ -222,7 +222,9 @@ ofereceu é tratada como ausente, e a pergunta volta.
 
 ### O pedido
 
-`payment_source.pix` com nome, CPF (só dígitos), e-mail e telefone do inscrito,
+`payment_source.pix` com nome, CPF (só dígitos, `BR_CPF`), e-mail e telefone do
+inscrito — com os nomes que a API aceita, que não são os da documentação (ver
+abaixo),
 `qr_expiry` em segundos (a validade do checkout, dentro dos limites do PayPal:
 10 minutos a 72 horas) e `processing_instruction:
 ORDER_COMPLETE_ON_PAYMENT_APPROVAL` — **captura automática**. No Pix o dinheiro
@@ -287,14 +289,32 @@ formulário de solicitação (links em
 A ativação passa por análise de elegibilidade do PayPal. Há sandbox. O saque do
 Pix é para a chave Pix cadastrada, em D+1.
 
-### A confirmar no sandbox
+### A documentação do Pix está errada nos nomes dos campos
 
-A documentação do Pix é marcada LIMITED (set/2026) e o adapter foi escrito por
-ela, sem conta habilitada para testar. O que precisa ser visto com uma:
+**Armadilha já pisada (11/11/2026, produção).** A página de criação de pedido do
+Pix manda `email_id`, `phone_number` e `tax_id_type: "CPF"`. A API recusou o
+pedido com 400 `INVALID_REQUEST` apontando os três:
+
+| Documentação | O que a API aceita |
+|---|---|
+| `email_id` | `email` (texto) |
+| `phone_number` (texto) | `phone`: `{ country_code: "55", national_number: "<DDD+número>" }` |
+| `tax_info.tax_id_type: "CPF"` | `"BR_CPF"` (o `tax_info` padrão da API só aceita `BR_CPF` e `BR_CNPJ`) |
+
+`email` e `BR_CPF` vêm do erro e do schema público. O formato do `phone` é o do
+tipo `phone` padrão da API — o erro só disse que faltava o campo, e o Pix não
+aparece no schema público. Se ele também for recusado, o log dirá o subcampo.
+
+Quando o PayPal recusa o pedido de Pix (400, 422, 403), o inscrito vê **"O Pix
+não está disponível agora. Escolha cartão ou conta PayPal."** (422), e não a
+mensagem genérica de "não foi possível falar com o PayPal", que soava como
+sistema fora do ar. O detalhe continua no log: `docker service logs
+sistema-eventos-iccv_api 2>&1 | grep "PayPal —"`.
+
+### A confirmar com uma conta habilitada
 
 - `shipping_preference: NO_SHIPPING` é aceito no Pix (o exemplo deles usa
-  `GET_FROM_FILE`);
-- o formato do telefone (enviamos DDD + número, sem o 55);
+  `GET_FROM_FILE`); no primeiro teste a API não reclamou dele;
 - `qr_payload` é lido pelos apps de banco (o outro campo, `qr_image`, vem num
   formato `pix://pay?…` que não parece ser);
 - o `GET` do pedido pago devolve `payment_source.pix` — é de onde sai o método

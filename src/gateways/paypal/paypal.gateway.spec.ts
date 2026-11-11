@@ -5,7 +5,11 @@ import {
   PaymentStatus,
 } from '@prisma/client';
 import { PayPalGateway } from './paypal.gateway';
-import { GatewayResourceNotFoundError } from '../core/gateway.errors';
+import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  GatewayRequestError,
+  GatewayResourceNotFoundError,
+} from '../core/gateway.errors';
 import { GatewayContext, HostedCheckoutRequest } from '../core/gateway.types';
 
 const ctx: GatewayContext = {
@@ -150,13 +154,19 @@ describe('PayPal — Pix na tela do sistema', () => {
     const [payload] = client.createOrder.mock.calls[0];
 
     expect(payload.payment_source.paypal).toBeUndefined();
-    expect(payload.payment_source.pix).toMatchObject({
+    const pix = payload.payment_source.pix;
+    // os nomes que a API aceita — a documentação do Pix fala em `email_id`,
+    // `phone_number` e `CPF`, e a API recusou os três em produção
+    expect(pix).toMatchObject({
       country_code: 'BR',
       currency_code: 'BRL',
+      email: 'f@x.com',
       // só dígitos: o PayPal recusa CPF com pontuação
-      tax_info: { tax_id: '12345678909', tax_id_type: 'CPF' },
-      phone_number: '11999999999',
+      tax_info: { tax_id: '12345678909', tax_id_type: 'BR_CPF' },
+      phone: { country_code: '55', national_number: '11999999999' },
     });
+    expect(pix.email_id).toBeUndefined();
+    expect(pix.phone_number).toBeUndefined();
     // captura automática: Pix pago não espera o servidor
     expect(payload.processing_instruction).toBe(
       'ORDER_COMPLETE_ON_PAYMENT_APPROVAL',
@@ -188,6 +198,54 @@ describe('PayPal — Pix na tela do sistema', () => {
     expect(
       client.createOrder.mock.calls[0][0].payment_source.pix.qr_expiry,
     ).toBe('600');
+  });
+
+  it('Pix recusado pelo PayPal vira "escolha cartão", e não "PayPal fora do ar"', async () => {
+    const recusa = new GatewayRequestError('PayPal', {
+      name: 'INVALID_REQUEST',
+      details: [{ issue: 'MISSING_REQUIRED_PARAMETER' }],
+    });
+    const gateway = new PayPalGateway({
+      createOrder: jest.fn().mockRejectedValue(recusa),
+    } as any);
+
+    const erro = await gateway
+      .createCheckout({ ...request, paymentMethod: PaymentMethod.PIX }, comPix)
+      .catch((e) => e);
+
+    expect(erro).toBeInstanceOf(UnprocessableEntityException);
+    expect(erro.message).toBe(
+      'O Pix não está disponível agora. Escolha cartão ou conta PayPal.',
+    );
+  });
+
+  it('PayPal fora do ar no Pix continua com a mensagem de tentar de novo', async () => {
+    // 5xx e rede não são recusa do Pix: aí tentar mais tarde é a saída certa
+    const foraDoAr = new GatewayRequestError('PayPal', {
+      name: 'INTERNAL_SERVER_ERROR',
+    });
+    const gateway = new PayPalGateway({
+      createOrder: jest.fn().mockRejectedValue(foraDoAr),
+    } as any);
+
+    const erro = await gateway
+      .createCheckout({ ...request, paymentMethod: PaymentMethod.PIX }, comPix)
+      .catch((e) => e);
+
+    expect(erro).toBe(foraDoAr);
+  });
+
+  it('recusa no cartão não ganha a mensagem do Pix', async () => {
+    const recusa = new GatewayRequestError('PayPal', {
+      name: 'INVALID_REQUEST',
+    });
+    const gateway = new PayPalGateway({
+      createOrder: jest.fn().mockRejectedValue(recusa),
+    } as any);
+
+    const erro = await gateway.createCheckout(request, comPix).catch((e) => e);
+
+    expect(erro).toBe(recusa);
   });
 
   it('pedido que volta sem o código não vira Pix nem link', async () => {
