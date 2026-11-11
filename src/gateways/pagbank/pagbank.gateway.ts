@@ -9,6 +9,7 @@ import { createHash } from 'crypto';
 import { PagbankClient, PagbankCredenciais } from './pagbank.client';
 import { CreatePagbankCheckoutDto } from './dto/create-checkout.dto';
 import { PaymentGateway } from '../core/payment-gateway.interface';
+import { metodoNaoMapeado } from '../core/gateway-http';
 import {
   GatewayCharge,
   GatewayContext,
@@ -326,7 +327,7 @@ function mapearMetodo(metodo?: string): PaymentMethod {
     case 'BOLETO':
       return PaymentMethod.BOLETO;
     default:
-      return PaymentMethod.OTHER;
+      return metodoNaoMapeado('PagBank', metodo);
   }
 }
 

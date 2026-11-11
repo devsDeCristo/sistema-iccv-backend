@@ -81,6 +81,7 @@ export const FORMA_DO_PAGAMENTO: Record<PaymentMethod, string> = {
   DEBIT_CARD: 'Cartão de débito',
   CASH: 'Dinheiro',
   BOLETO: 'Boleto',
+  WALLET: 'Conta digital',
   OTHER: 'Outra',
 };
 

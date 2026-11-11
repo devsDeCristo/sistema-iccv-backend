@@ -39,6 +39,7 @@ const FIELD_LABELS: Record<string, string> = {
   payload: 'Dados da transação',
   price: 'Preço',
   profession: 'Profissão',
+  provider: 'Gateway',
   productsDeliveredAt: 'Entrega dos produtos',
   productsDeliveredById: 'Entrega registrada por',
   profilePhotoUrl: 'Foto de perfil',
@@ -90,7 +91,15 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
     DEBIT_CARD: 'Cartão de Débito',
     CASH: 'Dinheiro',
     BOLETO: 'Boleto',
+    WALLET: 'Conta digital',
     OTHER: 'Outro',
+  },
+  provider: {
+    PAGBANK: 'PagBank',
+    MERCADO_PAGO: 'Mercado Pago',
+    INFINITEPAY: 'InfinitePay',
+    TON: 'Ton',
+    PAYPAL: 'PayPal',
   },
   receivedFrom: {
     PENDING: 'Aguardando pagamento',

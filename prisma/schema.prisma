@@ -600,6 +600,12 @@ model Payment {
   roleRegistrationId String?
   userId             String?
   payload            Json?
+  /// Por qual gateway o dinheiro entrou. Gravado na baixa, pelo checkout que
+  /// o gateway confirmou — e não pelo gateway que a igreja usa hoje, que pode
+  /// ter mudado depois. Nulo no lançamento manual e na cobrança ainda não
+  /// paga. Existe para auditoria: o extrato de cada gateway é conferido
+  /// contra as baixas dele.
+  provider           PaymentProvider?
   checkouts          PaymentCheckout[]
   /// Produtos comprados junto deste ingresso. Somam em `amount` e entram no
   /// mesmo checkout: pagar o ingresso é pagar os produtos dele.
@@ -1144,6 +1150,10 @@ enum PaymentMethod {
   DEBIT_CARD
   CASH
   BOLETO
+  /// Saldo ou conta do próprio gateway: conta PayPal; saldo, Linha de Crédito
+  /// e carteiras do Mercado Pago. Antes caía em OTHER — que também quer dizer
+  /// "forma ainda não definida", e a tesouraria não sabia como entrou.
+  WALLET
   OTHER
 }
 

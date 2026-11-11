@@ -192,6 +192,7 @@ export class CronService {
               // quem respondeu foi o gateway: a cobrança deixa de ser uma
               // linha sem origem e passa a ser governada por ele
               receivedFrom: PaymentReceived.SYSTEM,
+              provider: cobranca.provider,
             },
           });
 

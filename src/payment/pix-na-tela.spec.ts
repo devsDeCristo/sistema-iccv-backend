@@ -240,3 +240,52 @@ describe('tela do QR — leitura e conferência', () => {
     expect(listCharges).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A auditoria confere o extrato de cada gateway contra as baixas dele. Para
+ * isso a cobrança precisa dizer por qual gateway o dinheiro entrou — o do
+ * checkout que respondeu, não o que a igreja usa hoje.
+ */
+describe('baixa pelo gateway grava qual gateway foi', () => {
+  it('o aviso do gateway carimba o gateway do checkout na cobrança', async () => {
+    const updateMany = jest.fn();
+    const tx = {
+      paymentCheckout: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            provider: PaymentProvider.PAYPAL,
+            chargedAmountCents: 1000,
+            payment: { id: 'p-1', status: PaymentStatus.WAITING },
+          },
+        ]),
+        updateMany: jest.fn(),
+      },
+      payment: { updateMany },
+    };
+    const banco = { $transaction: (fn: any) => fn(tx) };
+    const service = new PaymentService(banco as any, {} as any);
+
+    await service.updatePaymentWebhook(
+      'ref-1',
+      PaymentStatus.PAID,
+      PaymentMethod.WALLET,
+      { codeTransaction: 'CAP-1' },
+      {
+        provider: PaymentProvider.PAYPAL,
+        configId: 'config-1',
+        churchId: 'ig-1',
+      },
+      1000,
+    );
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: PaymentStatus.PAID,
+          method: PaymentMethod.WALLET,
+          provider: PaymentProvider.PAYPAL,
+        }),
+      }),
+    );
+  });
+});

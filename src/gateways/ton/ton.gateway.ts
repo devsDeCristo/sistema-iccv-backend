@@ -8,6 +8,7 @@ import {
 import { createHmac, timingSafeEqual } from 'crypto';
 import { TonClient, TonCredenciais } from './ton.client';
 import { PaymentGateway } from '../core/payment-gateway.interface';
+import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
@@ -381,13 +382,17 @@ function mapearMetodo(metodo?: string): PaymentMethod {
     case 'pix':
       return PaymentMethod.PIX;
     case 'credit_card':
+    // cartão de loja (bandeira própria do lojista): é crédito
+    case 'private_label':
       return PaymentMethod.CREDIT_CARD;
     case 'debit_card':
       return PaymentMethod.DEBIT_CARD;
     case 'boleto':
       return PaymentMethod.BOLETO;
+    case 'cash':
+      return PaymentMethod.CASH;
     default:
-      return PaymentMethod.OTHER;
+      return metodoNaoMapeado('Ton', metodo);
   }
 }
 

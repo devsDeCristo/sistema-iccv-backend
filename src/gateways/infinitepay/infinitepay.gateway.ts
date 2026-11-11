@@ -6,6 +6,7 @@ import {
   InfinitePayCredenciais,
 } from './infinitepay.client';
 import { PaymentGateway } from '../core/payment-gateway.interface';
+import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto } from '../core/discount';
 import {
@@ -258,6 +259,6 @@ function mapearMetodo(metodo?: string): PaymentMethod {
     case 'debit_card':
       return PaymentMethod.DEBIT_CARD;
     default:
-      return PaymentMethod.OTHER;
+      return metodoNaoMapeado('InfinitePay', metodo);
   }
 }

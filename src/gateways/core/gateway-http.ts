@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { PaymentMethod } from '@prisma/client';
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { GatewayRequestError } from './gateway.errors';
 
@@ -37,6 +38,28 @@ export function criarHttp(
  * do inscrito. O que ele precisa saber é que não deu; o resto fica no log do
  * servidor, que só o operador lê.
  */
+/**
+ * O gateway disse uma forma de pagamento que o mapa dele não conhece.
+ *
+ * Vira `OTHER` — não há valor melhor —, mas não em silêncio: o aviso no log
+ * traz o nome que o gateway usou, para entrar no mapa. O valor cru continua no
+ * `payload` do pagamento (`payment_method`), então nada se perde. Sem tipo
+ * nenhum é cobrança ainda não paga, e aí não há o que avisar.
+ */
+export function metodoNaoMapeado(
+  gateway: string,
+  tipo: unknown,
+): PaymentMethod {
+  if (tipo) {
+    new Logger('MetodoDePagamento').warn(
+      `${gateway} — forma de pagamento "${String(
+        tipo,
+      )}" sem mapeamento; gravada como OTHER.`,
+    );
+  }
+  return PaymentMethod.OTHER;
+}
+
 export function falhaDoGateway(
   logger: Logger,
   provider: string,

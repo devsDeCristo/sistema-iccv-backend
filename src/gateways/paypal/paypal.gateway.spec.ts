@@ -220,6 +220,10 @@ describe('PayPal — Pix na tela do sistema', () => {
 
     expect(payload.payment_source.pix).toBeUndefined();
     expect(payload.processing_instruction).toBeUndefined();
+    // quem não tem conta PayPal (a maioria) cai direto no formulário de cartão
+    expect(payload.payment_source.paypal.experience_context.landing_page).toBe(
+      'GUEST_CHECKOUT',
+    );
     expect(resultado.pix).toBeUndefined();
     expect(resultado.payUrl).toBe('https://paypal/x');
   });
@@ -275,10 +279,28 @@ describe('PayPal — consulta e captura', () => {
     );
     expect(charge).toMatchObject({
       status: PaymentStatus.PAID,
-      method: PaymentMethod.OTHER,
+      // pela conta PayPal: "conta digital", e não "outro", que no sistema
+      // quer dizer forma ainda não definida
+      method: PaymentMethod.WALLET,
       paidAmountCents: 12000,
       payload: { codeTransaction: 'CAP-1' },
     });
+  });
+
+  it('cartão sem login vira crédito ou débito, pelo que o PayPal informa', async () => {
+    const comCartao = (type: string) => ({
+      ...pedido('COMPLETED', capturaPaga),
+      payment_source: { card: { type, brand: 'VISA', last_digits: '1234' } },
+    });
+    const gateway = new PayPalGateway(
+      comPedidos(comCartao('CREDIT'), comCartao('DEBIT')) as any,
+    );
+
+    const [credito] = await gateway.listCharges('ref-1', ctx, 'ORDER-1');
+    const [debito] = await gateway.listCharges('ref-1', ctx, 'ORDER-1');
+
+    expect(credito.method).toBe(PaymentMethod.CREDIT_CARD);
+    expect(debito.method).toBe(PaymentMethod.DEBIT_CARD);
   });
 
   it('não captura pedido que o comprador ainda não aprovou', async () => {

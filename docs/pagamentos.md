@@ -232,6 +232,37 @@ R$ 300 vira `IN_ANALYSIS`.
 
 ---
 
+## 6.1. Forma de pagamento e gateway da baixa
+
+Toda baixa feita pelo gateway — aviso, reconciliação, a conferência antes de um
+checkout novo e o "Já paguei" do Pix — grava na cobrança três coisas que vêm
+dele: o status, a **forma de pagamento** (`method`) e **por qual gateway**
+entrou (`Payment.provider`).
+
+- **`provider`** é o gateway do checkout que respondeu, e não o que a igreja
+  usa hoje: uma igreja que trocou de gateway tem cobranças pagas pelos dois. É
+  a coluna da auditoria (o extrato de cada gateway contra as baixas dele) e
+  aparece na trilha como mudança de campo, o que dá nome ao "Retorno do
+  gateway" no histórico. O retroativo (migração `gateway_do_pagamento`) usa o
+  checkout mais recente de cada cobrança paga pelo gateway.
+- **`method`** sai do que o gateway informou. `OTHER` tem dois sentidos no
+  sistema — forma desconhecida e "ainda não definida" (é por ele que Minhas
+  Inscrições sabe que não há cobrança em andamento) —, então pagamento
+  confirmado não deve cair nele quando o gateway disse como foi pago:
+  - **`WALLET` ("Conta digital")**: saldo ou conta do próprio gateway — conta
+    PayPal; `account_money`, `digital_currency` (Linha de Crédito) e
+    `digital_wallet` do Mercado Pago;
+  - cartão pré-pago do Mercado Pago é débito; cartão de loja da Ton
+    (`private_label`) é crédito; cartão sem login no PayPal é crédito ou
+    débito pelo `card.type`;
+  - o que nenhum mapa conhece continua `OTHER`, mas com aviso no log
+    (`metodoNaoMapeado`, com o nome cru que o gateway usou) — e o valor cru
+    sempre fica em `payload.payment_method`.
+- O retroativo do método (migração `metodo_conta_digital_retroativo`) corrige
+  as cobranças já pagas pelo `payload.payment_method.type` gravado na baixa.
+  Separada da que cria o `WALLET`, porque o Postgres não deixa usar um valor de
+  enum na mesma transação que o criou.
+
 ## 7. Cobrança online por igreja
 
 Substituiu as duas variáveis globais. A igreja cobra com o módulo **Eventos** no plano **e** a cobrança ligada nela (`Church.modulePayment`, que o dev/super admin alterna em `PATCH /churches/:churchId/payment-providers/module`) — ver `docs/planos.md`. As respostas seguem com o nome `modulePayment`, já calculado. Sem cobrança:

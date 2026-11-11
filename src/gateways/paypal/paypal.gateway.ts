@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 import { PayPalClient, PayPalCredenciais } from './paypal.client';
 import { PaymentGateway } from '../core/payment-gateway.interface';
+import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
@@ -179,6 +180,13 @@ export class PayPalGateway implements PaymentGateway {
                 // "Pagar agora" em vez de "Continuar": não há tela de revisão
                 // nossa depois do PayPal
                 user_action: 'PAY_NOW',
+                // Abre no formulário de cartão, com "Entrar no PayPal" como
+                // alternativa. Sem isto o PayPal escolhia a tela de login, e o
+                // inscrito que não tem conta — a maioria — parava ali. Se a
+                // conta da igreja não aceita pagamento sem login ("Conta
+                // PayPal opcional" desligada), o PayPal mostra o login mesmo
+                // assim: é configuração dela, não deste pedido.
+                landing_page: 'GUEST_CHECKOUT',
                 ...retorno,
               },
             },
@@ -351,7 +359,9 @@ export class PayPalGateway implements PaymentGateway {
       // "aguardando com forma definida" como cobrança em andamento e trava o
       // botão de pagar — e é por ele que o inscrito volta ao QR que fechou, ou
       // tenta de novo depois de um cartão recusado.
-      method: captura ? metodoDaFonte(fonte) : PaymentMethod.OTHER,
+      method: captura
+        ? metodoDaFonte(fonte, pedido.payment_source?.[fonte])
+        : PaymentMethod.OTHER,
       createdAt: new Date(
         captura?.create_time ?? pedido.create_time ?? Date.now(),
       ),
@@ -405,15 +415,28 @@ function pedidoCitado(tipo: string, recurso: any): string | undefined {
   return undefined;
 }
 
-function metodoDaFonte(fonte: string): PaymentMethod {
+/**
+ * A forma de pagamento, pelo `payment_source` do pedido.
+ *
+ * Pela conta PayPal o PayPal não diz de onde o dinheiro saiu (saldo ou cartão
+ * salvo na conta): a API de pedidos devolve só a conta. O que se sabe é que foi
+ * pela conta — e isso é `WALLET`, não `OTHER`, que no sistema também quer dizer
+ * "forma ainda não definida".
+ */
+function metodoDaFonte(fonte: string, detalhe?: any): PaymentMethod {
   switch (fonte) {
     case 'pix':
       return PaymentMethod.PIX;
+    // cartão digitado na página do PayPal, sem login: o PayPal informa o tipo
     case 'card':
-      return PaymentMethod.CREDIT_CARD;
-    // carteira PayPal: saldo ou o que estiver cadastrado na conta
+      return detalhe?.type === 'DEBIT'
+        ? PaymentMethod.DEBIT_CARD
+        : PaymentMethod.CREDIT_CARD;
+    case 'paypal':
+    case 'venmo':
+      return PaymentMethod.WALLET;
     default:
-      return PaymentMethod.OTHER;
+      return metodoNaoMapeado('PayPal', fonte);
   }
 }
 

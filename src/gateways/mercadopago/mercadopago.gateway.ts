@@ -11,6 +11,7 @@ import {
   MercadoPagoCredenciais,
 } from './mercadopago.client';
 import { PaymentGateway } from '../core/payment-gateway.interface';
+import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto } from '../core/discount';
 import {
@@ -366,12 +367,20 @@ function mapearMetodo(tipo?: string): PaymentMethod {
     case 'credit_card':
       return PaymentMethod.CREDIT_CARD;
     case 'debit_card':
+    // pré-pago desconta de um saldo carregado antes, como o débito
+    case 'prepaid_card':
       return PaymentMethod.DEBIT_CARD;
+    // saldo da conta, Linha de Crédito Mercado Pago e carteiras: o dinheiro
+    // saiu da conta do comprador no próprio Mercado Pago
+    case 'account_money':
+    case 'digital_currency':
+    case 'digital_wallet':
+      return PaymentMethod.WALLET;
     // "ticket" é como o Mercado Pago chama boleto e pagamento em lotérica
     case 'ticket':
       return PaymentMethod.BOLETO;
     default:
-      return PaymentMethod.OTHER;
+      return metodoNaoMapeado('Mercado Pago', tipo);
   }
 }
 

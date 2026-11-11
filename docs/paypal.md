@@ -84,6 +84,19 @@ O token OAuth é pedido a cada operação. Custa uma chamada a mais e evita um
 cache de token por igreja. Se o `/v1/oauth2/token` começar a responder 429,
 é hora de cachear (o comentário `ponytail:` no cliente marca o lugar).
 
+## Pagar sem conta PayPal
+
+O pedido de cartão sai com `landing_page: GUEST_CHECKOUT`: a página do PayPal
+abre no formulário de cartão, com "Entrar no PayPal" como alternativa. Sem isso
+o PayPal escolhia a tela de login, e quem não tem conta parava ali — visto no
+primeiro teste em sandbox (11/11/2026).
+
+Não é garantia: o PayPal só oferece pagar sem conta se a conta que recebe
+permitir (*Configurações da conta › Pagamentos no site › Preferências do site ›
+Conta PayPal opcional*) e se ele considerar o comprador elegível. Em sandbox,
+essa opção é da conta Business de teste, ajustada entrando com ela em
+`sandbox.paypal.com`.
+
 ## Moeda: só conta brasileira
 
 O pedido sai em **BRL**. Pela documentação do PayPal, o real é aceito como moeda
@@ -149,8 +162,12 @@ segredo é a única tranca", porque não é).
 | pedido `VOIDED` | `CANCELED` |
 | qualquer outro pedido sem captura | `WAITING` |
 
-O método sai de `payment_source`: `pix` vira `PIX`, `card` vira `CREDIT_CARD`
-e a carteira PayPal vira `OTHER`. **Sem captura o método fica `OTHER`**, de
+O método sai de `payment_source`: `pix` vira `PIX`; `card` (cartão sem login)
+vira `DEBIT_CARD` ou `CREDIT_CARD` pelo `card.type`; a conta PayPal vira
+`WALLET` ("Conta digital"). Pela conta, o PayPal não diz se o dinheiro saiu do
+saldo ou de um cartão salvo nela: a API de pedidos devolve só a conta, e a de
+relatório de transações classifica o mesmo pagamento como "PayPal wallet" — e
+ainda leva até 3 horas. **Sem captura o método fica `OTHER`**, de
 propósito: a tela trata "aguardando com forma definida" como cobrança em
 andamento e trava o botão de pagar — e é por esse botão que o inscrito volta ao
 QR que fechou, ou tenta de novo depois de um cartão recusado. O código da
