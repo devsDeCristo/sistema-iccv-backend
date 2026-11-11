@@ -70,6 +70,10 @@ function ehLancamentoManual(anterior: PaymentStatus, novo?: PaymentStatus) {
   return !!novo && novo !== anterior && ENTRADAS_MANUAIS.includes(novo);
 }
 
+/** Ver `PaymentService.conferirPix`: uma pergunta ao gateway a cada 15 s */
+const INTERVALO_DA_CONFERENCIA = 15 * 1000;
+const ultimaConferenciaDoPix = new Map<string, number>();
+
 const ACCEPTED_RECEIPT_MIME_TYPES = [
   'image/png',
   'image/jpeg',
@@ -784,14 +788,25 @@ export class PaymentService {
    * `updatePaymentWebhook`, o mesmo caminho do aviso — então a conferência de
    * valor e o recorte por gateway valem aqui também.
    *
-   * ponytail: sem limite de frequência no servidor; cada clique são duas ou
-   * três chamadas na conta da igreja. Pôr um throttle por checkout se alguém
-   * abusar do botão.
+   * Uma pergunta ao gateway por cobrança a cada `INTERVALO_DA_CONFERENCIA`.
+   * Cada clique custa duas ou três chamadas na conta da igreja, e a conta tem
+   * limite: alguém insistindo no botão faria o PayPal recusar (429) as
+   * chamadas da igreja inteira — inclusive as baixas de quem já pagou. Dentro
+   * do intervalo, a resposta é o que está no banco.
    */
   async conferirPix(eventId: string, userId: string, referenceId: string) {
     const checkout = await this.checkoutPix(eventId, userId, referenceId);
 
-    if (checkout.payment.status !== PaymentStatus.PAID) {
+    const agora = Date.now();
+    const ultima = ultimaConferenciaDoPix.get(referenceId) ?? 0;
+    const podePerguntar = agora - ultima >= INTERVALO_DA_CONFERENCIA;
+
+    if (podePerguntar && checkout.payment.status !== PaymentStatus.PAID) {
+      ultimaConferenciaDoPix.set(referenceId, agora);
+      // ponytail: memória do processo; com mais de uma instância do backend o
+      // intervalo vale por instância — mover para o banco ou Redis aí
+      if (ultimaConferenciaDoPix.size > 5000) ultimaConferenciaDoPix.clear();
+
       const event = await this.prisma.event.findUnique({
         where: { id: eventId },
         select: { churchId: true },
@@ -1074,6 +1089,10 @@ export class PaymentService {
           // só quando a mão de alguém trouxe o dinheiro; ver `ehLancamentoManual`
           ...(ehLancamentoManual(payment.status, payload.status) && {
             receivedFrom: PaymentReceived.EXTERNAL,
+            // o dinheiro veio pela mão de alguém, não pelo gateway que tinha
+            // respondido antes (uma recusa, um Pix expirado): sem limpar, a
+            // auditoria atribuiria ao PayPal um pagamento recebido em mãos
+            provider: null,
           }),
           // desconto é da inscrição; compra avulsa de produto não tem onde
           // guardar, e o update aninhado estouraria sem a relação

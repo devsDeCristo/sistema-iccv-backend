@@ -136,6 +136,16 @@ Pix. O corpo nunca passa disso: aponta o pedido, e o estado vem da API.
 Sem o cadastro a integração **funciona, só mais devagar**: a captura fica para
 a reconciliação (até 3 h) ou para o próximo clique em pagar.
 
+### "Aguardando" é ignorado
+
+Aviso que, conferido na API, dá "aguardando" — Pix expirado ou cancelado,
+cartão recusado na captura — volta `ignored` em vez de virar baixa. Aplicar não
+mudaria o status, mas carimbaria a cobrança como vinda do gateway
+(`receivedFrom: SYSTEM`), e a tela trava a edição de toda cobrança assim: a
+tesouraria não conseguiria quitar à mão quem acabou pagando em dinheiro. Nos
+outros gateways "aguardando" pode vir com forma definida (boleto gerado) e
+quer dizer cobrança em andamento; no PayPal, sem captura, nunca tem forma.
+
 ### Por que a assinatura não é conferida
 
 O PayPal assina com certificado. Conferir exige o `webhook_id` da aplicação e
@@ -251,7 +261,11 @@ Três regras que não podem se perder:
    gateway — falar estouraria o limite de chamadas da conta da igreja (o PayPal
    pede no máximo uma consulta a cada 3–5 s por pedido). Quem muda o estado é o
    webhook, a reconciliação ou o `check`, e o `check` passa por
-   `updatePaymentWebhook`: a conferência de valor vale igual.
+   `updatePaymentWebhook`: a conferência de valor vale igual. O `check` só
+   pergunta ao PayPal **uma vez a cada 15 s por cobrança**; dentro do
+   intervalo devolve o que está no banco. Sem isso, alguém insistindo no botão
+   esgotaria o limite de chamadas da conta da igreja (o PayPal responde 429), e
+   as baixas dos outros inscritos parariam junto.
 
 `active: false` na resposta quer dizer que um checkout novo tomou o lugar
 deste. O QR antigo ainda seria aceito pelo banco, então a tela para de
@@ -307,9 +321,10 @@ público do Orders v2.
   que hoje ele não conhece. Fica para quando acontecer. Vale para o Pix
   também: o QR substituído continua pagável até expirar, e por isso a tela
   dele deixa de mostrá-lo.
-- **"Já paguei" não tem limite de frequência no servidor.** Cada clique são
-  duas ou três chamadas na conta da igreja; o botão trava enquanto a chamada
-  roda, e é só. Um throttle por checkout entra se alguém abusar.
+- **O intervalo do "Já paguei" é por processo.** Uma consulta ao PayPal por
+  cobrança a cada 15 s (`INTERVALO_DA_CONFERENCIA`), guardada na memória do
+  backend. Com mais de uma instância rodando, cada uma conta o seu intervalo;
+  aí o lugar dele é o banco ou um Redis.
 - **Taxas não aparecem na tela.** O PayPal não publica a tabela brasileira numa
   página legível (a oficial bloqueia leitura e as fontes de terceiros divergem),
   então `PROVIDER_PRICING` no front não tem o PayPal. O cartão mostra só os

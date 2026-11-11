@@ -243,8 +243,14 @@ entrou (`Payment.provider`).
   usa hoje: uma igreja que trocou de gateway tem cobranças pagas pelos dois. É
   a coluna da auditoria (o extrato de cada gateway contra as baixas dele) e
   aparece na trilha como mudança de campo, o que dá nome ao "Retorno do
-  gateway" no histórico. O retroativo (migração `gateway_do_pagamento`) usa o
-  checkout mais recente de cada cobrança paga pelo gateway.
+  gateway" no histórico. Numa cobrança recusada ou estornada, é o gateway que
+  recusou ou estornou. **Volta a nulo no lançamento manual** (`ehLancamentoManual`
+  em `updatePaymentStatus`): uma cobrança que o gateway tinha recusado e que
+  depois foi quitada em dinheiro não pode aparecer na auditoria do extrato do
+  gateway. O retroativo (migração `gateway_do_pagamento`) usa o checkout mais
+  recente de cada cobrança cuja origem é o gateway.
+- Ninguém grava `provider` pela API: nenhum DTO declara o campo, e o
+  `ValidationPipe` (`forbidNonWhitelisted`) recusa a requisição que o mandar.
 - **`method`** sai do que o gateway informou. `OTHER` tem dois sentidos no
   sistema — forma desconhecida e "ainda não definida" (é por ele que Minhas
   Inscrições sabe que não há cobrança em andamento) —, então pagamento

@@ -217,8 +217,11 @@ describe('tela do QR — leitura e conferência', () => {
     );
   });
 
+  // Cada teste com a sua referência: o intervalo entre conferências é por
+  // referência e vive no processo, então reusar 'ref-1' faria o teste passar
+  // sem o gateway ter sido consultado.
   it('"já paguei" sem pagamento no gateway não mexe na cobrança', async () => {
-    const { service, baixa } = montar(checkoutPix(), [
+    const { service, baixa, listCharges } = montar(checkoutPix(), [
       {
         status: PaymentStatus.WAITING,
         method: PaymentMethod.OTHER,
@@ -227,17 +230,37 @@ describe('tela do QR — leitura e conferência', () => {
       },
     ]);
 
-    await service.conferirPix('ev-1', 'u-1', 'ref-1');
+    await service.conferirPix('ev-1', 'u-1', 'ref-aguardando');
 
+    expect(listCharges).toHaveBeenCalled();
     expect(baixa).not.toHaveBeenCalled();
   });
 
   it('cobrança já paga não volta a consultar o gateway', async () => {
     const { service, listCharges } = montar(checkoutPix(PaymentStatus.PAID));
 
-    await service.conferirPix('ev-1', 'u-1', 'ref-1');
+    await service.conferirPix('ev-1', 'u-1', 'ref-ja-paga');
 
     expect(listCharges).not.toHaveBeenCalled();
+  });
+
+  it('cliques seguidos em "já paguei" consultam o gateway uma vez só', async () => {
+    const { service, listCharges } = montar(checkoutPix(), [
+      {
+        status: PaymentStatus.WAITING,
+        method: PaymentMethod.OTHER,
+        createdAt: new Date(),
+        payload: {},
+      },
+    ]);
+
+    // a conta PayPal da igreja tem limite de chamadas: insistir no botão não
+    // pode esgotá-lo para as baixas dos outros inscritos
+    await service.conferirPix('ev-1', 'u-1', 'ref-insistente');
+    await service.conferirPix('ev-1', 'u-1', 'ref-insistente');
+    await service.conferirPix('ev-1', 'u-1', 'ref-insistente');
+
+    expect(listCharges).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -284,6 +307,52 @@ describe('baixa pelo gateway grava qual gateway foi', () => {
           status: PaymentStatus.PAID,
           method: PaymentMethod.WALLET,
           provider: PaymentProvider.PAYPAL,
+        }),
+      }),
+    );
+  });
+});
+
+describe('lançamento manual não herda o gateway', () => {
+  it('quitar à mão uma cobrança que o gateway tinha recusado limpa o gateway', async () => {
+    const update = jest.fn();
+    const tx = {
+      payment: { findMany: jest.fn().mockResolvedValue([]), update },
+      paymentCheckout: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn(),
+      },
+    };
+    const banco = {
+      payment: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'p-1',
+          eventId: 'ev-1',
+          status: PaymentStatus.DECLINED,
+          receivedFrom: 'SYSTEM',
+          provider: PaymentProvider.PAYPAL,
+          payload: {},
+          roleRegistrationId: null,
+          eventUserRole: null,
+        }),
+      },
+      $transaction: (fn: any) => fn(tx),
+    };
+    const service = new PaymentService(banco as any, {} as any);
+
+    await service.updatePaymentStatus('p-1', {
+      status: PaymentStatus.PAID,
+      method: PaymentMethod.CASH,
+    } as any);
+
+    // dinheiro na secretaria não é dinheiro do PayPal: a auditoria do extrato
+    // do PayPal não pode contar com ele
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: PaymentStatus.PAID,
+          receivedFrom: 'EXTERNAL',
+          provider: null,
         }),
       }),
     );

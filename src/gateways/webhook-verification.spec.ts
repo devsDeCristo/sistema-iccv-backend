@@ -317,11 +317,8 @@ describe('PayPal — a prova é a API, não o corpo', () => {
       expect.objectContaining({ clientSecret: 'sec' }),
       ctx.mode,
     );
-    expect(evento).toMatchObject({
-      kind: 'payment',
-      referenceId: 'ref-1',
-      status: PaymentStatus.WAITING,
-    });
+    // o corpo dizia "pago"; a API diz que nem aprovou — nada a aplicar
+    expect(evento).toMatchObject({ kind: 'ignored' });
   });
 
   it('captura quando o aviso é de aprovação, e só então dá baixa', async () => {
@@ -408,10 +405,9 @@ describe('PayPal — a prova é a API, não o corpo', () => {
       expect.anything(),
       ctx.mode,
     );
-    expect(evento).toMatchObject({
-      kind: 'payment',
-      status: PaymentStatus.WAITING,
-    });
+    // aplicar um "aguardando" carimbaria a cobrança como vinda do gateway e
+    // travaria a edição na tela, sem nada ter acontecido com o dinheiro
+    expect(evento).toMatchObject({ kind: 'ignored' });
   });
 
   it('ignora outros tipos de aviso sem falar com a API', async () => {

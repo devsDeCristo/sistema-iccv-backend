@@ -293,6 +293,21 @@ export class PayPalGateway implements PaymentGateway {
 
     const charge = this.paraCharge(pedido);
 
+    /**
+     * "Aguardando" no PayPal é sempre "nada aconteceu": Pix expirado ou
+     * cancelado, cartão recusado na captura. Aplicar isso não mudaria o status
+     * e ainda carimbaria a cobrança como vinda do gateway — o que trava a
+     * edição na tela e impede a tesouraria de quitar à mão quem acabou pagando
+     * em dinheiro. Nos outros gateways "aguardando" pode trazer forma definida
+     * (boleto gerado) e significa cobrança em andamento; aqui, nunca.
+     */
+    if (charge.status === PaymentStatus.WAITING) {
+      return {
+        kind: 'ignored',
+        reason: `pedido ${pedido.id} ainda sem pagamento (${pedido.status})`,
+      };
+    }
+
     return {
       kind: 'payment',
       referenceId,

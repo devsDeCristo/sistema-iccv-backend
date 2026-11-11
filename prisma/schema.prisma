@@ -600,11 +600,13 @@ model Payment {
   roleRegistrationId String?
   userId             String?
   payload            Json?
-  /// Por qual gateway o dinheiro entrou. Gravado na baixa, pelo checkout que
-  /// o gateway confirmou — e não pelo gateway que a igreja usa hoje, que pode
-  /// ter mudado depois. Nulo no lançamento manual e na cobrança ainda não
-  /// paga. Existe para auditoria: o extrato de cada gateway é conferido
-  /// contra as baixas dele.
+  /// Por qual gateway o dinheiro entrou. Gravado toda vez que um gateway
+  /// responde pela cobrança (aviso, conferência), pelo checkout que ele
+  /// confirmou — e não pelo gateway que a igreja usa hoje, que pode ter mudado
+  /// depois. Na cobrança paga pelo gateway é quem recebeu; numa recusada, quem
+  /// recusou. Volta a nulo no lançamento manual e é nulo enquanto nenhum
+  /// gateway respondeu. Existe para auditoria: o extrato de cada gateway é
+  /// conferido contra as baixas dele.
   provider           PaymentProvider?
   checkouts          PaymentCheckout[]
   /// Produtos comprados junto deste ingresso. Somam em `amount` e entram no
