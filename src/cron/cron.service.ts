@@ -33,8 +33,17 @@ interface CobrancaPendente {
   configId: string | null;
   /** O que foi pedido à casa, para conferir o que voltou pago */
   chargedAmountCents: number | null;
+  createdAt: Date;
   eventId: string | null;
 }
+
+/**
+ * Depois disto, "o gateway não conhece o pedido" é definitivo. O link vale 1
+ * hora; o prazo largo cobre o gateway que responde "não existe" para um
+ * checkout ainda dentro da validade (o PagBank responde 404 enquanto ninguém
+ * pagou).
+ */
+const PRAZO_PARA_DESISTIR = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class CronService {
@@ -91,16 +100,21 @@ export class CronService {
             provider: true,
             configId: true,
             chargedAmountCents: true,
+            createdAt: true,
+            status: true,
           },
         },
       },
     });
 
+    // checkout já dado como morto não volta a ser perguntado
     const cobrancas: CobrancaPendente[] = pendentes.flatMap((pagamento) =>
-      pagamento.checkouts.map((checkout) => ({
-        ...checkout,
-        eventId: pagamento.eventId,
-      })),
+      pagamento.checkouts
+        .filter((checkout) => checkout.status !== CheckoutStatus.EXPIRED)
+        .map((checkout) => ({
+          ...checkout,
+          eventId: pagamento.eventId,
+        })),
     );
 
     // A igreja com o módulo de pagamento desligado fica de fora. Desligar o
@@ -144,7 +158,10 @@ export class CronService {
           cobranca.checkoutId,
         );
 
-        if (charges.length === 0) continue;
+        if (charges.length === 0) {
+          await this.desistirSeVelho(cobranca);
+          continue;
+        }
 
         const chargeMaisRecente = charges.reduce((atual, item) =>
           item.createdAt > atual.createdAt ? item : atual,
@@ -214,6 +231,11 @@ export class CronService {
           this.logger.warn(
             `Pagamento ${cobranca.referenceId} não encontrado em ${cobranca.provider}.`,
           );
+          await this.desistirSeVelho(cobranca).catch((erro) =>
+            this.logger.error(
+              `Falha ao expirar ${cobranca.referenceId}: ${erro.message}`,
+            ),
+          );
           continue;
         }
 
@@ -227,6 +249,30 @@ export class CronService {
     this.logger.log('✅ Reconciliação finalizada');
 
     return { conferidas: aReconciliar.length, atualizadas };
+  }
+
+  /**
+   * O gateway não conhece (mais) o pedido — o do PayPal some da API quando
+   * expira. Passado o prazo, o checkout vira EXPIRED e sai das próximas
+   * rodadas; sem isto, toda rodada perguntava de novo pelo mesmo pedido.
+   *
+   * Só o checkout: a cobrança continua pendente, e o inscrito que voltar para
+   * pagar ganha um checkout novo. Um aviso atrasado do gateway ainda dá baixa,
+   * porque o webhook acha o checkout pela referência, seja qual for o status.
+   */
+  private async desistirSeVelho(cobranca: CobrancaPendente) {
+    if (Date.now() - cobranca.createdAt.getTime() < PRAZO_PARA_DESISTIR) {
+      return;
+    }
+
+    await this.prisma.paymentCheckout.updateMany({
+      where: { referenceId: cobranca.referenceId },
+      data: { status: CheckoutStatus.EXPIRED },
+    });
+
+    this.logger.log(
+      `Checkout ${cobranca.referenceId} expirado: ${cobranca.provider} não o conhece mais.`,
+    );
   }
 
   /**

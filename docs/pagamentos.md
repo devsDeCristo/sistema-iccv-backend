@@ -307,6 +307,16 @@ Duas decisões que valem registro:
   reconciliação gravava o objeto cru da casa, e o painel ficava sem código de
   transação em todo pagamento que o webhook não pegou — sintoma que apareceu no
   Mercado Pago, onde em sandbox o webhook nunca pega.
+- **Pedido que o gateway não conhece mais sai da rotina.** Quando a resposta é
+  "não existe" (ou lista vazia) e o checkout tem mais de 24 horas, ele vira
+  `EXPIRED` e as rodadas seguintes não o consultam. Antes a rotina só avisava e
+  seguia, e perguntava pelo mesmo pedido a cada 3 horas, para sempre — visto no
+  painel do PayPal como uma fila de `404` no mesmo `GET /v2/checkout/orders`
+  (o pedido do PayPal some da API quando expira). As 24 horas existem porque o
+  PagBank responde 404 para checkout ainda válido enquanto ninguém pagou.
+  Só o checkout expira: a cobrança continua pendente, quem voltar para pagar
+  ganha um checkout novo, e um aviso atrasado do gateway ainda dá baixa, porque
+  o webhook acha o checkout pela referência, seja qual for o status.
 
 Além do relógio, a rotina tem um gatilho manual: o botão **Conferir no gateway**
 na aba Tesouraria do evento, recortado àquele evento e limitado ao perfil dev —
