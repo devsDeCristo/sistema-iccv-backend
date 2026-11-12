@@ -604,6 +604,15 @@ export class PaymentService {
           email: user.email,
           taxId: user.cpf,
           phone: { country: '55', area: ddd, number: numero },
+          birthDate: user.birthday,
+          address: {
+            street: user.street,
+            number: user.number,
+            neighborhood: user.neighborhood,
+            city: user.city,
+            state: user.state,
+            zipCode: user.zipCode,
+          },
         },
         // Arredondado: o desconto é percentual sobre o preço, e um resultado
         // como 1234.9999999 em centavos é recusado por casa que só aceita

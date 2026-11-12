@@ -61,8 +61,12 @@ export class PayPalGateway implements PaymentGateway {
     provider: PaymentProvider.PAYPAL,
     label: 'PayPal',
     summary:
-      'Cartão de crédito ou saldo da conta no site do PayPal. Com o Pix habilitado na conta, o inscrito também paga por QR Code, sem sair do sistema.',
-    paymentMethods: [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD],
+      'Cartão de crédito, débito ou saldo da conta no site do PayPal. Com o Pix habilitado na conta, o inscrito também paga por QR Code, sem sair do sistema.',
+    paymentMethods: [
+      PaymentMethod.PIX,
+      PaymentMethod.CREDIT_CARD,
+      PaymentMethod.DEBIT_CARD,
+    ],
     fields: [
       {
         key: 'clientId',
@@ -192,6 +196,8 @@ export class PayPalGateway implements PaymentGateway {
           }
         : {
             paypal: {
+              // o formulário de cartão já abre preenchido com o cadastro
+              ...dadosDoInscrito(pedido.customer),
               experience_context: {
                 locale: 'pt-BR',
                 shipping_preference: 'NO_SHIPPING',
@@ -214,7 +220,22 @@ export class PayPalGateway implements PaymentGateway {
     const criado = await this.client
       .createOrder(payload, this.cred(ctx), ctx.mode, pedido.referenceId)
       .catch((erro) => {
-        throw querPix ? pixRecusado(erro) : erro;
+        if (querPix) throw pixRecusado(erro);
+        if (!recusouOsDados(erro)) throw erro;
+
+        // O preenchimento é conveniência: um cadastro que o PayPal não aceita
+        // (CEP, telefone) não pode impedir o pagamento. Segunda tentativa sem
+        // os dados, com outro Request-Id — o primeiro já tem resposta guardada.
+        new Logger(PayPalGateway.name).warn(
+          `PayPal — dados do inscrito recusados em ${pedido.referenceId}; pedido refeito sem eles.`,
+        );
+        const { experience_context } = (payload.payment_source as any).paypal;
+        return this.client.createOrder(
+          { ...payload, payment_source: { paypal: { experience_context } } },
+          this.cred(ctx),
+          ctx.mode,
+          `${pedido.referenceId}-sem-dados`,
+        );
       });
 
     if (querPix) {
@@ -458,6 +479,79 @@ function pixRecusado(erro: unknown) {
   }
 
   return erro;
+}
+
+/**
+ * O cadastro do inscrito no formato do `payment_source.paypal`, para o
+ * formulário de cartão abrir preenchido. Cada campo só vai quando está
+ * completo: mandar meio dado faz o PayPal recusar o pedido inteiro.
+ */
+function dadosDoInscrito(cliente: HostedCheckoutRequest['customer']) {
+  const [nome, ...sobrenome] = cliente.name.trim().split(/\s+/);
+  const cpf = cliente.taxId.replace(/\D/g, '');
+  const celular = `${cliente.phone.area}${cliente.phone.number}`.replace(
+    /\D/g,
+    '',
+  );
+  const endereco = cliente.address;
+  const cep = (endereco?.zipCode ?? '').replace(/\D/g, '');
+  const uf = (endereco?.state ?? '').trim().toUpperCase();
+  const enderecoCompleto =
+    endereco?.street &&
+    endereco.city &&
+    cep.length === 8 &&
+    /^[A-Z]{2}$/.test(uf);
+
+  return {
+    email_address: cliente.email,
+    name: {
+      given_name: nome.slice(0, 140),
+      ...(sobrenome.length && {
+        surname: sobrenome.join(' ').slice(0, 140),
+      }),
+    },
+    ...(cpf.length === 11 && {
+      tax_info: { tax_id: cpf, tax_id_type: 'BR_CPF' },
+    }),
+    ...(celular.length >= 10 && {
+      phone: {
+        phone_type: 'MOBILE',
+        phone_number: { national_number: celular },
+      },
+    }),
+    ...(cliente.birthDate && {
+      birth_date: cliente.birthDate.toISOString().slice(0, 10),
+    }),
+    ...(enderecoCompleto && {
+      address: {
+        address_line_1: [endereco.street, endereco.number]
+          .filter(Boolean)
+          .join(', '),
+        ...(endereco.neighborhood && {
+          address_line_2: endereco.neighborhood,
+        }),
+        admin_area_2: endereco.city,
+        admin_area_1: uf,
+        postal_code: `${cep.slice(0, 5)}-${cep.slice(5)}`,
+        country_code: 'BR',
+      },
+    }),
+  };
+}
+
+/** O PayPal recusou o pedido por um dos dados do inscrito, e não pelo resto */
+function recusouOsDados(erro: unknown) {
+  if (!(erro instanceof GatewayRequestError)) return false;
+
+  const detalhes =
+    (erro.detalhes as { details?: { field?: string }[] } | undefined)
+      ?.details ?? [];
+
+  return detalhes.some(
+    ({ field = '' }) =>
+      field.startsWith('/payment_source/paypal/') &&
+      !field.startsWith('/payment_source/paypal/experience_context'),
+  );
 }
 
 const PIX_INDISPONIVEL =

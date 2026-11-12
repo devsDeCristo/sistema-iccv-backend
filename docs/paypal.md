@@ -97,6 +97,38 @@ Conta PayPal opcional*) e se ele considerar o comprador elegível. Em sandbox,
 essa opção é da conta Business de teste, ajustada entrando com ela em
 `sandbox.paypal.com`.
 
+**Testar sempre num navegador sem sessão do PayPal** (outro navegador ou janela
+anônima). Quando o navegador já entrou no PayPal antes, ele reconhece a pessoa,
+preenche o e-mail e abre no login, ignorando o `GUEST_CHECKOUT` — parece que a
+configuração não pegou, mas não é o caso. Confirmado em 12/11/2026: no
+navegador com sessão caía no login; em outro, abriu no formulário de cartão.
+O inscrito comum não tem essa sessão e vê o formulário.
+
+### O formulário abre preenchido
+
+No Brasil, o pagamento sem login do PayPal é um formulário longo: país,
+e-mail, telefone, cartão, endereço de cobrança e, no fim, **criar senha, data
+de nascimento e CPF** — o PayPal abre uma conta para quem paga assim, e isso
+não tem opção na API para desligar. O que dá para fazer é mandar o que já
+temos: `dadosDoInscrito` põe no `payment_source.paypal` o e-mail, nome
+(primeiro nome + o resto como sobrenome), CPF (`BR_CPF`), celular, data de
+nascimento e endereço do cadastro. Sobra para o inscrito o cartão e a senha.
+
+- Cada campo só vai **completo**: o endereço só com rua, cidade, CEP de 8
+  dígitos e UF de 2 letras (cadastro antigo com "Pernambuco" por extenso fica
+  sem endereço); CPF só com 11 dígitos; celular com DDD.
+- **Preencher é conveniência, não requisito.** Se o PayPal recusar o pedido
+  apontando um campo de `/payment_source/paypal/…` (fora o
+  `experience_context`), o adapter refaz o pedido sem os dados, com o
+  `PayPal-Request-Id` `<referência>-sem-dados` (o primeiro já tem a recusa
+  guardada), e deixa no log `PayPal — dados do inscrito recusados em <ref>`.
+  Erro em qualquer outro campo sobe como antes.
+- A API diz que o `phone` só é usado com a opção **Contact Telephone Number**
+  ligada no perfil da conta; sem ela, é ignorado ou recusado — no segundo
+  caso, cai na regra acima.
+- Não confirmado em produção (12/11/2026): se o formulário do Brasil usa todos
+  esses campos ou só parte deles.
+
 ## Moeda: só conta brasileira
 
 O pedido sai em **BRL**. Pela documentação do PayPal, o real é aceito como moeda
@@ -171,6 +203,11 @@ segredo é a única tranca", porque não é).
 | captura `REFUNDED` | `REFUNDED` |
 | pedido `VOIDED` | `CANCELED` |
 | qualquer outro pedido sem captura | `WAITING` |
+
+As etiquetas do cartão do PayPal na tela de pagamentos (`paymentMethods` do
+descriptor) são Pix, crédito e débito — o formulário de cartão do PayPal aceita
+os dois. A pergunta ao inscrito continua com duas opções (`paymentMethodChoices`:
+Pix ou cartão); crédito ou débito ele escolhe na página do PayPal.
 
 O método sai de `payment_source`: `pix` vira `PIX`; `card` (cartão sem login)
 vira `DEBIT_CARD` ou `CREDIT_CARD` pelo `card.type`; a conta PayPal vira

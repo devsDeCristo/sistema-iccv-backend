@@ -110,6 +110,117 @@ describe('PayPal — criação do pedido', () => {
       payUrl: 'https://paypal/checkoutnow?token=1',
     });
   });
+
+  const comCadastro: HostedCheckoutRequest = {
+    ...request,
+    customer: {
+      name: 'Maria  da Silva Souza',
+      email: 'm@x.com',
+      taxId: '123.456.789-09',
+      phone: { country: '55', area: '81', number: '999998888' },
+      birthDate: new Date('1990-05-20T00:00:00Z'),
+      address: {
+        street: 'Rua A',
+        number: '120-A',
+        neighborhood: 'Boa Vista',
+        city: 'Recife',
+        state: 'pe',
+        zipCode: '50050000',
+      },
+    },
+  };
+
+  it('abre o formulário de cartão preenchido com o cadastro', async () => {
+    const client = { createOrder: jest.fn().mockResolvedValue({ id: 'O' }) };
+
+    await new PayPalGateway(client as any).createCheckout(comCadastro, ctx);
+
+    const { paypal } = client.createOrder.mock.calls[0][0].payment_source;
+    expect(paypal).toMatchObject({
+      email_address: 'm@x.com',
+      name: { given_name: 'Maria', surname: 'da Silva Souza' },
+      tax_info: { tax_id: '12345678909', tax_id_type: 'BR_CPF' },
+      phone: {
+        phone_type: 'MOBILE',
+        phone_number: { national_number: '81999998888' },
+      },
+      birth_date: '1990-05-20',
+      address: {
+        address_line_1: 'Rua A, 120-A',
+        address_line_2: 'Boa Vista',
+        admin_area_2: 'Recife',
+        admin_area_1: 'PE',
+        postal_code: '50050-000',
+        country_code: 'BR',
+      },
+      experience_context: { landing_page: 'GUEST_CHECKOUT' },
+    });
+  });
+
+  it('endereço incompleto não vai — meio endereço faz o PayPal recusar tudo', async () => {
+    const client = { createOrder: jest.fn().mockResolvedValue({ id: 'O' }) };
+
+    await new PayPalGateway(client as any).createCheckout(
+      {
+        ...comCadastro,
+        customer: {
+          ...comCadastro.customer,
+          address: { ...comCadastro.customer.address, state: 'Pernambuco' },
+        },
+      },
+      ctx,
+    );
+
+    const { paypal } = client.createOrder.mock.calls[0][0].payment_source;
+    expect(paypal.address).toBeUndefined();
+    expect(paypal.tax_info).toBeDefined();
+  });
+
+  it('dado do cadastro recusado não impede o pagamento: refaz sem os dados', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const client = {
+      createOrder: jest
+        .fn()
+        .mockRejectedValueOnce(
+          new GatewayRequestError('PayPal', {
+            name: 'INVALID_REQUEST',
+            details: [{ field: '/payment_source/paypal/address/postal_code' }],
+          }),
+        )
+        .mockResolvedValueOnce({
+          id: 'O',
+          links: [{ rel: 'payer-action', href: 'https://paypal/pagar' }],
+        }),
+    };
+
+    const resultado = await new PayPalGateway(client as any).createCheckout(
+      comCadastro,
+      ctx,
+    );
+
+    const [payload, , , requestId] = client.createOrder.mock.calls[1];
+    expect(payload.payment_source.paypal).toEqual({
+      experience_context: expect.objectContaining({
+        landing_page: 'GUEST_CHECKOUT',
+      }),
+    });
+    // o primeiro Request-Id já tem a recusa guardada no PayPal
+    expect(requestId).toBe('ref-1-sem-dados');
+    expect(resultado.payUrl).toBe('https://paypal/pagar');
+  });
+
+  it('erro que não é dos dados do inscrito não é refeito', async () => {
+    const recusa = new GatewayRequestError('PayPal', {
+      name: 'UNPROCESSABLE_ENTITY',
+      details: [{ field: "/purchase_units/@reference_id=='ref-1'/amount" }],
+    });
+    const client = { createOrder: jest.fn().mockRejectedValue(recusa) };
+
+    await expect(
+      new PayPalGateway(client as any).createCheckout(comCadastro, ctx),
+    ).rejects.toBe(recusa);
+    expect(client.createOrder).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('PayPal — Pix na tela do sistema', () => {

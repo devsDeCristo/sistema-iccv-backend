@@ -107,6 +107,16 @@ export interface HostedCheckoutRequest {
     email: string;
     taxId: string;
     phone: { country: string; area: string; number: string };
+    /** Hoje só o PayPal usa: preenche o formulário de cartão por ele */
+    birthDate?: Date;
+    address?: {
+      street?: string | null;
+      number?: string | null;
+      neighborhood?: string | null;
+      city?: string | null;
+      state?: string | null;
+      zipCode?: string | null;
+    };
   };
   items: HostedCheckoutItem[];
   discountCents: number;
