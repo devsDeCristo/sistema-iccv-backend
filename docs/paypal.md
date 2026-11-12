@@ -232,9 +232,10 @@ já saiu da conta de quem pagou; não há o que revisar, e a regra de "aprovar n
 é pagar" lá de cima não se aplica. Se por algum motivo o pedido aparecer
 `APPROVED`, `pedidoAtual` captura do mesmo jeito.
 
-A resposta traz `qr_payload` (o copia e cola no padrão do Banco Central, de
-onde o QR é desenhado) e não traz link — **desde que o pedido seja criado com o
-header `Prefer: return=representation`** (ver a armadilha abaixo). O adapter devolve
+A resposta traz o copia e cola no padrão do Banco Central (de onde o QR é
+desenhado) e não traz link — **desde que o pedido seja criado com o header
+`Prefer: return=representation`**, e não no campo que a documentação diz (ver
+as armadilhas abaixo). O adapter devolve
 `HostedCheckoutResult.pix = { code, expiresAt }`, e o serviço:
 
 - grava em `PaymentCheckout.pixCode` e `pixExpiresAt`;
@@ -323,17 +324,35 @@ documentação do Pix mostra a resposta completa sem dizer que ela precisa ser
 pedida.
 
 `PayPalClient.createOrder` manda `Prefer: return=representation` em todo
-pedido (no cartão também; o link `payer-action` vem igual). Se um pedido de Pix
-ainda voltar sem o código, o log tem a linha `PayPal — pedido de Pix <id>
-(<status>) voltou sem qr_payload`, com os campos que vieram — sem dados do
-inscrito. O pedido órfão expira sozinho no PayPal; nada foi gravado aqui.
+pedido (no cartão também; o link `payer-action` vem igual).
+
+### O código não vem em `qr_payload`
+
+**Terceira armadilha (11/11/2026, produção).** Com a resposta completa, o
+`payment_source.pix` voltou com `name, country_code, currency_code, phone,
+email, tax_info, qr_details` — sem o `qr_payload` da documentação, e com um
+`qr_details` que ela não menciona nem descreve.
+
+Como o nome do campo de dentro é desconhecido, `codigoDoPix` acha o código
+**pelo conteúdo**: o BR Code do Banco Central sempre começa com `000201` (o
+indicador de formato do padrão EMV). A busca olha `qr_payload` (se um dia vier)
+e tudo dentro de `qr_details`, em qualquer profundidade — e **só** neles: o
+resto do `pix` é do inscrito, e um CPF que comece com 000.201 casaria com o
+prefixo. O `qr_image` do exemplo deles (`pix://pay?…`) não casa.
+
+Sem código, o inscrito vê a mensagem do Pix indisponível (422), e o log tem
+`PayPal — pedido de Pix <id> (<status>) voltou sem o código`, com os campos do
+`pix` e o `qr_details` com os textos cortados em 12 caracteres — o formato
+aparece, nenhum dado do inscrito. O pedido órfão expira sozinho no PayPal; nada
+é gravado aqui.
 
 ### A confirmar com uma conta habilitada
 
 - `shipping_preference: NO_SHIPPING` é aceito no Pix (o exemplo deles usa
-  `GET_FROM_FILE`); no primeiro teste a API não reclamou dele;
-- `qr_payload` é lido pelos apps de banco (o outro campo, `qr_image`, vem num
-  formato `pix://pay?…` que não parece ser);
+  `GET_FROM_FILE`); a API não reclamou dele;
+- o nome do campo do código dentro de `qr_details`, para trocar a busca pelo
+  prefixo por uma leitura direta;
+- o texto que começa com `000201` é lido pelos apps de banco;
 - o `GET` do pedido pago devolve `payment_source.pix` — é de onde sai o método
   `PIX`; se não devolver, a baixa acontece igual e o método fica `OTHER`;
 - o formato do `CHECKOUT.PAYMENT-APPROVAL.REVERSED` e o estado do pedido depois

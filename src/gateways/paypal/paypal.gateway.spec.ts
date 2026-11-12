@@ -5,7 +5,7 @@ import {
   PaymentStatus,
 } from '@prisma/client';
 import { PayPalGateway } from './paypal.gateway';
-import { UnprocessableEntityException } from '@nestjs/common';
+import { Logger, UnprocessableEntityException } from '@nestjs/common';
 import {
   GatewayRequestError,
   GatewayResourceNotFoundError,
@@ -183,7 +183,12 @@ describe('PayPal — Pix na tela do sistema', () => {
   });
 
   it('respeita o mínimo de 10 minutos de validade do PayPal', async () => {
-    const client = { createOrder: jest.fn().mockResolvedValue({ id: 'X' }) };
+    const client = {
+      createOrder: jest.fn().mockResolvedValue({
+        id: 'X',
+        payment_source: { pix: { qr_payload: '000201...' } },
+      }),
+    };
     const gateway = new PayPalGateway(client as any);
 
     await gateway.createCheckout(
@@ -248,9 +253,23 @@ describe('PayPal — Pix na tela do sistema', () => {
     expect(erro).toBe(recusa);
   });
 
-  it('pedido que volta sem o código não vira Pix nem link', async () => {
+  it('acha o código dentro de `qr_details`, o formato que a produção devolveu', async () => {
     const client = {
-      createOrder: jest.fn().mockResolvedValue({ id: 'ORDER-PIX' }),
+      createOrder: jest.fn().mockResolvedValue({
+        id: 'ORDER-PIX',
+        status: 'PAYER_ACTION_REQUIRED',
+        payment_source: {
+          pix: {
+            name: 'Fulano',
+            // o nome do campo de dentro não é documentado: o código é achado
+            // pelo prefixo do BR Code, e o `pix://` do QR em imagem não casa
+            qr_details: {
+              qr_image: 'pix://pay?ver=1.0',
+              qualquer_nome: '00020101021226910014BR.GOV.BCB.PIX',
+            },
+          },
+        },
+      }),
     };
     const gateway = new PayPalGateway(client as any);
 
@@ -259,9 +278,28 @@ describe('PayPal — Pix na tela do sistema', () => {
       comPix,
     );
 
-    // sem os dois, o serviço de pagamento recusa em vez de abrir um QR vazio
-    expect(resultado.pix).toBeUndefined();
-    expect(resultado.payUrl).toBe('');
+    expect(resultado.pix?.code).toBe('00020101021226910014BR.GOV.BCB.PIX');
+  });
+
+  it('pedido que volta sem o código é recusado, sem abrir um QR vazio', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const client = {
+      createOrder: jest.fn().mockResolvedValue({
+        id: 'ORDER-PIX',
+        payment_source: {
+          // CPF com cara de BR Code: a busca fica só nos campos do QR
+          pix: { tax_info: { tax_id: '00020112345' }, qr_details: {} },
+        },
+      }),
+    };
+    const gateway = new PayPalGateway(client as any);
+
+    await expect(
+      gateway.createCheckout(
+        { ...request, paymentMethod: PaymentMethod.PIX },
+        comPix,
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('sem a escolha, o pedido continua sendo o do checkout do PayPal', async () => {

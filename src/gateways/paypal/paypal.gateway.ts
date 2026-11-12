@@ -219,33 +219,38 @@ export class PayPalGateway implements PaymentGateway {
 
     if (querPix) {
       const pix = criado?.payment_source?.pix;
+      // só nos campos do QR: o resto do `pix` é do inscrito, e um CPF que
+      // comece com 000.201 casaria com o prefixo do BR Code
+      const code = codigoDoPix(pix?.qr_payload) ?? codigoDoPix(pix?.qr_details);
 
-      if (!pix?.qr_payload) {
-        // sem dados do inscrito no log: id e status bastam para achar o
-        // pedido no painel do PayPal
+      if (!code) {
+        // Só o QR e com os textos cortados: o formato aparece, e nenhum dado
+        // do inscrito vai para o log. O id acha o pedido no painel do PayPal.
         new Logger(PayPalGateway.name).warn(
-          `PayPal — pedido de Pix ${criado?.id} (${criado?.status}) voltou sem qr_payload; campos do pix: ${Object.keys(
-            pix ?? {},
-          ).join(', ')}`,
+          `PayPal — pedido de Pix ${criado?.id} (${
+            criado?.status
+          }) voltou sem o código; campos do pix: ${Object.keys(pix ?? {}).join(
+            ', ',
+          )}; qr_details: ${JSON.stringify(pix?.qr_details, (_, valor) =>
+            typeof valor === 'string' ? valor.slice(0, 12) : valor,
+          )}`,
         );
+        // melhor que mandar o inscrito para um QR vazio; o pedido do lado
+        // de lá expira sozinho
+        throw new UnprocessableEntityException(PIX_INDISPONIVEL);
       }
 
       return {
         checkoutId: criado?.id,
-        // sem página do lado de lá: o link passa a ser a nossa tela do QR.
-        // Pedido que voltou sem o código fica sem `pix` e sem link, e quem
-        // chama recusa — melhor que mandar o inscrito para um QR vazio.
+        // sem página do lado de lá: o link passa a ser a nossa tela do QR
         payUrl: '',
-        pix: pix?.qr_payload
-          ? {
-              // `qr_payload` é o copia e cola no padrão do Banco Central; o
-              // QR é desenhado a partir do mesmo texto
-              code: pix.qr_payload,
-              expiresAt: new Date(
-                Date.now() + (Number(pix.qr_expiry) || validadeDoPix) * 1000,
-              ),
-            }
-          : undefined,
+        pix: {
+          // o QR é desenhado a partir do mesmo texto do copia e cola
+          code,
+          expiresAt: new Date(
+            Date.now() + (Number(pix.qr_expiry) || validadeDoPix) * 1000,
+          ),
+        },
         raw: criado,
       };
     }
@@ -449,12 +454,32 @@ function pixRecusado(erro: unknown) {
   const resposta = erro.detalhes as { name?: string } | undefined;
 
   if (RECUSAS_DO_PAYPAL.has(resposta?.name ?? '')) {
-    return new UnprocessableEntityException(
-      'O Pix não está disponível agora. Escolha cartão ou conta PayPal.',
-    );
+    return new UnprocessableEntityException(PIX_INDISPONIVEL);
   }
 
   return erro;
+}
+
+const PIX_INDISPONIVEL =
+  'O Pix não está disponível agora. Escolha cartão ou conta PayPal.';
+
+/**
+ * O copia e cola do Pix. A documentação diz `pix.qr_payload`; a produção
+ * devolveu `pix.qr_details`, sem documentação do que vai dentro (11/11/2026).
+ * Por isso a busca é pelo conteúdo, não pelo nome do campo: o BR Code do
+ * Banco Central sempre começa com "000201" (o indicador de formato do padrão
+ * EMV). O `qr_image` do exemplo deles (`pix://pay?…`) não casa.
+ */
+function codigoDoPix(pix: unknown): string | undefined {
+  if (typeof pix === 'string')
+    return pix.startsWith('000201') ? pix : undefined;
+  if (!pix || typeof pix !== 'object') return undefined;
+
+  for (const valor of Object.values(pix)) {
+    const codigo = codigoDoPix(valor);
+    if (codigo) return codigo;
+  }
+  return undefined;
 }
 
 /** Centavos para o texto que o PayPal pede: 15000 → "150.00" */
