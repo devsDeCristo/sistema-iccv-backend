@@ -63,6 +63,11 @@ export class PayPalClient {
    * @param requestId a nossa referência, como `PayPal-Request-Id`: a mesma
    * chamada repetida (um retry de rede) devolve o pedido já criado em vez de
    * abrir outro.
+   *
+   * `Prefer: return=representation` porque o padrão do PayPal é a resposta
+   * mínima (id, status, links), sem `payment_source` — e é nele que vem o
+   * código do Pix. Sem isto o pedido era criado e o QR nunca chegava
+   * (produção, 11/11/2026).
    */
   async createOrder(
     payload: Record<string, unknown>,
@@ -73,7 +78,10 @@ export class PayPalClient {
     try {
       const http = await this.http(cred, mode);
       const { data } = await http.post('/v2/checkout/orders', payload, {
-        headers: { 'PayPal-Request-Id': requestId },
+        headers: {
+          'PayPal-Request-Id': requestId,
+          Prefer: 'return=representation',
+        },
       });
       return data;
     } catch (err: any) {

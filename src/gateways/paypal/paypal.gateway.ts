@@ -1,4 +1,8 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   PaymentMethod,
   PaymentProvider,
@@ -215,6 +219,16 @@ export class PayPalGateway implements PaymentGateway {
 
     if (querPix) {
       const pix = criado?.payment_source?.pix;
+
+      if (!pix?.qr_payload) {
+        // sem dados do inscrito no log: id e status bastam para achar o
+        // pedido no painel do PayPal
+        new Logger(PayPalGateway.name).warn(
+          `PayPal — pedido de Pix ${criado?.id} (${criado?.status}) voltou sem qr_payload; campos do pix: ${Object.keys(
+            pix ?? {},
+          ).join(', ')}`,
+        );
+      }
 
       return {
         checkoutId: criado?.id,

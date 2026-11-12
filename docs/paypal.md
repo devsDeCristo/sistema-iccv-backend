@@ -233,7 +233,8 @@ já saiu da conta de quem pagou; não há o que revisar, e a regra de "aprovar n
 `APPROVED`, `pedidoAtual` captura do mesmo jeito.
 
 A resposta traz `qr_payload` (o copia e cola no padrão do Banco Central, de
-onde o QR é desenhado) e não traz link. O adapter devolve
+onde o QR é desenhado) e não traz link — **desde que o pedido seja criado com o
+header `Prefer: return=representation`** (ver a armadilha abaixo). O adapter devolve
 `HostedCheckoutResult.pix = { code, expiresAt }`, e o serviço:
 
 - grava em `PaymentCheckout.pixCode` e `pixExpiresAt`;
@@ -310,6 +311,22 @@ não está disponível agora. Escolha cartão ou conta PayPal."** (422), e não 
 mensagem genérica de "não foi possível falar com o PayPal", que soava como
 sistema fora do ar. O detalhe continua no log: `docker service logs
 sistema-eventos-iccv_api 2>&1 | grep "PayPal —"`.
+
+### O código do Pix só vem na resposta completa
+
+**Segunda armadilha (11/11/2026, produção, logo depois da primeira).** Com os
+campos corrigidos o PayPal criou o pedido, mas o inscrito recebeu "Não foi
+possível gerar o link de pagamento em PayPal" (400). O padrão da criação de
+pedido é `Prefer: return=minimal`: a resposta traz só `id`, `status` e `links`,
+sem `payment_source` — e o `qr_payload` está dentro dele. O exemplo da
+documentação do Pix mostra a resposta completa sem dizer que ela precisa ser
+pedida.
+
+`PayPalClient.createOrder` manda `Prefer: return=representation` em todo
+pedido (no cartão também; o link `payer-action` vem igual). Se um pedido de Pix
+ainda voltar sem o código, o log tem a linha `PayPal — pedido de Pix <id>
+(<status>) voltou sem qr_payload`, com os campos que vieram — sem dados do
+inscrito. O pedido órfão expira sozinho no PayPal; nada foi gravado aqui.
 
 ### A confirmar com uma conta habilitada
 
