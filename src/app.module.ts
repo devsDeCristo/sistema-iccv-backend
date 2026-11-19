@@ -20,6 +20,7 @@ import { PluggyModule } from './pluggy/pluggy.module';
 import { TesourariaModule } from './tesouraria/tesouraria.module';
 import { MembrosModule } from './membros/membros.module';
 import { SolicitacoesModule } from './solicitacoes/solicitacoes.module';
+import { OportunidadesModule } from './oportunidades/oportunidades.module';
 import { NotificacoesModule } from './notificacoes/notificacoes.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CronModule } from './cron/cron.module';
@@ -56,6 +57,7 @@ import { RequestContextInterceptor } from './middleware/request-context.middlewa
     TesourariaModule,
     MembrosModule,
     SolicitacoesModule,
+    OportunidadesModule,
     NotificacoesModule,
     WebhooksModule,
     CronModule,

@@ -23,6 +23,7 @@ Código: `src/planos` (`PlanosController`, `PlanosService`, `ModuloGuard`, `modu
 | `NEWS`     | Notícias e disparos; e o WhatsApp da igreja (`/churches/:churchId/whatsapp`, a tela Disparadores)                                                                                                                                                                           |
 | `TREASURY` | Tesouraria (`/churches/:churchId/tesouraria`); e os bancos pela Pluggy (`/churches/:churchId/pluggy`, a tela Integrações)                                                                                                                                                   |
 | `REQUESTS` | Solicitações no painel (`/churches/:churchId/solicitacoes`); e o membro só pede à igreja dele se ela tiver o módulo (ver [solicitacoes.md](solicitacoes.md)) |
+| `OPPORTUNITIES` | Oportunidades no painel (`/churches/:churchId/oportunidades`, só o admin); e o membro só vê as vagas e se interessa se a igreja dele tiver o módulo (ver [oportunidades.md](oportunidades.md)) |
 
 ## Rotas (`/plans`)
 

@@ -33,6 +33,8 @@ model Church {
   families           Family[]
   /// Módulo Solicitações: o que os membros pedem à igreja (ver `ChurchRequest`)
   requests           ChurchRequest[]
+  /// Módulo Oportunidades: as vagas que a igreja publica aos membros (ver `Opportunity`)
+  opportunities      Opportunity[]
   /// Notificações sobre esta igreja (pedido de membro, solicitação, notícia)
   notifications      Notification[]
   /// Tesourarias de evento e de congregação (a Administrativa é a própria
@@ -277,6 +279,10 @@ model User {
   /// Solicitações em que deu a decisão do pastor / da tesouraria
   pastorDecisions   ChurchRequest[] @relation("RequestPastor")
   treasuryDecisions ChurchRequest[] @relation("RequestTreasurer")
+  /// Vagas do módulo Oportunidades em que a pessoa demonstrou interesse
+  opportunityInterests OpportunityInterest[]
+  /// Vagas que publicou (como admin da igreja)
+  opportunitiesPublished Opportunity[]
 
   @@index([email])
   @@index([memberChurchId])
@@ -1627,6 +1633,9 @@ enum ChurchModule {
   /// Solicitações: os membros pedem à igreja equipamentos e melhorias, e o
   /// admin responde (ver `ChurchRequest`)
   REQUESTS
+  /// Oportunidades: o admin publica vagas de emprego (da igreja ou de empresas
+  /// de membros) e os membros demonstram interesse (ver `Opportunity`)
+  OPPORTUNITIES
 }
 
 /// Em que pé está uma solicitação. O membro acompanha por aqui.
@@ -1724,6 +1733,52 @@ model ChurchRequestItem {
 
   @@index([requestId])
   @@map("church_request_items")
+}
+
+/// Uma vaga de emprego publicada pela igreja aos membros dela (módulo
+/// Oportunidades): na própria igreja ou na empresa de um membro.
+///
+/// Só os membros da igreja (`User.memberChurchId`) veem e demonstram
+/// interesse; o admin vê quem se interessou e exporta a lista para quem
+/// ofereceu a vaga.
+model Opportunity {
+  id          String   @id @default(uuid())
+  churchId    String
+  title       String
+  /// Quem oferece: a própria igreja ou a empresa de um membro (texto livre)
+  company     String
+  description String
+  /// Cidade, bairro ou "Remoto". Opcional
+  location    String?
+  /// Encerrada: some da tela dos membros e não recebe interesse novo; os que
+  /// já vieram ficam para o admin
+  isOpen      Boolean  @default(true)
+  /// `SetNull`: apagar a conta de quem publicou não apaga a vaga
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  church    Church                @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  createdBy User?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  interests OpportunityInterest[]
+
+  @@index([churchId, createdAt(sort: Desc)])
+  @@map("opportunities")
+}
+
+/// Um membro interessado numa vaga. Um por pessoa e vaga (a chave é o par).
+model OpportunityInterest {
+  opportunityId String
+  userId        String
+  createdAt     DateTime @default(now())
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  /// `Cascade`: apagar a conta tira a pessoa da lista, como o resto dos dados dela
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([opportunityId, userId])
+  @@index([userId])
+  @@map("opportunity_interests")
 }
 
 /// O plano de uma igreja: o que ela pode usar no sistema. Só dev e super admin
