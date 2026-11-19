@@ -44,6 +44,13 @@ valem nele, as rotas e onde está no código. Serve de contexto para quem
 As telas estão documentadas no repositório `ic-front`, em `docs/` (índice em
 `docs/README.md`).
 
+O app mobile (`ic-app`, área do usuário) consome as mesmas rotas do site, sem
+rotas próprias: login, cadastro e senha, `/auth/validate`, `/users/me`,
+termos, eventos, inscrição, loja, pagamentos (inclusive o Pix do PayPal),
+certificado, quadrante, notícias, notificações, solicitações e oportunidades.
+Mudar o contrato dessas rotas afeta o app; a lista por tela está em
+`ic-app/docs/`.
+
 ## Manter atualizado
 
 Toda modificação, da mais simples à mais complexa, atualiza o `.md` do módulo
