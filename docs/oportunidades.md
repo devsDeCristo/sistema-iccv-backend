@@ -48,6 +48,9 @@ correspondente em `ic-front/docs/oportunidades.md`.
 - **Aviso aos membros:** publicar uma vaga aberta (ou reabrir uma que nasceu
   encerrada) notifica os membros da igreja (`notificarOportunidade`, tipo
   `OPPORTUNITY`), uma vez por vaga. Ver [notificacoes.md](notificacoes.md).
+  Igreja sem o módulo no plano, ou desativada, não avisa ninguém: o super
+  admin publica em qualquer igreja (o `ModuloGuard` não vale para ele), mas o
+  membro não abriria a vaga.
 - **Excluir** apaga a vaga, as candidaturas e os arquivos delas (imagem e
   currículos). Para só tirar dos membros, encerra-se.
 - **Conta bloqueada:** as rotas do membro não passam pelo `RolesGuard`, então

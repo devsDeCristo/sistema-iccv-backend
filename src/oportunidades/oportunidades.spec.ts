@@ -55,7 +55,15 @@ function montar({
           ? vaga
           : null,
       ),
-      findUnique: jest.fn(async () => vaga),
+      findUnique: jest.fn(
+        async () =>
+          vaga && {
+            ...vaga,
+            title: 'Caixa',
+            company: 'Padaria',
+            church: { status: 'ACTIVE', plan: { modules: modulos } },
+          },
+      ),
       findMany: jest.fn(async () => []),
       create: jest.fn(async ({ data }: any) => ({
         ...data,
@@ -291,6 +299,32 @@ describe('OportunidadesService', () => {
     await service.atualizar('igreja-1', 'vaga-1', { aberta: false });
     expect(prisma.opportunity.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { isOpen: false } }),
+    );
+  });
+
+  it('vaga publicada (pelo super admin) em igreja sem o módulo não avisa ninguém', async () => {
+    const { service, prisma } = montar({ modulos: [ChurchModule.EVENTS] });
+    prisma.user.findMany.mockResolvedValue([{ id: 'membro' }] as any);
+    await service.criar('igreja-1', 'super', {
+      titulo: 'Caixa',
+      empresa: 'Padaria',
+      descricao: 'Balcão',
+    });
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('com o módulo no plano, os membros são avisados', async () => {
+    const { service, prisma } = montar();
+    prisma.user.findMany.mockResolvedValue([{ id: 'membro' }] as any);
+    await service.criar('igreja-1', 'admin', {
+      titulo: 'Caixa',
+      empresa: 'Padaria',
+      descricao: 'Balcão',
+    });
+    expect(prisma.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: 'OPPORTUNITY' }),
+      }),
     );
   });
 

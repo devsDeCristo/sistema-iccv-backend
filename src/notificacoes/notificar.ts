@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import {
+  ChurchModule,
   ChurchRequestStatus,
   ChurchStatus,
   EventStatus,
@@ -7,6 +8,7 @@ import {
   PrismaClient,
 } from '@prisma/client';
 import { Role } from 'src/auth/roles';
+import { modulosDa } from 'src/planos/modulos';
 
 type Prisma = Pick<
   PrismaClient,
@@ -410,9 +412,26 @@ export const notificarOportunidade = (
   seguro(`oportunidade ${opportunityId}`, async () => {
     const o = await prisma.opportunity.findUnique({
       where: { id: opportunityId },
-      select: { title: true, company: true, isOpen: true, churchId: true },
+      select: {
+        title: true,
+        company: true,
+        isOpen: true,
+        churchId: true,
+        church: {
+          select: { status: true, plan: { select: { modules: true } } },
+        },
+      },
     });
     if (!o?.isOpen) return;
+    // o super admin publica em qualquer igreja (o plano não vale para ele):
+    // sem o módulo, ou com a igreja desativada, o membro não abriria a vaga —
+    // o aviso levaria a uma tela que diz que a igreja não divulga vagas
+    if (
+      o.church.status === ChurchStatus.INACTIVE ||
+      !modulosDa(o.church).includes(ChurchModule.OPPORTUNITIES)
+    ) {
+      return;
+    }
     await notificar(
       prisma,
       {
