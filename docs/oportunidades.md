@@ -50,6 +50,9 @@ correspondente em `ic-front/docs/oportunidades.md`.
   `OPPORTUNITY`), uma vez por vaga. Ver [notificacoes.md](notificacoes.md).
 - **Excluir** apaga a vaga, as candidaturas e os arquivos delas (imagem e
   currículos). Para só tirar dos membros, encerra-se.
+- **Conta bloqueada:** as rotas do membro não passam pelo `RolesGuard`, então
+  o bloqueio é conferido em `igrejaDoMembro`, na mesma busca da igreja: quem
+  foi bloqueado leva `401` mesmo com o token ainda valendo.
 - **Fora do plano:** o membro não vê (o item some do menu, e a API recusa) e
   o painel recusa; nada é apagado.
 
@@ -104,6 +107,18 @@ exige ser membro ainda nem a vaga aberta: o dado é dela.
   fica na resposta, mas nunca sai da API (`semCaminho`).
 - O admin baixa pela rota do currículo, que confere a igreja da vaga e manda
   o arquivo.
+- O registro de atividades não guarda as respostas
+  (`REDACTED_FIELDS` em `prisma.service.ts`, ver
+  [logs-e-auditoria.md](logs-e-auditoria.md)): fica só o fato de que a
+  pessoa se candidatou, sem o caminho do currículo nem os dados pessoais.
+- **Regras do Firebase Storage** (ficam no console, fora deste
+  repositório): o sigilo do currículo hoje depende de o caminho ser
+  impossível de adivinhar (uuid) e nunca sair da API. Para fechar de vez,
+  as regras não devem permitir leitura de `oportunidades/*/curriculos/**`.
+  A API lê pelo Admin SDK, que não passa pelas regras. As regras somam
+  permissões (basta uma liberar): se houver um
+  `match /{allPaths=**} { allow read: if true; }`, é ele que precisa
+  excluir esse caminho.
 - O cascade do banco não apaga o bucket. Por isso o service apaga os
   currículos ao retirar a candidatura e ao excluir a vaga, e
   `UserService.excluir` e `ChurchService.remove` apagam os da conta e os da

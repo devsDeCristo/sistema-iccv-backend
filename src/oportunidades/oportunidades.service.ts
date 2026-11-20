@@ -10,6 +10,7 @@ import { ChurchModule, ChurchStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { exigirModulo } from 'src/planos/modulos';
+import { contaBloqueadaNaSessao } from 'src/auth/bloqueio';
 import { notificarOportunidade } from 'src/notificacoes/notificar';
 import {
   resolveImageExtension,
@@ -137,13 +138,22 @@ export class OportunidadesService {
   /**
    * A igreja de que a pessoa é membro agora — ativa e com o módulo no plano.
    * É sempre ela, nunca uma vinda da requisição: ninguém vê as vagas da
-   * igreja dos outros.
+   * igreja dos outros. `memberChurchId` só a igreja grava (aceitar o pedido,
+   * em Membros); o pedido pendente fica em `requestedChurchId` e não abre
+   * nada aqui.
+   *
+   * O bloqueio vem na mesma busca: estas rotas não passam pelo `RolesGuard`,
+   * e o token de quem foi bloqueado ainda vale até 24h.
    */
   private async igrejaDoMembro(userId: string) {
     const pessoa = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { memberChurch: { select: { id: true, status: true } } },
+      select: {
+        memberChurch: { select: { id: true, status: true } },
+        block: { select: { userId: true } },
+      },
     });
+    if (pessoa?.block) throw contaBloqueadaNaSessao();
     const igreja = pessoa?.memberChurch;
     if (!igreja || igreja.status === ChurchStatus.INACTIVE) {
       throw new ForbiddenException(

@@ -53,6 +53,7 @@ intercepta `create`, `update`, `delete`, `createMany`, `updateMany`,
 | `UserToken` | `codeHash`, `ticketHash` |
 | `PaymentProviderConfig` | `credentials`, `webhookSecretHash` |
 | `EventProduct` | `images` (só volume: fotos em base64) |
+| `OpportunityInterest` | `answers` (as respostas da candidatura: o caminho do currículo no bucket e dados pessoais; o log fica com quem se candidatou a qual vaga) |
 
 Campo escondido não desaparece sem deixar rastro: quando muda, a linha grava
 o marcador `(alterada)` no lugar do valor — assim uma troca de senha continua

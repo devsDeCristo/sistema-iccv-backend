@@ -110,6 +110,56 @@ describe('OportunidadesService', () => {
     expect(prisma.opportunityInterest.create).not.toHaveBeenCalled();
   });
 
+  it('conta bloqueada cai fora mesmo com o token valendo (401)', async () => {
+    const { service, prisma } = montar();
+    prisma.user.findUnique.mockResolvedValue({
+      memberChurch: { id: 'igreja-1', status: 'ACTIVE' },
+      block: { userId: 'u1' },
+    } as any);
+    await expect(service.abertas('u1')).rejects.toMatchObject({ status: 401 });
+    await expect(service.interessar('u1', 'vaga-1')).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(prisma.opportunityInterest.create).not.toHaveBeenCalled();
+  });
+
+  it('membro de igreja desativada não vê as vagas dela', async () => {
+    const { service } = montar({
+      igrejaDoMembro: { id: 'igreja-1', status: 'INACTIVE' },
+    });
+    await expect(service.abertas('u1')).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('o membro só alcança a vaga e o detalhe da própria igreja', async () => {
+    const { service, prisma } = montar({
+      igrejaDoMembro: { id: 'igreja-2', status: 'ACTIVE' },
+    });
+    await service.abertas('u1').catch(() => undefined);
+    const { where } = (prisma.opportunity.findMany as jest.Mock).mock
+      .calls[0][0];
+    // a igreja da consulta é a do cadastro, nunca uma vinda da requisição
+    expect(where.churchId).toBe('igreja-2');
+  });
+
+  it('o admin não baixa currículo nem troca imagem de vaga de outra igreja', async () => {
+    const { service } = montar();
+    await expect(
+      service.trocarImagem('igreja-2', 'vaga-1', {} as any),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      service.removerImagem('igreja-2', 'vaga-1'),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(bucket.baixarDoBucket).not.toHaveBeenCalled();
+  });
+
+  it('a lista do painel é só da igreja da URL', async () => {
+    const { service, prisma } = montar();
+    await service.daIgreja('igreja-1');
+    expect(
+      (prisma.opportunity.findMany as jest.Mock).mock.calls[0][0].where,
+    ).toEqual({ churchId: 'igreja-1' });
+  });
+
   it('igreja sem Oportunidades no plano recusa', async () => {
     const { service } = montar({ modulos: [ChurchModule.EVENTS] });
     await expect(service.abertas('u1')).rejects.toMatchObject({ status: 403 });

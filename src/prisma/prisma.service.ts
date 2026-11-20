@@ -36,6 +36,13 @@ const REDACTED_FIELDS: Record<string, string[]> = {
    * registra que a foto mudou sem guardar a foto.
    */
   EventProduct: ['images'],
+  /**
+   * As respostas da candidatura: guardam o caminho do currículo no bucket,
+   * que nunca sai da API (quem lê o arquivo é a rota do admin, depois de
+   * conferir a igreja), e dados pessoais (pretensão, mensagem). O log fica
+   * com o fato — quem se candidatou a qual vaga —, sem o conteúdo.
+   */
+  OpportunityInterest: ['answers'],
 };
 
 /** Marca no lugar do segredo: registra que mudou, sem guardar o valor */
