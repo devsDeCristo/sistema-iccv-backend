@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { ChurchStatus, Prisma } from '@prisma/client';
 import { notificarEventosDaIgreja } from 'src/notificacoes/notificar';
+import { caminhosDosCurriculos } from 'src/oportunidades/formulario';
+import { apagarDoBucket } from 'src/oportunidades/bucket';
 import { Role } from 'src/auth/roles';
 import { perfilEfetivo, SELECT_TENANT } from 'src/auth/tenant';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -207,7 +209,18 @@ export class ChurchService {
       );
     }
 
+    // o cascade leva as vagas, mas não a imagem e os currículos no bucket
+    const vagas = await this.prisma.opportunity.findMany({
+      where: { churchId: id },
+      select: { id: true, interests: { select: { answers: true } } },
+    });
     await this.prisma.church.delete({ where: { id } });
+    await apagarDoBucket(
+      vagas.flatMap((v) => [
+        `oportunidades/${v.id}/imagem`,
+        ...caminhosDosCurriculos(v.interests),
+      ]),
+    ).catch(() => undefined);
   }
 
   private async findOneOrFail(id: string) {

@@ -1753,6 +1753,14 @@ model Opportunity {
   /// Encerrada: some da tela dos membros e não recebe interesse novo; os que
   /// já vieram ficam para o admin
   isOpen      Boolean  @default(true)
+  /// Último dia para se candidatar (opcional). Vencida conta como encerrada
+  /// — na consulta, sem cron
+  closesAt    DateTime?
+  /// Configuração da vaga, livre como `Event.data`: `imagemUrl` (a logo),
+  /// `salario` (`{ min, max? }`, valor ou faixa) e `formulario` (`{ campos }`,
+  /// o formulário de candidatura). Formato e regras em
+  /// `src/oportunidades/formulario.ts`
+  data        Json     @default("{}")
   /// `SetNull`: apagar a conta de quem publicou não apaga a vaga
   createdById String?
   createdAt   DateTime @default(now())
@@ -1770,6 +1778,10 @@ model Opportunity {
 model OpportunityInterest {
   opportunityId String
   userId        String
+  /// As respostas ao formulário da vaga, por id do campo:
+  /// `{ [campoId]: { tipo, rotulo, valor } }`. O currículo guarda o caminho
+  /// no bucket, que nunca sai da API
+  answers       Json     @default("{}")
   createdAt     DateTime @default(now())
 
   opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
@@ -1948,6 +1960,8 @@ enum NotificationType {
   MEMBERSHIP_ANSWERED
   /// Evento aberto ao público pela primeira vez (membros da igreja)
   EVENT
+  /// Vaga publicada em Oportunidades (membros da igreja)
+  OPPORTUNITY
 }
 
 /// Uma notificação do sininho, com o texto já pronto. Quem recebe e quem já

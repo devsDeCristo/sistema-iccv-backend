@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   IsBoolean,
+  IsDateString,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -23,10 +25,14 @@ export class CriarOportunidadeDto {
   @MaxLength(120)
   empresa: string;
 
-  @ApiProperty({ example: 'Atendimento no balcão, segunda a sábado.' })
+  @ApiProperty({
+    example: '<p>Atendimento no balcão, segunda a sábado.</p>',
+    description:
+      'HTML do editor (as vagas antigas são texto puro). Renderizado só pelo visualizador do Quill, que descarta o que não é formatação',
+  })
   @IsString()
   @IsNotEmpty({ message: 'Descreva a vaga' })
-  @MaxLength(4000)
+  @MaxLength(20000)
   descricao: string;
 
   @ApiPropertyOptional({ example: 'Centro, Fortaleza' })
@@ -36,11 +42,39 @@ export class CriarOportunidadeDto {
   local?: string;
 
   @ApiPropertyOptional({
-    description: '`false` encerra: some para os membros e não recebe interesse',
+    description:
+      '`false` encerra: some para os membros e não recebe candidatura',
   })
   @IsOptional()
   @IsBoolean()
   aberta?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2026-12-31',
+    description:
+      'Último dia para se candidatar (vale até o fim do dia). `null` tira o prazo',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsDateString({}, { message: 'Data final inválida' })
+  encerraEm?: string | null;
+
+  @ApiPropertyOptional({
+    example: { min: 2000, max: 2500 },
+    description: 'Salário oferecido: valor (`min`) ou faixa. `null` tira',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsObject()
+  salario?: { min?: number; max?: number } | null;
+
+  @ApiPropertyOptional({
+    description:
+      'O formulário de candidatura (`{ campos }`, ver `formulario.ts`). Ausente na criação: o padrão',
+  })
+  @IsOptional()
+  @IsObject()
+  formulario?: { campos: unknown[] };
 }
 
 /** Edição parcial: o formulário manda tudo; encerrar/reabrir, só `aberta` */

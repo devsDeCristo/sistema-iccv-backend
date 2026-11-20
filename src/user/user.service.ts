@@ -51,6 +51,8 @@ import { SELECT_MODULOS } from 'src/planos/modulos';
 import { podeBloquear } from 'src/auth/bloqueio';
 import { historicoDaConta } from './exclusao';
 import { notificarPedidoDeMembro } from 'src/notificacoes/notificar';
+import { caminhosDosCurriculos } from 'src/oportunidades/formulario';
+import { apagarDoBucket } from 'src/oportunidades/bucket';
 
 /** A senha de quem é cadastrado pelo painel, até a pessoa redefinir */
 const SENHA_PADRAO =
@@ -1062,7 +1064,17 @@ export class UserService {
       );
     }
 
+    // o cascade leva as candidaturas, mas não os currículos guardados no bucket
+    const candidaturas = await this.prisma.opportunityInterest.findMany({
+      where: { userId: alvoId },
+      select: { answers: true },
+    });
     await this.prisma.user.delete({ where: { id: alvoId } });
+    await apagarDoBucket(caminhosDosCurriculos(candidaturas)).catch((erro) =>
+      this.logger.error(
+        `Currículos de ${alvoId} não apagados: ${erro?.message}`,
+      ),
+    );
 
     return { message: 'Conta excluída' };
   }

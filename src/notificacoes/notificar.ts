@@ -18,6 +18,7 @@ type Prisma = Pick<
   | 'churchRequest'
   | 'news'
   | 'event'
+  | 'opportunity'
 >;
 
 type Aviso = {
@@ -395,4 +396,33 @@ export const notificarEventosDaIgreja = (prisma: Prisma, churchId: string) =>
       select: { id: true },
     });
     for (const { id } of eventos) await notificarEvento(prisma, id);
+  });
+
+/**
+ * Vaga publicada (aberta) em Oportunidades: avisa os membros da igreja — só
+ * eles a veem. Uma vez por vaga: encerrar e reabrir não avisa de novo.
+ */
+export const notificarOportunidade = (
+  prisma: Prisma,
+  opportunityId: string,
+  quemFez?: string,
+) =>
+  seguro(`oportunidade ${opportunityId}`, async () => {
+    const o = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      select: { title: true, company: true, isOpen: true, churchId: true },
+    });
+    if (!o?.isOpen) return;
+    await notificar(
+      prisma,
+      {
+        type: NotificationType.OPPORTUNITY,
+        sourceId: opportunityId,
+        title: 'Nova oportunidade',
+        body: `${o.title} · ${o.company}`,
+        churchId: o.churchId,
+      },
+      await publicoDa(prisma, o.churchId),
+      quemFez,
+    );
   });
