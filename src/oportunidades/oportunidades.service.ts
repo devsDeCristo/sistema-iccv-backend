@@ -43,7 +43,12 @@ import {
   semCaminho,
   validarRespostas,
 } from './formulario';
-import { apagarDoBucket, baixarDoBucket, salvarNoBucket } from './bucket';
+import {
+  apagarDoBucket,
+  apagarPasta,
+  baixarDoBucket,
+  salvarNoBucket,
+} from './bucket';
 import { limparDescricao, temTexto } from './descricao';
 
 const CAMPOS = {
@@ -381,12 +386,16 @@ export class OportunidadesService {
 
   /** O que vai para as colunas, de um DTO de criação (admin ou proposta) */
   private colunasDaCriacao(dto: CriarOportunidadeDto) {
+    const closesAt = dto.encerraEm ? fimDoDia(dto.encerraEm) : null;
+    if (vencida(closesAt)) {
+      throw new BadRequestException('A data final já passou');
+    }
     return {
       title: dto.titulo.trim(),
       company: dto.empresa.trim(),
       description: descricaoLimpa(dto.descricao),
       location: dto.local?.trim() || null,
-      closesAt: dto.encerraEm ? fimDoDia(dto.encerraEm) : null,
+      closesAt,
       data: {
         formulario: formularioPadrao(),
         ...this.dadosDoDto(dto),
@@ -451,7 +460,7 @@ export class OportunidadesService {
   private async daIgrejaOu404(churchId: string, id: string) {
     const vaga = await this.prisma.opportunity.findFirst({
       where: { id, churchId },
-      select: { id: true, data: true },
+      select: { id: true, data: true, closesAt: true },
     });
     if (!vaga) throw new NotFoundException('Oportunidade não encontrada');
     return vaga;
@@ -483,6 +492,13 @@ export class OportunidadesService {
    * atropelam — quem chega depois leva 409.
    */
   async aprovar(churchId: string, id: string, quemFez: string) {
+    const { closesAt } = await this.daIgrejaOu404(churchId, id);
+    // iria ao ar já encerrada (e o aviso levaria a uma vaga que o membro não abre)
+    if (vencida(closesAt)) {
+      throw new ConflictException(
+        'O prazo desta proposta já passou: ajuste a data final antes de aprovar',
+      );
+    }
     await this.decidir(churchId, id, quemFez, {
       status: OpportunityStatus.APPROVED,
       rejectionReason: null,
@@ -652,7 +668,7 @@ export class OportunidadesService {
       throw new ConflictException('Esta proposta já foi decidida pelo admin');
     }
     await encerrarPropostaDeOportunidade(this.prisma, id);
-    await this.apagar([caminhoDaImagem(id)]);
+    await this.apagarPastaDa(id);
   }
 
   async trocarImagemDaProposta(
@@ -666,7 +682,7 @@ export class OportunidadesService {
       id,
       OpportunityStatus.PENDING,
     );
-    return this.gravarImagem(vaga, file, cor);
+    return this.gravarImagem(vaga, file, cor, AINDA_PENDENTE(userId));
   }
 
   async removerImagemDaProposta(userId: string, id: string) {
@@ -675,7 +691,7 @@ export class OportunidadesService {
       id,
       OpportunityStatus.PENDING,
     );
-    return this.tirarImagem(vaga);
+    return this.tirarImagem(vaga, AINDA_PENDENTE(userId));
   }
 
   /**
@@ -716,38 +732,61 @@ export class OportunidadesService {
     return this.tirarImagem(await this.daIgrejaOu404(churchId, id));
   }
 
-  /** Grava a imagem de uma vaga já conferida (do admin ou de quem propôs) */
+  /**
+   * Grava a imagem de uma vaga já conferida (do admin ou de quem propôs).
+   * Cada envio vai para um arquivo novo, e a troca no banco leva `onde` no
+   * `where`: se o admin aprovou a proposta enquanto a imagem subia, a vaga no
+   * ar não muda — o arquivo novo sai e a pessoa leva 409. Sobrescrever o mesmo
+   * caminho trocaria a logo da vaga já publicada direto no bucket.
+   */
   private async gravarImagem(
     vaga: { id: string; data: Prisma.JsonValue },
     file: Express.Multer.File,
     cor?: string,
+    onde: Prisma.OpportunityWhereInput = {},
   ) {
-    if (!file) throw new BadRequestException('Envie a imagem');
-    resolveImageExtension(file);
-    const { url } = await uploadImageFirebase(file, caminhoDaImagem(vaga.id));
-    await this.prisma.opportunity.update({
-      where: { id: vaga.id },
+    const extensao = conferirImagem(file);
+    const caminho = `oportunidades/${
+      vaga.id
+    }/imagem-${randomUUID()}.${extensao}`;
+    const { url } = await uploadImageFirebase(file, caminho);
+    const dados = dadosDa(vaga.data);
+    const { count } = await this.prisma.opportunity.updateMany({
+      where: { id: vaga.id, ...onde },
       data: {
         data: {
-          ...dadosDa(vaga.data),
+          ...dados,
           imagemUrl: url,
+          imagemCaminho: caminho,
           cor: /^#[0-9a-f]{6}$/i.test(cor ?? '')
             ? cor.toLowerCase()
             : undefined,
         } as unknown as Prisma.InputJsonObject,
       },
     });
+    if (!count) {
+      await this.apagar([caminho]);
+      throw new ConflictException('Esta proposta já foi decidida pelo admin');
+    }
+    if (dados.imagemUrl) await this.apagar([caminhoDaImagem(vaga.id, dados)]);
     return { imagemUrl: url };
   }
 
-  private async tirarImagem(vaga: { id: string; data: Prisma.JsonValue }) {
+  private async tirarImagem(
+    vaga: { id: string; data: Prisma.JsonValue },
+    onde: Prisma.OpportunityWhereInput = {},
+  ) {
+    const dados = dadosDa(vaga.data);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- a cor vai junto com a imagem
-    const { imagemUrl, cor, ...resto } = dadosDa(vaga.data);
-    await this.prisma.opportunity.update({
-      where: { id: vaga.id },
+    const { imagemUrl, imagemCaminho, cor, ...resto } = dados;
+    const { count } = await this.prisma.opportunity.updateMany({
+      where: { id: vaga.id, ...onde },
       data: { data: resto as unknown as Prisma.InputJsonObject },
     });
-    if (imagemUrl) await this.apagar([caminhoDaImagem(vaga.id)]);
+    if (!count) {
+      throw new ConflictException('Esta proposta já foi decidida pelo admin');
+    }
+    if (imagemUrl) await this.apagar([caminhoDaImagem(vaga.id, dados)]);
     return { imagemUrl: null };
   }
 
@@ -818,16 +857,19 @@ export class OportunidadesService {
   /** Apaga a vaga, as candidaturas e os arquivos delas (imagem e currículos) */
   async excluir(churchId: string, id: string) {
     await this.daIgrejaOu404(churchId, id);
-    const candidaturas = await this.prisma.opportunityInterest.findMany({
-      where: { opportunityId: id },
-      select: { answers: true },
-    });
     await this.prisma.opportunity.delete({ where: { id } });
     await encerrarPropostaDeOportunidade(this.prisma, id);
-    await this.apagar([
-      caminhoDaImagem(id),
-      ...caminhosDosCurriculos(candidaturas),
-    ]);
+    await this.apagarPastaDa(id);
+  }
+
+  private async apagarPastaDa(id: string) {
+    try {
+      await apagarPasta(`oportunidades/${id}/`);
+    } catch (erro) {
+      this.logger.error(
+        `Arquivos da vaga ${id} não apagados: ${erro?.message}`,
+      );
+    }
   }
 
   /** Arquivo que sobra no bucket não pode derrubar quem apagou a linha */
@@ -842,7 +884,38 @@ export class OportunidadesService {
   }
 }
 
-const caminhoDaImagem = (id: string) => `oportunidades/${id}/imagem`;
+/** Onde está a imagem atual; as vagas de antes do caminho guardado usam o fixo */
+const caminhoDaImagem = (id: string, dados: DadosDaVaga) =>
+  dados.imagemCaminho ?? `oportunidades/${id}/imagem`;
+
+/** A proposta continua pendente e da mesma pessoa no momento de gravar */
+const AINDA_PENDENTE = (userId: string): Prisma.OpportunityWhereInput => ({
+  proposedById: userId,
+  status: OpportunityStatus.PENDING,
+});
+
+/** A assinatura de cada formato aceito: o mime vem do cliente */
+const ASSINATURAS: Record<string, (b: Buffer) => boolean> = {
+  png: (b) => b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])),
+  jpg: (b) => b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
+  webp: (b) =>
+    b.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    b.subarray(8, 12).toString('latin1') === 'WEBP',
+};
+
+/**
+ * Só PNG, JPG e WebP, com o conteúdo batendo com o tipo. Qualquer membro
+ * sobe imagem (na proposta) e ela fica num link público: SVG (que roda
+ * script quando aberto direto) e arquivo disfarçado de imagem ficam de fora.
+ */
+function conferirImagem(file?: Express.Multer.File) {
+  if (!file) throw new BadRequestException('Envie a imagem');
+  const extensao = resolveImageExtension(file);
+  if (!ASSINATURAS[extensao]?.(file.buffer ?? Buffer.alloc(0))) {
+    throw new BadRequestException('A imagem tem que ser PNG, JPG ou WebP');
+  }
+  return extensao;
+}
 
 /** A descrição limpa (ver `descricao.ts`); vazia depois de limpar é recusada */
 function descricaoLimpa(html: string) {

@@ -32,3 +32,11 @@ export async function apagarDoBucket(caminhos: string[]) {
     caminhos.map((c) => bucket.file(c).delete({ ignoreNotFound: true })),
   );
 }
+
+/**
+ * Apaga tudo de uma vaga (`oportunidades/<id>/`): imagens e currículos. Mais
+ * seguro que listar caminho a caminho — não deixa sobra de versão antiga.
+ */
+export async function apagarPasta(prefixo: string) {
+  await admin.storage().bucket().deleteFiles({ prefix: prefixo });
+}

@@ -12,7 +12,20 @@ jest.mock('./bucket', () => ({
   salvarNoBucket: jest.fn(),
   baixarDoBucket: jest.fn(),
   apagarDoBucket: jest.fn(),
+  apagarPasta: jest.fn(),
 }));
+jest.mock('src/utils/uploadImgFirebase', () => ({
+  ...jest.requireActual('src/utils/uploadImgFirebase'),
+  uploadImageFirebase: jest.fn(async (_f: any, path: string) => ({
+    url: `https://x/${path}`,
+    path,
+  })),
+}));
+
+const PNG = {
+  mimetype: 'image/png',
+  buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]),
+} as Express.Multer.File;
 
 const VAGA = {
   id: 'vaga-1',
@@ -355,11 +368,11 @@ describe('OportunidadesService', () => {
       titulo: 'Caixa',
       empresa: 'Padaria',
       descricao: 'Balcão',
-      encerraEm: '2026-12-31',
+      encerraEm: '2099-12-31',
     });
     const { data } = (prisma.opportunity.create as jest.Mock).mock.calls[0][0];
     expect(data.data.formulario).toEqual(formularioPadrao());
-    expect(data.closesAt.toISOString()).toBe('2027-01-01T02:59:59.999Z');
+    expect(data.closesAt.toISOString()).toBe('2100-01-01T02:59:59.999Z');
     expect(prisma.opportunity.findUnique).toHaveBeenCalled();
   });
 });
@@ -766,5 +779,102 @@ describe('formulário de candidatura', () => {
     expect(normalizarSalario({})).toBeNull();
     expect(() => normalizarSalario({ min: 3000, max: 2000 })).toThrow();
     expect(() => normalizarSalario({ min: -1 })).toThrow();
+  });
+
+  it('vaga não nasce com a data final no passado', async () => {
+    const { service, prisma } = montar();
+    await expect(
+      service.criar('igreja-1', 'admin', {
+        titulo: 'Caixa',
+        empresa: 'Padaria',
+        descricao: 'Balcão',
+        encerraEm: '2020-01-01',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(prisma.opportunity.create).not.toHaveBeenCalled();
+  });
+
+  it('proposta com o prazo vencido não é aprovada (iria ao ar encerrada)', async () => {
+    const { service, prisma } = montar({
+      vaga: {
+        ...VAGA,
+        status: 'PENDING',
+        proposedById: 'u1',
+        closesAt: new Date(Date.now() - 1000),
+      },
+    });
+    await expect(
+      service.aprovar('igreja-1', 'vaga-1', 'admin'),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(prisma.opportunity.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('imagem só PNG, JPG ou WebP de verdade: SVG e arquivo disfarçado saem', async () => {
+    const { service, prisma } = montar();
+    const svg = {
+      mimetype: 'image/svg+xml',
+      buffer: Buffer.from('<svg onload="alert(1)"/>'),
+    } as Express.Multer.File;
+    const disfarcado = {
+      mimetype: 'image/png',
+      buffer: Buffer.from('<html><script>'),
+    } as Express.Multer.File;
+    for (const arquivo of [svg, disfarcado]) {
+      await expect(
+        service.trocarImagem('igreja-1', 'vaga-1', arquivo),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(prisma.opportunity.updateMany).not.toHaveBeenCalled();
+    await expect(
+      service.trocarImagem('igreja-1', 'vaga-1', PNG),
+    ).resolves.toMatchObject({ imagemUrl: expect.stringContaining('imagem-') });
+  });
+
+  it('cada imagem num arquivo novo; a anterior sai do bucket', async () => {
+    const { service } = montar({
+      vaga: {
+        ...VAGA,
+        data: { imagemUrl: 'u', imagemCaminho: 'oportunidades/vaga-1/velha' },
+      },
+    });
+    await service.trocarImagem('igreja-1', 'vaga-1', PNG);
+    expect(bucket.apagarDoBucket).toHaveBeenCalledWith([
+      'oportunidades/vaga-1/velha',
+    ]);
+  });
+
+  it('aprovada enquanto a imagem subia: a vaga no ar não muda e o arquivo novo sai', async () => {
+    const { service, prisma } = montar({
+      vaga: { ...VAGA, status: 'PENDING', proposedById: 'u1' },
+    });
+    // o admin aprova entre a conferência e a gravação
+    prisma.opportunity.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.trocarImagemDaProposta('u1', 'vaga-1', PNG),
+    ).rejects.toMatchObject({ status: 409 });
+    const { where } = (prisma.opportunity.updateMany as jest.Mock).mock
+      .calls[0][0];
+    expect(where).toMatchObject({ status: 'PENDING', proposedById: 'u1' });
+    const [[apagado]] = (bucket.apagarDoBucket as jest.Mock).mock.lastCall;
+    expect(apagado).toMatch(/^oportunidades\/vaga-1\/imagem-/);
+  });
+
+  it('excluir a vaga apaga a pasta inteira dela no bucket', async () => {
+    const { service } = montar();
+    await service.excluir('igreja-1', 'vaga-1');
+    expect(bucket.apagarPasta).toHaveBeenCalledWith('oportunidades/vaga-1/');
+  });
+
+  it('id de pergunta que bate com o protótipo (`__proto__`) é trocado', () => {
+    const [campo] = normalizarFormulario({
+      campos: [{ id: '__proto__', tipo: 'TEXTO', rotulo: 'Quem?' }],
+    }).campos;
+    expect(campo.id).not.toBe('__proto__');
+    const respostas = validarRespostas(
+      { campos: [campo] },
+      { [campo.id]: 'eu' },
+      false,
+    );
+    expect(Object.keys(respostas)).toEqual([campo.id]);
   });
 });

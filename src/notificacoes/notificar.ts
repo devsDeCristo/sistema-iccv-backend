@@ -417,6 +417,7 @@ export const notificarOportunidade = (
         title: true,
         company: true,
         isOpen: true,
+        closesAt: true,
         status: true,
         proposedById: true,
         churchId: true,
@@ -427,6 +428,8 @@ export const notificarOportunidade = (
     });
     // proposta pendente ou recusada não está no ar: só a aprovada avisa
     if (!o?.isOpen || o.status !== OpportunityStatus.APPROVED) return;
+    // já vencida: o membro não abriria (o detalhe dá 404 a quem não se candidatou)
+    if (o.closesAt && o.closesAt <= new Date()) return;
     // o super admin publica em qualquer igreja (o plano não vale para ele):
     // sem o módulo, ou com a igreja desativada, o membro não abriria a vaga —
     // o aviso levaria a uma tela que diz que a igreja não divulga vagas

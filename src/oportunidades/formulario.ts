@@ -61,6 +61,8 @@ export interface Salario {
 /** O que a vaga guarda em `Opportunity.data` */
 export interface DadosDaVaga {
   imagemUrl?: string;
+  /** onde a imagem está no bucket (cada envio num arquivo novo); nunca sai da API */
+  imagemCaminho?: string;
   /** a cor dominante da logo (`#rrggbb`), tirada na tela de quem sobe; tinge o crachá */
   cor?: string;
   salario?: Salario;
@@ -190,7 +192,10 @@ export function normalizarFormulario(entrada: unknown): Formulario {
       }
       // o id fica (as respostas apontam para ele); sem um válido, nasce um
       let id =
-        typeof c.id === 'string' && /^[\w-]{1,40}$/.test(c.id)
+        typeof c.id === 'string' &&
+        /^[\w-]{1,40}$/.test(c.id) &&
+        // `__proto__`, `constructor`...: as respostas são indexadas pelo id
+        !(c.id in Object.prototype)
           ? c.id
           : randomUUID();
       if (vistos.has(id)) id = randomUUID();

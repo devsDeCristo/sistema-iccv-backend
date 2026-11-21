@@ -42,7 +42,7 @@ const REDACTED_FIELDS: Record<string, string[]> = {
    * conferir a igreja), e dados pessoais (pretensão, mensagem). O log fica
    * com o fato — quem se candidatou a qual vaga —, sem o conteúdo.
    */
-  OpportunityInterest: ['answers'],
+  OpportunityInterest: ['answers', 'note'],
 };
 
 /** Marca no lugar do segredo: registra que mudou, sem guardar o valor */
