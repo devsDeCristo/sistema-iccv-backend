@@ -40,6 +40,8 @@ export const MODEL_LABELS: Record<string, string> = {
   Plan: 'Plano',
   Opportunity: 'Oportunidade',
   OpportunityInterest: 'Interesse em oportunidade',
+  ChurchRequest: 'Solicitação',
+  ChurchRequestItem: 'Produto da solicitação',
   // Legado: saíram do schema, mas as linhas antigas continuam no log
   Church: 'Igreja',
   UserChurchRole: 'Vínculo com igreja',
@@ -77,6 +79,7 @@ const MAIN_MODELS = new Set([
   'Family',
   'Plan',
   'Opportunity',
+  'ChurchRequest',
 ]);
 
 export function isMainModel(model: string): boolean {

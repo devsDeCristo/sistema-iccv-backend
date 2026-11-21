@@ -3,7 +3,8 @@
 Módulo do plano (`ChurchModule.REQUESTS`) em que os membros pedem à igreja
 equipamentos e melhorias: o louvor pede um pedestal, a mídia pede um cabo.
 Aprovar pede duas confirmações — a do pastor e a de uma tesouraria da igreja —,
-e o membro acompanha.
+e o membro acompanha. Na igreja sem o módulo Tesouraria e sem ninguém na
+tesouraria, basta a do pastor.
 
 Um pedido tem um ou mais produtos (dois microfones e um cabo), e pode ser
 aceito só em parte. Anexo, prioridade, valor e aviso por e-mail ainda não
@@ -44,13 +45,30 @@ existem.
     que **os dois** aprovaram em comum: todos, aceita; alguns, aceita em
     parte; nenhum em comum, recusada.
   - **Recusar** encerra: recusada, com todos os produtos fora, mesmo que o
-    outro já tenha aprovado.
+    outro já tenha aprovado. Pede o motivo (`resposta`; vazia é `400`, desde
+    21/11/2026): é o que quem pediu lê.
   - A linha da solicitação fica travada (`SELECT … FOR UPDATE`) durante a
     decisão, numa transação interativa (a forma em array é descartada pelo
     middleware de auditoria): pastor e tesouraria decidindo ao mesmo tempo
     não deixam a solicitação presa em "aguardando".
   - Igreja sem pastor cadastrado não aprova nada: a tesouraria pode aprovar,
     mas a solicitação fica aguardando o pastor até cadastrarem um.
+- **Quando a tesouraria entra (desde 21/11/2026):** a aprovação da
+  tesouraria é obrigatória na igreja que tem `ChurchModule.TREASURY` no plano
+  **ou** alguém com o perfil `TESOURARIA` nela — o perfil existe sem o
+  módulo, porque o cadastro de usuários não confere o plano. Sem nenhum dos
+  dois, o pastor decide sozinho: aprovar fecha na hora com o que ele marcou
+  (todos, aceita; alguns, aceita em parte). `papel` devolve
+  `exigeTesouraria` (a tela esconde a tesouraria quando é `false`) e
+  `temTesouraria`.
+  - Com o módulo e sem ninguém na tesouraria, nada é aprovado: a tela avisa
+    para dar o perfil a alguém em Usuários.
+  - Uma aprovação da tesouraria de antes de ela sair do trâmite (o módulo
+    saiu e não sobrou ninguém no perfil) não conta mais: o pastor fecha sem
+    ela.
+  - Caso de borda: a solicitação que já estava em `AWAITING_TREASURY` (o
+    pastor aprovou) quando a tesouraria saiu do trâmite fica parada — o
+    pastor já decidiu, e não há tesouraria para decidir.
 - **Por produto:** `pastorAccepted` e `treasuryAccepted` guardam o que cada
   lado marcou — a tela mostra ao segundo o que o primeiro liberou ou recusou.
   `accepted` é o resultado: nulo até o fim; depois, `true` só no que os dois
@@ -76,14 +94,15 @@ existem.
 
 **Notificações:** a solicitação nova avisa os admins e a tesouraria da igreja
 (até 07/11/2026, só os admins: a tesouraria que entrou no módulo não ficava
-sabendo), e a mudança de
+sabendo; sem o módulo Tesouraria, só os admins), e a mudança de
 situação avisa quem pediu — em análise e o fim (aceita, em parte, recusada);
 o "aguardando" não avisa o membro, e sim **quem falta decidir**: o pastor
 aprovou, a tesouraria da igreja recebe "Solicitação aguardando a tesouraria";
 a tesouraria aprovou, o pastor recebe "Solicitação aguardando o pastor"
 (`CHURCH_REQUEST_AWAITING`, [notificacoes.md](notificacoes.md)).
 Na home do painel, a tarefa de solicitações sem resposta conta também as que
-aguardam o pastor ou a tesouraria.
+aguardam o pastor ou a tesouraria; para a tesouraria, só nas igrejas com o
+módulo Tesouraria.
 
 ## Rotas
 
@@ -92,9 +111,9 @@ aguardam o pastor ou a tesouraria.
 | `GET` | `/solicitacoes/minhas` | qualquer logado | as solicitações da pessoa, com a igreja |
 | `POST` | `/solicitacoes` | membro de uma igreja com o módulo | `{ ministerio, titulo, descricao, produtos: [{ nome, quantidade, link? }] }` |
 | `GET` | `/churches/:churchId/solicitacoes` | admin ou tesouraria da igreja | as solicitações da igreja, com quem pediu |
-| `GET` | `/churches/:churchId/solicitacoes/papel` | admin ou tesouraria da igreja | `{ lado: 'PASTOR' \| 'TESOURARIA' \| null, temPastor }` — como quem está logado decide aqui |
+| `GET` | `/churches/:churchId/solicitacoes/papel` | admin ou tesouraria da igreja | `{ lado: 'PASTOR' \| 'TESOURARIA' \| null, temPastor, temTesouraria, exigeTesouraria }` — como quem está logado decide aqui |
 | `PATCH` | `/churches/:churchId/solicitacoes/:id/status` | admin ou tesouraria da igreja | `{ status?, resposta? }` — `status` só `REQUESTED` ou `IN_REVIEW`, e só antes de qualquer decisão |
-| `POST` | `/churches/:churchId/solicitacoes/:id/decisao` | o pastor ou a tesouraria da igreja | `{ aprova, produtosAceitos?, resposta? }` |
+| `POST` | `/churches/:churchId/solicitacoes/:id/decisao` | o pastor ou a tesouraria da igreja | `{ aprova, produtosAceitos?, resposta? }` — `resposta` obrigatória para recusar |
 
 ## Banco
 

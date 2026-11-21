@@ -3,6 +3,9 @@ import { Role } from 'src/auth/roles';
 import { SolicitacoesDaIgrejaController } from './solicitacoes.controller';
 import { ChurchModule } from '@prisma/client';
 import { SolicitacoesService } from './solicitacoes.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CriarSolicitacaoDto } from './solicitacoes.dto';
 
 const ITENS = ['item-a', 'item-b', 'item-c'];
 
@@ -94,6 +97,10 @@ function montarTramite({
   pastorAprovou = null as string[] | null,
   tesourariaAprovou = null as string[] | null,
   lider = 'pastor-1' as string | null,
+  /** a igreja tem o módulo Tesouraria no plano */
+  comModulo = true,
+  /** quem tem o perfil de tesouraria na igreja */
+  tesoureiros = ['tes-1', 'tes-2'],
 } = {}) {
   const estado: any = {
     status,
@@ -114,6 +121,14 @@ function montarTramite({
         : null,
     ),
     update: jest.fn(async ({ data }: any) => Object.assign(estado, data)),
+    updateMany: jest.fn(async ({ where, data }: any) => {
+      const casa =
+        where.id === 'sol-1' &&
+        where.churchId === 'igreja-1' &&
+        where.status.in.includes(estado.status);
+      if (casa) Object.assign(estado, data);
+      return { count: casa ? 1 : 0 };
+    }),
     // a notificação do fim lê a solicitação; aqui ela não acha e não avisa
     findUnique: jest.fn(async () => null),
   };
@@ -130,13 +145,21 @@ function montarTramite({
     },
   };
   const prisma = {
-    church: { findUnique: jest.fn(async () => ({ spiritualLeaderId: lider })) },
+    church: {
+      findUnique: jest.fn(async () => ({
+        spiritualLeaderId: lider,
+        plan: {
+          modules: comModulo
+            ? [ChurchModule.REQUESTS, ChurchModule.TREASURY]
+            : [ChurchModule.REQUESTS],
+        },
+      })),
+    },
     userChurchRole: {
-      findFirst: jest.fn(async ({ where }: any) =>
-        ['tes-1', 'tes-2'].includes(where.userId) &&
+      findMany: jest.fn(async ({ where }: any) =>
         where.role === Role.TESOURARIA
-          ? { userId: where.userId }
-          : null,
+          ? tesoureiros.map((userId) => ({ userId }))
+          : [],
       ),
     },
     churchRequest,
@@ -252,14 +275,33 @@ describe('SolicitacoesService.decidir — pastor e tesouraria', () => {
       tesourariaAprovou: ITENS,
     });
     await expect(
-      service.decidir('igreja-1', 'sol-1', 'tes-2', { aprova: false }),
+      service.decidir('igreja-1', 'sol-1', 'tes-2', {
+        aprova: false,
+        resposta: 'Sem verba',
+      }),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('recusar pede o motivo', async () => {
+    const { service, estado } = montarTramite();
+    for (const resposta of [undefined, '   ']) {
+      await expect(
+        service.decidir('igreja-1', 'sol-1', 'pastor-1', {
+          aprova: false,
+          resposta,
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(estado.status).toBe('REQUESTED');
   });
 
   it('decidida não volta a ser decidida', async () => {
     const { service } = montarTramite({ status: 'ACCEPTED' });
     await expect(
-      service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: false }),
+      service.decidir('igreja-1', 'sol-1', 'pastor-1', {
+        aprova: false,
+        resposta: 'Sem verba',
+      }),
     ).rejects.toMatchObject({ status: 409 });
   });
 
@@ -281,6 +323,72 @@ describe('SolicitacoesService.decidir — pastor e tesouraria', () => {
     await expect(
       service.decidir('igreja-1', 'sol-2', 'pastor-1', { aprova: true }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('SolicitacoesService.decidir — quando a tesouraria entra no trâmite', () => {
+  const soPastor = { comModulo: false, tesoureiros: [] as string[] };
+
+  it('sem o módulo e sem ninguém na tesouraria, o pastor decide sozinho', async () => {
+    const { service, estado, resultado } = montarTramite(soPastor);
+    expect(await service.papel('igreja-1', 'pastor-1')).toEqual({
+      lado: 'PASTOR',
+      temPastor: true,
+      temTesouraria: false,
+      exigeTesouraria: false,
+    });
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: true });
+    expect(estado.status).toBe('ACCEPTED');
+    expect(resultado()).toEqual({
+      'item-a': true,
+      'item-b': true,
+      'item-c': true,
+    });
+  });
+
+  it('sozinho, aprovar parte fecha aceita em parte', async () => {
+    const { service, estado, resultado } = montarTramite(soPastor);
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', {
+      aprova: true,
+      produtosAceitos: ['item-a'],
+    });
+    expect(estado.status).toBe('PARTIALLY_ACCEPTED');
+    expect(resultado()).toEqual({
+      'item-a': true,
+      'item-b': false,
+      'item-c': false,
+    });
+  });
+
+  it('sem o módulo, mas com alguém na tesouraria: ela segue no trâmite', async () => {
+    const { service, estado } = montarTramite({ comModulo: false });
+    expect(await service.papel('igreja-1', 'tes-1')).toMatchObject({
+      lado: 'TESOURARIA',
+      exigeTesouraria: true,
+    });
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: true });
+    expect(estado.status).toBe('AWAITING_TREASURY');
+  });
+
+  it('com o módulo e ninguém na tesouraria: segue exigida, e a tela é avisada', async () => {
+    const { service, estado } = montarTramite({ tesoureiros: [] });
+    expect(await service.papel('igreja-1', 'pastor-1')).toMatchObject({
+      temTesouraria: false,
+      exigeTesouraria: true,
+    });
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: true });
+    expect(estado.status).toBe('AWAITING_TREASURY');
+  });
+
+  it('a aprovação da tesouraria de antes não conta quando ela sai do trâmite', async () => {
+    const { service, estado, resultado } = montarTramite({
+      ...soPastor,
+      status: 'AWAITING_PASTOR',
+      tesourariaAprovou: ['item-a'],
+    });
+    await service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: true });
+    expect(estado.status).toBe('ACCEPTED');
+    expect(resultado()['item-b']).toBe(true);
   });
 });
 
@@ -308,11 +416,51 @@ describe('SolicitacoesService.mudarStatus — o que o admin faz à mão', () => 
     });
   });
 
+  it('não sobrescreve a decisão que chegou entre a leitura e a gravação', async () => {
+    const { service, estado } = montarTramite();
+    const leitura = { ...estado, items: [] };
+    // o pastor aprova logo depois de o admin ler "solicitada"
+    estado.status = 'AWAITING_TREASURY';
+    estado.pastorDecision = true;
+    (service as any).prisma.churchRequest.findFirst.mockResolvedValueOnce(
+      leitura,
+    );
+    await expect(
+      service.mudarStatus('igreja-1', 'sol-1', { status: 'IN_REVIEW' }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(estado.status).toBe('AWAITING_TREASURY');
+  });
+
   it('não mexe em solicitação de outra igreja', async () => {
     const { service } = montarTramite();
     await expect(
       service.mudarStatus('igreja-2', 'sol-1', { status: 'IN_REVIEW' }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('CriarSolicitacaoDto', () => {
+  const erros = (dados: any) =>
+    validate(plainToInstance(CriarSolicitacaoDto, dados)).then((lista) =>
+      lista.map((erro) => erro.property),
+    );
+
+  it('texto só com espaços conta como vazio', async () => {
+    expect(
+      await erros({
+        ...pedido,
+        titulo: '   ',
+        descricao: ' ',
+        produtos: [{ nome: '  ', quantidade: 1 }],
+      }),
+    ).toEqual(expect.arrayContaining(['titulo', 'descricao', 'produtos']));
+  });
+
+  it('apara as pontas e aceita o pedido', async () => {
+    const dto = plainToInstance(CriarSolicitacaoDto, pedido);
+    expect(await validate(dto)).toEqual([]);
+    expect(dto.titulo).toBe('Microfones');
+    expect(dto.produtos[0].nome).toBe('Microfone sem fio');
   });
 });
 

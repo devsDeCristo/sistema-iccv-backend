@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ChurchRequestStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -39,9 +39,17 @@ export const MINISTERIOS = [
   'Outro',
 ] as const;
 
+/**
+ * Tira os espaços das pontas antes de validar: sem isso, `"   "` passa no
+ * `@IsNotEmpty` e o service grava texto vazio.
+ */
+const Aparar = () =>
+  Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
+
 /** Um produto do pedido */
 export class ProdutoDaSolicitacaoDto {
   @ApiProperty({ example: 'Microfone sem fio' })
+  @Aparar()
   @IsString()
   @IsNotEmpty({ message: 'Dê um nome a cada produto' })
   @MaxLength(120)
@@ -69,12 +77,14 @@ export class CriarSolicitacaoDto {
   ministerio: string;
 
   @ApiProperty({ example: 'Microfones para o culto jovem' })
+  @Aparar()
   @IsString()
   @IsNotEmpty({ message: 'Diga o que está sendo pedido' })
   @MaxLength(120)
   titulo: string;
 
   @ApiProperty({ example: 'O pedestal do vocal quebrou no culto de domingo.' })
+  @Aparar()
   @IsString()
   @IsNotEmpty({ message: 'Explique o pedido' })
   @MaxLength(2000)

@@ -12,7 +12,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Role } from 'src/auth/roles';
-import { exigirModulo } from 'src/planos/modulos';
+import { exigirModulo, modulosDa, SELECT_MODULOS } from 'src/planos/modulos';
 import {
   notificarRespostaDaSolicitacao,
   notificarSolicitacao,
@@ -94,9 +94,11 @@ export type LadoDaDecisao = 'PASTOR' | 'TESOURARIA';
 /**
  * Módulo Solicitações: o membro pede à igreja de que é membro (um ou mais
  * produtos). Aprovar pede duas confirmações, em qualquer ordem — a do pastor e
- * a de uma tesouraria da igreja —, e recusar basta uma (`decidir`). O admin
- * que não é nenhum dos dois acompanha, põe em análise e responde ao membro
- * (`mudarStatus`).
+ * a de uma tesouraria da igreja —, e recusar basta uma (`decidir`). A
+ * tesouraria só entra na igreja que tem o módulo Tesouraria no plano ou
+ * alguém com o perfil de tesouraria: sem nenhum dos dois, o pastor decide
+ * sozinho. O admin que não decide acompanha, põe em análise e responde ao
+ * membro (`mudarStatus`).
  */
 @Injectable()
 export class SolicitacoesService {
@@ -165,25 +167,39 @@ export class SolicitacoesService {
    * `Church.spiritualLeaderId`), tesouraria (o vínculo dela aqui) ou nenhum.
    * `temPastor` avisa a tela da igreja sem pastor cadastrado, que não consegue
    * aprovar nada até cadastrarem um.
+   *
+   * `exigeTesouraria`: a aprovação pede a tesouraria — a igreja tem o módulo
+   * Tesouraria no plano **ou** alguém com o perfil de tesouraria nela (o
+   * perfil existe sem o módulo). Sem nenhum dos dois, o pastor decide
+   * sozinho. `temTesouraria` avisa a tela da igreja com o módulo e sem
+   * ninguém na tesouraria, que não consegue aprovar nada até cadastrarem um.
    */
   async papel(churchId: string, userId: string) {
-    const [igreja, tesouraria] = await Promise.all([
+    const [igreja, tesoureiros] = await Promise.all([
       this.prisma.church.findUnique({
         where: { id: churchId },
-        select: { spiritualLeaderId: true },
+        select: { spiritualLeaderId: true, ...SELECT_MODULOS },
       }),
-      this.prisma.userChurchRole.findFirst({
-        where: { churchId, userId, role: Role.TESOURARIA },
+      this.prisma.userChurchRole.findMany({
+        where: { churchId, role: Role.TESOURARIA },
         select: { userId: true },
       }),
     ]);
+    const temTesouraria = tesoureiros.length > 0;
+    const exigeTesouraria =
+      temTesouraria || modulosDa(igreja).includes(ChurchModule.TREASURY);
     const lado: LadoDaDecisao | null =
       igreja?.spiritualLeaderId === userId
         ? 'PASTOR'
-        : tesouraria
+        : tesoureiros.some((t) => t.userId === userId)
         ? 'TESOURARIA'
         : null;
-    return { lado, temPastor: !!igreja?.spiritualLeaderId };
+    return {
+      lado,
+      temPastor: !!igreja?.spiritualLeaderId,
+      temTesouraria,
+      exigeTesouraria,
+    };
   }
 
   /**
@@ -208,23 +224,38 @@ export class SolicitacoesService {
     });
     if (!atual) throw new NotFoundException('Solicitação não encontrada');
 
+    const jaDecidida = new ConflictException(
+      'A solicitação já está com o pastor e a tesouraria: a situação muda pela decisão deles',
+    );
     const mudaSituacao = !!dto.status && dto.status !== atual.status;
     if (mudaSituacao && !ANTES_DA_DECISAO.includes(atual.status)) {
-      throw new ConflictException(
-        'A solicitação já está com o pastor e a tesouraria: a situação muda pela decisão deles',
-      );
+      throw jaDecidida;
+    }
+    const resposta =
+      dto.resposta !== undefined
+        ? { response: dto.resposta.trim() || null }
+        : {};
+
+    if (mudaSituacao) {
+      // a condição vai no `where`, e não só na leitura acima: a decisão do
+      // pastor ou da tesouraria que chegou no meio não é sobrescrita
+      const { count } = await this.prisma.churchRequest.updateMany({
+        where: { id, churchId, status: { in: ANTES_DA_DECISAO } },
+        data: { status: dto.status, ...resposta },
+      });
+      if (!count) throw jaDecidida;
     }
 
-    const salva = await this.prisma.churchRequest.update({
-      where: { id },
-      data: {
-        ...(mudaSituacao && { status: dto.status }),
-        ...(dto.resposta !== undefined && {
-          response: dto.resposta.trim() || null,
-        }),
-      },
-      select: CAMPOS_DA_IGREJA,
-    });
+    const salva = mudaSituacao
+      ? await this.prisma.churchRequest.findUnique({
+          where: { id },
+          select: CAMPOS_DA_IGREJA,
+        })
+      : await this.prisma.churchRequest.update({
+          where: { id },
+          data: resposta,
+          select: CAMPOS_DA_IGREJA,
+        });
     // só quando a situação muda: corrigir a resposta não avisa de novo
     if (mudaSituacao) {
       await notificarRespostaDaSolicitacao(this.prisma, id, actorId);
@@ -236,6 +267,13 @@ export class SolicitacoesService {
    * A decisão do pastor ou da tesouraria — o lado sai de quem está logado
    * (`papel`), nunca do corpo. Cada lado decide uma vez (da tesouraria, basta
    * uma pessoa).
+   *
+   * Igreja sem o módulo Tesouraria e sem ninguém na tesouraria
+   * (`exigeTesouraria` falso): só o pastor decide, e a decisão dele fecha a
+   * solicitação — com o que ele aprovou. Uma aprovação da tesouraria de antes
+   * (o módulo saiu, o último tesoureiro saiu) não conta mais.
+   *
+   * Recusar pede o motivo (`resposta`): é o que quem pediu lê.
    *
    * - Recusar encerra: a solicitação vai para recusada, com todos os produtos
    *   fora, decida o outro lado o que for.
@@ -249,10 +287,17 @@ export class SolicitacoesService {
    * cada um achando que o outro ainda não tinha decidido.
    */
   async decidir(churchId: string, id: string, userId: string, dto: DecidirDto) {
-    const { lado } = await this.papel(churchId, userId);
+    const { lado, exigeTesouraria } = await this.papel(churchId, userId);
     if (!lado) {
       throw new ForbiddenException(
-        'Só o pastor e a tesouraria da igreja aprovam ou recusam',
+        exigeTesouraria
+          ? 'Só o pastor e a tesouraria da igreja aprovam ou recusam'
+          : 'Só o pastor da igreja aprova ou recusa',
+      );
+    }
+    if (!dto.aprova && !dto.resposta?.trim()) {
+      throw new BadRequestException(
+        'Diga o motivo da recusa: é o que quem pediu vai ler',
       );
     }
     const pastor = lado === 'PASTOR';
@@ -294,23 +339,26 @@ export class SolicitacoesService {
         );
       }
 
-      // a outra decisão, se já houve, é aprovação: a recusa teria encerrado
+      // a outra decisão, se já houve, é aprovação: a recusa teria encerrado.
+      // Sem a tesouraria no trâmite não há outro lado: o pastor fecha sozinho
       const outroAprovou =
+        exigeTesouraria &&
         (pastor ? atual.treasuryDecision : atual.pastorDecision) === true;
+      const fecha = !exigeTesouraria || outroAprovou;
       const doOutro = (item: (typeof atual.items)[number]) =>
         pastor ? item.treasuryAccepted : item.pastorAccepted;
       /** O resultado do produto: só no fim, e só o que os dois aprovaram */
       const final = (item: (typeof atual.items)[number]) =>
         !dto.aprova
           ? false
-          : outroAprovou
-          ? meus.has(item.id) && doOutro(item) === true
-          : null;
+          : !fecha
+          ? null
+          : meus.has(item.id) && (!exigeTesouraria || doOutro(item) === true);
 
       const emComum = atual.items.filter((item) => final(item)).length;
       const status = !dto.aprova
         ? ChurchRequestStatus.REJECTED
-        : !outroAprovou
+        : !fecha
         ? pastor
           ? ChurchRequestStatus.AWAITING_TREASURY
           : ChurchRequestStatus.AWAITING_PASTOR
