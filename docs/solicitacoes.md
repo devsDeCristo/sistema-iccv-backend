@@ -33,8 +33,14 @@ existem.
 - **Situação (`ChurchRequestStatus`):** `REQUESTED` (solicitado, ao criar),
   `IN_REVIEW` (em análise), `AWAITING_TREASURY` (o pastor aprovou, falta a
   tesouraria), `AWAITING_PASTOR` (a tesouraria aprovou, falta o pastor),
-  `ACCEPTED` (aceito), `PARTIALLY_ACCEPTED` (aceito parcialmente) e `REJECTED`
-  (recusado).
+  `ACCEPTED` (aceito), `PARTIALLY_ACCEPTED` (aceito parcialmente), `REJECTED`
+  (recusado) e `CANCELED` (cancelado por quem pediu).
+- **Cancelar (desde 21/11/2026):** quem pediu desiste da própria
+  solicitação, só antes de qualquer decisão (`REQUESTED` ou `IN_REVIEW`);
+  depois que o pastor ou a tesouraria aprovou, `409` — o trâmite segue até o
+  fim. A de outra pessoa é `404`. A condição vai no `where` do `updateMany`:
+  uma decisão que chegou no meio não é desfeita. Cancelada, ninguém decide
+  mais (`409`), e ela não conta nas pendências da home. Não avisa ninguém.
 - **Duas confirmações (desde 07/11/2026):** aprovar pede o **pastor** — o
   líder espiritual da igreja (`Church.spiritualLeaderId`, posto ao criar a
   igreja) — **e uma tesouraria** dela (vínculo `TESOURARIA` nesta igreja;
@@ -112,8 +118,9 @@ módulo Tesouraria.
 | Método | Rota | Quem | O que faz |
 | --- | --- | --- | --- |
 | `GET` | `/solicitacoes/minhas` | qualquer logado | as solicitações da pessoa, com a igreja |
-| `POST` | `/solicitacoes` | membro de uma igreja com o módulo | `{ ministerio, titulo, descricao, produtos: [{ nome, quantidade, link? }] }` |
-| `GET` | `/churches/:churchId/solicitacoes` | admin ou tesouraria da igreja | `?etapa=&ministerio=&ordem=&page=&limit=` → `{ items, total, page, limit, contagens }`: uma página (25 por padrão, até 100), as novas primeiro. `etapa`: `novas`, `em-aprovacao`, `aceitas`, `recusadas` ou `sua-vez` (em aberto e sem a decisão do lado de quem está logado). `contagens`: `todas`, cada etapa e `sua-vez`, no filtro de ministério |
+| `POST` | `/solicitacoes` | membro de uma igreja com o módulo | `{ ministerio, ministerioOutro?, titulo, descricao, produtos: [{ nome, quantidade, link? }] }` |
+| `PATCH` | `/solicitacoes/:id/cancelar` | quem pediu | desiste, antes de qualquer decisão |
+| `GET` | `/churches/:churchId/solicitacoes` | admin ou tesouraria da igreja | `?etapa=&ministerio=&ordem=&page=&limit=` → `{ items, total, page, limit, contagens }`: uma página (25 por padrão, até 100), as novas primeiro. `etapa`: `novas`, `em-aprovacao`, `aceitas`, `encerradas` (recusadas e canceladas) ou `sua-vez` (em aberto e sem a decisão do lado de quem está logado). `contagens`: `todas`, cada etapa e `sua-vez`, no filtro de ministério |
 | `GET` | `/churches/:churchId/solicitacoes/papel` | admin ou tesouraria da igreja | `{ lado: 'PASTOR' \| 'TESOURARIA' \| null, temPastor, temTesouraria, exigeTesouraria }` — como quem está logado decide aqui |
 | `PATCH` | `/churches/:churchId/solicitacoes/:id/status` | admin ou tesouraria da igreja | `{ status?, resposta? }` — `status` só `REQUESTED` ou `IN_REVIEW`, e só antes de qualquer decisão |
 | `POST` | `/churches/:churchId/solicitacoes/:id/decisao` | o pastor ou a tesouraria da igreja | `{ aprova, produtosAceitos?, resposta? }` — `resposta` obrigatória para recusar |

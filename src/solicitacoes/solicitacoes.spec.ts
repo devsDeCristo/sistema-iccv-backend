@@ -453,6 +453,61 @@ describe('SolicitacoesService.mudarStatus — o que o admin faz à mão', () => 
   });
 });
 
+describe('SolicitacoesService.cancelar — quem pediu desiste', () => {
+  /** uma solicitação de `membro-1`, com a situação pedida */
+  function montarCancelar(status = 'REQUESTED') {
+    const estado: any = { id: 'sol-1', requesterId: 'membro-1', status };
+    const casa = (where: any) =>
+      where.id === estado.id && where.requesterId === estado.requesterId;
+    const churchRequest = {
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        const pode = casa(where) && where.status.in.includes(estado.status);
+        if (pode) Object.assign(estado, data);
+        return { count: pode ? 1 : 0 };
+      }),
+      findFirst: jest.fn(async ({ where }: any) =>
+        casa(where) ? { id: estado.id } : null,
+      ),
+      findUnique: jest.fn(async () => estado),
+    };
+    return {
+      service: new SolicitacoesService({ churchRequest } as any),
+      estado,
+    };
+  }
+
+  it('cancela a própria, enquanto ninguém decidiu', async () => {
+    for (const status of ['REQUESTED', 'IN_REVIEW']) {
+      const { service, estado } = montarCancelar(status);
+      await service.cancelar('membro-1', 'sol-1');
+      expect(estado.status).toBe('CANCELED');
+    }
+  });
+
+  it('depois da primeira decisão, não cancela mais', async () => {
+    const { service, estado } = montarCancelar('AWAITING_TREASURY');
+    await expect(service.cancelar('membro-1', 'sol-1')).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(estado.status).toBe('AWAITING_TREASURY');
+  });
+
+  it('a de outra pessoa não existe para quem tenta', async () => {
+    const { service, estado } = montarCancelar();
+    await expect(service.cancelar('outro', 'sol-1')).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(estado.status).toBe('REQUESTED');
+  });
+
+  it('cancelada, o pastor e a tesouraria não decidem mais', async () => {
+    const { service } = montarTramite({ status: 'CANCELED' });
+    await expect(
+      service.decidir('igreja-1', 'sol-1', 'pastor-1', { aprova: true }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});
+
 describe('SolicitacoesService.daIgreja — a lista paginada do painel', () => {
   function montarLista(lider = 'pastor-1') {
     const churchRequest = {
@@ -512,7 +567,7 @@ describe('SolicitacoesService.daIgreja — a lista paginada do painel', () => {
         novas: 3,
         'em-aprovacao': 3,
         aceitas: 0,
-        recusadas: 4,
+        encerradas: 4,
         'sua-vez': 7,
       },
     });
@@ -523,7 +578,9 @@ describe('SolicitacoesService.daIgreja — a lista paginada do painel', () => {
     await service.daIgreja('igreja-1', 'pastor-1', { etapa: 'sua-vez' });
     expect(churchRequest.findMany.mock.calls[0][0].where).toEqual({
       churchId: 'igreja-1',
-      status: { notIn: ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'REJECTED'] },
+      status: {
+        notIn: ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'REJECTED', 'CANCELED'],
+      },
       pastorDecision: null,
     });
   });

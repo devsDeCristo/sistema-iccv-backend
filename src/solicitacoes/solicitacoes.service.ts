@@ -86,11 +86,12 @@ const ANTES_DA_DECISAO: ChurchRequestStatus[] = [
   ChurchRequestStatus.IN_REVIEW,
 ];
 
-/** O fim do trâmite: ninguém decide mais */
+/** O fim do trâmite: ninguém decide mais (a cancelada também) */
 const DECIDIDA: ChurchRequestStatus[] = [
   ChurchRequestStatus.ACCEPTED,
   ChurchRequestStatus.PARTIALLY_ACCEPTED,
   ChurchRequestStatus.REJECTED,
+  ChurchRequestStatus.CANCELED,
 ];
 
 /** Quem decide: o pastor (líder espiritual da igreja) ou a tesouraria dela */
@@ -158,6 +159,33 @@ export class SolicitacoesService {
     });
     await notificarSolicitacao(this.prisma, criada.id);
     return criada;
+  }
+
+  /**
+   * Quem pediu desiste: só a própria solicitação, e só antes de qualquer
+   * decisão (solicitada ou em análise). Depois que o pastor ou a tesouraria
+   * aprovou, o trâmite segue até o fim. A condição vai no `where`: uma
+   * decisão que chegou no meio não é desfeita.
+   */
+  async cancelar(userId: string, id: string) {
+    const { count } = await this.prisma.churchRequest.updateMany({
+      where: { id, requesterId: userId, status: { in: ANTES_DA_DECISAO } },
+      data: { status: ChurchRequestStatus.CANCELED },
+    });
+    if (!count) {
+      const minha = await this.prisma.churchRequest.findFirst({
+        where: { id, requesterId: userId },
+        select: { id: true },
+      });
+      if (!minha) throw new NotFoundException('Solicitação não encontrada');
+      throw new ConflictException(
+        'Só dá para cancelar antes de o pastor ou a tesouraria decidir',
+      );
+    }
+    return this.prisma.churchRequest.findUnique({
+      where: { id },
+      select: { ...CAMPOS, church: { select: { id: true, name: true } } },
+    });
   }
 
   /**
@@ -386,7 +414,11 @@ export class SolicitacoesService {
       });
       if (!atual) throw new NotFoundException('Solicitação não encontrada');
       if (DECIDIDA.includes(atual.status)) {
-        throw new ConflictException('Esta solicitação já foi decidida');
+        throw new ConflictException(
+          atual.status === ChurchRequestStatus.CANCELED
+            ? 'Quem pediu cancelou esta solicitação'
+            : 'Esta solicitação já foi decidida',
+        );
       }
       const minha = pastor ? atual.pastorDecision : atual.treasuryDecision;
       if (minha !== null) {

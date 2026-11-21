@@ -49,6 +49,14 @@ export class SolicitacoesController {
   criar(@Req() req: any, @Body() dto: CriarSolicitacaoDto) {
     return this.service.criar(req.user.userId, dto);
   }
+
+  @ApiOperation({
+    summary: 'Quem pediu desiste, antes de o pastor ou a tesouraria decidir',
+  })
+  @Patch(':id/cancelar')
+  cancelar(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.cancelar(req.user.userId, id);
+  }
 }
 
 /**

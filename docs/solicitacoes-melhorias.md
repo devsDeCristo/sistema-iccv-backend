@@ -20,7 +20,13 @@ a de prioridade: primeiro as correções, depois as melhorias.
 > numa coluna nova (`ministryOther`), e `ministry` segue "Outro". Na 16, a
 > lista do painel vem paginada (`page`/`limit`, como os logs), com as
 > contagens das abas na mesma resposta; ordena só pela data e filtra só pelo
-> ministério. Falta a 12 (o membro cancelar).
+> ministério.
+>
+> **Melhoria 12 e os pequenos ajustes implementados em 21/11/2026.** Cancelar
+> só antes de qualquer decisão (a pergunta em aberto); a aba "Recusadas"
+> virou "Encerradas" (recusadas e canceladas). O id dos produtos na tela é um
+> contador, e não `crypto.randomUUID`, que só existe em HTTPS. Falta só a
+> decisão da 6.
 
 ## Correções
 
@@ -147,7 +153,7 @@ botão diz "Aprovar tudo", mas o resultado vai ser parcial.
   etiqueta já existente ("Pastor ✗"), ou mostrar "vai entrar X de Y" no
   botão.
 
-### ⏳ 12. O membro cancela a solicitação
+### ✅ 12. O membro cancela a solicitação
 
 O membro não consegue desistir do pedido, e o painel acumula pedidos que
 ninguém quer mais.
@@ -195,10 +201,10 @@ Não é urgente, mas a lista cresce para sempre.
 
 - ✅ `modalDaSolicitacao.tsx`: o `import { ListaDeProdutos }` está no meio
   do arquivo, depois do componente `Confirmacao`.
-- ⏳ `modalNovaSolicitacao.tsx`: os produtos usam `key={i}`. Ao remover um
+- ✅ `modalNovaSolicitacao.tsx`: os produtos usam `key={i}`. Ao remover um
   produto do meio da lista, o foco pula de campo. Usar um id gerado na
   criação do produto (`crypto.randomUUID()`).
-- ⏳ `DecidirDto.produtosAceitos`: falta `@ArrayMaxSize(20)`, o mesmo teto da
+- ✅ `DecidirDto.produtosAceitos`: falta `@ArrayMaxSize(20)`, o mesmo teto da
   criação.
 
 ## Para mais adiante

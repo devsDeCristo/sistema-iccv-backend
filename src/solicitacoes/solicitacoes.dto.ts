@@ -153,6 +153,7 @@ export class DecidirDto {
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
   @IsUUID('all', { each: true })
   produtosAceitos?: string[];
 
@@ -180,7 +181,8 @@ export const ETAPAS: Record<string, ChurchRequestStatus[]> = {
     ChurchRequestStatus.ACCEPTED,
     ChurchRequestStatus.PARTIALLY_ACCEPTED,
   ],
-  recusadas: [ChurchRequestStatus.REJECTED],
+  // o fim sem compra: recusada pela igreja ou cancelada por quem pediu
+  encerradas: [ChurchRequestStatus.REJECTED, ChurchRequestStatus.CANCELED],
 };
 
 /** "Sua vez": o que espera a decisão de quem está logado (pastor ou tesouraria) */
