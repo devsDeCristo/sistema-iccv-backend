@@ -260,29 +260,33 @@ model User {
   /// De qual igreja a pessoa é membro. Uma só: é campo, e não lista, para o
   /// banco garantir que ninguém seja membro de duas. Quem coloca e tira é o
   /// admin ou a tesouraria da igreja (módulo Membros); a pessoa não se coloca.
-  memberChurchId    String?
-  memberChurch      Church?         @relation("MemberOf", fields: [memberChurchId], references: [id], onDelete: SetNull)
-  memberSince       DateTime?
+  memberChurchId         String?
+  memberChurch           Church?               @relation("MemberOf", fields: [memberChurchId], references: [id], onDelete: SetNull)
+  memberSince            DateTime?
   /// A igreja que ela escolheu na inscrição: um pedido, que o admin aceita
   /// (vira membro) ou recusa. Sem isso, marcar o nome de uma igreja bastava
   /// para entrar na lista de membros — e na tesouraria — dela.
-  requestedChurchId String?
-  requestedChurch   Church?         @relation("MembershipRequest", fields: [requestedChurchId], references: [id], onDelete: SetNull)
+  requestedChurchId      String?
+  requestedChurch        Church?               @relation("MembershipRequest", fields: [requestedChurchId], references: [id], onDelete: SetNull)
   /// "Outra" na inscrição: o nome da igreja, como a pessoa escreveu. Só
   /// informativo; a busca de Membros mostra, para o admin decidir.
-  otherChurchName   String?
+  otherChurchName        String?
   /// A família dentro da igreja de que é membro. Sai junto quando deixa de ser membro.
-  familyId          String?
-  family            Family?         @relation(fields: [familyId], references: [id], onDelete: SetNull)
+  familyId               String?
+  family                 Family?               @relation(fields: [familyId], references: [id], onDelete: SetNull)
   /// O que a pessoa pediu à igreja de que é membro (módulo Solicitações)
-  churchRequests    ChurchRequest[]
+  churchRequests         ChurchRequest[]
   /// Solicitações em que deu a decisão do pastor / da tesouraria
-  pastorDecisions   ChurchRequest[] @relation("RequestPastor")
-  treasuryDecisions ChurchRequest[] @relation("RequestTreasurer")
+  pastorDecisions        ChurchRequest[]       @relation("RequestPastor")
+  treasuryDecisions      ChurchRequest[]       @relation("RequestTreasurer")
   /// Vagas do módulo Oportunidades em que a pessoa demonstrou interesse
-  opportunityInterests OpportunityInterest[]
+  opportunityInterests   OpportunityInterest[]
   /// Vagas que publicou (como admin da igreja)
   opportunitiesPublished Opportunity[]
+  /// Vagas que propôs como membro (ver `Opportunity.status`)
+  opportunitiesProposed  Opportunity[]         @relation("OpportunityProposedBy")
+  /// Propostas de vaga que aprovou ou recusou
+  opportunitiesReviewed  Opportunity[]         @relation("OpportunityReviewedBy")
 
   @@index([email])
   @@index([memberChurchId])
@@ -1742,36 +1746,77 @@ model ChurchRequestItem {
 /// interesse; o admin vê quem se interessou e exporta a lista para quem
 /// ofereceu a vaga.
 model Opportunity {
-  id          String   @id @default(uuid())
-  churchId    String
-  title       String
+  id              String            @id @default(uuid())
+  churchId        String
+  title           String
   /// Quem oferece: a própria igreja ou a empresa de um membro (texto livre)
-  company     String
-  description String
+  company         String
+  description     String
   /// Cidade, bairro ou "Remoto". Opcional
-  location    String?
+  location        String?
   /// Encerrada: some da tela dos membros e não recebe interesse novo; os que
   /// já vieram ficam para o admin
-  isOpen      Boolean  @default(true)
+  isOpen          Boolean           @default(true)
   /// Último dia para se candidatar (opcional). Vencida conta como encerrada
   /// — na consulta, sem cron
-  closesAt    DateTime?
+  closesAt        DateTime?
   /// Configuração da vaga, livre como `Event.data`: `imagemUrl` (a logo),
   /// `salario` (`{ min, max? }`, valor ou faixa) e `formulario` (`{ campos }`,
   /// o formulário de candidatura). Formato e regras em
   /// `src/oportunidades/formulario.ts`
-  data        Json     @default("{}")
+  data            Json              @default("{}")
+  /// Situação na igreja: a vaga do admin nasce aprovada; a proposta de um
+  /// membro nasce pendente e só aparece aos membros depois que o admin
+  /// aprova. O padrão do banco é o lado seguro (pendente): caminho que
+  /// esquecer de dizer não publica nada
+  status          OpportunityStatus @default(PENDING)
+  /// O membro que propôs (nulo na vaga criada pelo admin). Aprovada, ele
+  /// também vê os candidatos, enquanto for membro desta igreja
+  proposedById    String?
+  /// Quem aprovou ou recusou, quando e por quê (o motivo é opcional e vai
+  /// para quem propôs)
+  reviewedById    String?
+  reviewedAt      DateTime?
+  rejectionReason String?
   /// `SetNull`: apagar a conta de quem publicou não apaga a vaga
-  createdById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdById     String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
-  church    Church                @relation(fields: [churchId], references: [id], onDelete: Cascade)
-  createdBy User?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  interests OpportunityInterest[]
+  church     Church                @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  createdBy  User?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  proposedBy User?                 @relation("OpportunityProposedBy", fields: [proposedById], references: [id], onDelete: SetNull)
+  reviewedBy User?                 @relation("OpportunityReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  interests  OpportunityInterest[]
 
   @@index([churchId, createdAt(sort: Desc)])
+  @@index([proposedById])
   @@map("opportunities")
+}
+
+/// Situação de uma vaga (ver `Opportunity.status`)
+enum OpportunityStatus {
+  /// Proposta de um membro, esperando o admin
+  PENDING
+  /// Publicada aos membros (a do admin já nasce assim)
+  APPROVED
+  /// Proposta recusada: fica arquivada no painel, e quem propôs vê o motivo
+  REJECTED
+}
+
+/// A etapa de uma candidatura no processo da vaga (ver
+/// `OpportunityInterest.stage`). Interna: o candidato não vê
+enum InterestStage {
+  /// Chegou e ninguém mexeu ainda
+  NEW
+  /// Em análise
+  REVIEWING
+  /// Chamada para entrevista
+  INTERVIEW
+  /// Selecionada para a vaga
+  SELECTED
+  /// Fora do processo
+  DISCARDED
 }
 
 /// Um membro interessado numa vaga. Um por pessoa e vaga (a chave é o par).
@@ -1781,8 +1826,15 @@ model OpportunityInterest {
   /// As respostas ao formulário da vaga, por id do campo:
   /// `{ [campoId]: { tipo, rotulo, valor } }`. O currículo guarda o caminho
   /// no bucket, que nunca sai da API
-  answers       Json     @default("{}")
-  createdAt     DateTime @default(now())
+  answers       Json          @default("{}")
+  /// O acompanhamento do processo, de quem conduz a vaga (o admin da igreja
+  /// e quem a propôs). **O candidato não vê** nem a etapa nem a anotação
+  stage         InterestStage @default(NEW)
+  /// Anotação interna sobre o candidato ("liguei dia 22, entrevista sexta")
+  note          String?
+  /// Quando a etapa ou a anotação mudou pela última vez
+  trackedAt     DateTime?
+  createdAt     DateTime      @default(now())
 
   opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   /// `Cascade`: apagar a conta tira a pessoa da lista, como o resto dos dados dela
@@ -1962,6 +2014,10 @@ enum NotificationType {
   EVENT
   /// Vaga publicada em Oportunidades (membros da igreja)
   OPPORTUNITY
+  /// Um membro propôs uma vaga (admins da igreja)
+  OPPORTUNITY_PROPOSAL
+  /// A proposta de vaga foi aprovada ou recusada (quem propôs)
+  OPPORTUNITY_PROPOSAL_ANSWERED
 }
 
 /// Uma notificação do sininho, com o texto já pronto. Quem recebe e quem já

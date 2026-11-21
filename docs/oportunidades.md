@@ -14,8 +14,10 @@ correspondente em `ic-front/docs/oportunidades.md`.
   cadastro da pessoa, nunca da requisição: o membro só vê as vagas da igreja
   dele e só se candidata a elas. Vaga de outra igreja responde `404`, sem
   dizer que existe.
-- **Quem publica:** só o admin da igreja (`ADMIN_ROLES`: admin, dev e super
-  admin). A tesouraria não entra. A rota da igreja passa pelo
+- **Quem publica:** o admin da igreja (`ADMIN_ROLES`: admin, dev e super
+  admin) publica direto. O **membro propõe**, e a proposta só vai ao ar
+  depois que o admin aprova (ver "Propostas dos membros"). A tesouraria não
+  entra. A rota da igreja passa pelo
   `ChurchTenantGuard` (admin **da igreja da URL**) e pelo `ModuloGuard`, e o
   service confere que a vaga é dessa igreja (`daIgrejaOu404`): trocar o id na
   URL não mexe na vaga de outra igreja.
@@ -32,10 +34,18 @@ correspondente em `ic-front/docs/oportunidades.md`.
     dominante dela (`cor`), que a tela calcula ao escolher o arquivo e usa
     para tingir o crachá dos detalhes. Cor inválida é ignorada. Remover a
     imagem tira a cor junto.
-- **Descrição em HTML:** a tela só a mostra pelo visualizador do Quill
-  (`ReactQuillViewer`), que reconstrói o texto a partir do modelo dele e
-  descarta o que não é formatação, como nas notícias. Não renderizar
-  `description` como HTML cru em outro lugar.
+- **Descrição em HTML, limpa no servidor** (`descricao.ts`, com
+  `sanitize-html`): com as propostas, qualquer membro escreve HTML que
+  outros leem. Ao gravar (admin ou proposta), fica só a formatação do
+  editor numa lista fechada: parágrafo, negrito, itálico, sublinhado,
+  riscado, sub/sobrescrito, títulos, citação, código, listas, `span`, as
+  classes `ql-*`, cor, fundo, alinhamento e links `http`/`https`/`mailto`,
+  sempre com `target="_blank"` e `rel="noopener noreferrer"`. Script,
+  eventos (`onerror`), `style` livre, iframe e **imagem** saem (o editor
+  embute imagem em base64). Se depois da limpeza não sobra texto, a API
+  responde `400` "Descreva a vaga". As descrições gravadas antes disso (só
+  do admin) não foram limpas de novo; a tela continua mostrando todas pelo
+  visualizador do Quill.
 - **Situação:** a vaga nasce aberta (`isOpen`). Encerrada à mão (`isOpen:
   false`) ou **vencida** (`closesAt` passou) é a mesma coisa para o membro:
   sai da vitrine e recusa candidatura nova (`409`). Não há cron: o filtro da
@@ -58,6 +68,53 @@ correspondente em `ic-front/docs/oportunidades.md`.
   foi bloqueado leva `401` mesmo com o token ainda valendo.
 - **Fora do plano:** o membro não vê (o item some do menu, e a API recusa) e
   o painel recusa; nada é apagado.
+
+## Propostas dos membros
+
+Qualquer membro que vê as vagas (membro de igreja ativa, com o módulo no
+plano, sem bloqueio) pode **propor** uma vaga. A proposta passa pelo admin.
+
+- **Situação (`status`):**
+  - `PENDING`: proposta esperando o admin;
+  - `APPROVED`: no ar (a vaga do admin já nasce assim);
+  - `REJECTED`: recusada, arquivada no painel.
+  - O padrão do banco é `PENDING`, o lado seguro: caminho que esquecer de
+    dizer não publica nada.
+- **Só a aprovada existe para os membros:** a lista, o detalhe e a
+  candidatura começam todos pelo filtro `PUBLICADA` (`status = APPROVED`).
+  Pendente e recusada respondem `404` a quem não é admin, como vaga de outra
+  igreja.
+- **Para onde vai:** a igreja sai do cadastro de quem propõe, nunca da
+  requisição. `createdById` e `proposedById` são essa pessoa.
+- **Limite:** até 5 propostas pendentes por pessoa ao mesmo tempo (`409`
+  depois disso), para ninguém encher a fila do admin.
+- **Quem propôs** (rotas em `/oportunidades/propostas`):
+  - vê as próprias propostas **da igreja de que é membro agora**, com a
+    situação e o motivo da recusa;
+  - **edita e retira** enquanto está pendente (imagem também). `aberta` não
+    é dele: a proposta nasce aberta;
+  - **aprovada, vê os candidatos e baixa os currículos**, como o admin. Isso
+    vale enquanto ela for membro desta igreja (com o módulo e sem
+    bloqueio): mudou de igreja, perde o acesso. O aviso de privacidade da
+    candidatura diz que os dados ficam com a igreja e com quem oferece a
+    vaga.
+- **O admin** (aba Pendentes do painel):
+  - edita a proposta antes de decidir (a mesma rota de editar);
+  - **aprova**: a proposta vai ao ar (`isOpen: true`), os membros são
+    avisados (menos quem propôs, que recebe "aprovada") e quem propôs passa a
+    ver os candidatos;
+  - **recusa**, com motivo opcional (até 500), que vai para quem propôs. A
+    recusada fica em Recusadas, e o admin pode excluí-la.
+  - `reviewedById` e `reviewedAt` guardam quem decidiu e quando.
+- **Sem atropelo:** aprovar, recusar, editar e retirar só valem a partir de
+  `PENDING`, e numa instrução só (`updateMany`/`deleteMany` com a situação
+  no `where`). Dois admins decidindo juntos, ou quem propôs editando enquanto
+  o admin aprova: quem chega depois leva `409` e nada muda.
+- **Avisos** ([notificacoes.md](notificacoes.md)):
+  - `OPPORTUNITY_PROPOSAL` para os admins da igreja (sai do sininho deles
+    quando a proposta é decidida, retirada ou excluída);
+  - `OPPORTUNITY_PROPOSAL_ANSWERED` para quem propôs, uma vez por decisão;
+  - `OPPORTUNITY` (vaga nova) para os membros, só depois de aprovada.
 
 ## Formulário de candidatura
 
@@ -127,6 +184,21 @@ exige ser membro ainda nem a vaga aberta: o dado é dela.
   `UserService.excluir` e `ChurchService.remove` apagam os da conta e os da
   igreja.
 
+### Acompanhamento (etapa e anotação)
+
+Quem conduz a vaga (o admin da igreja e, na vaga proposta e aprovada, quem
+propôs, enquanto for membro desta igreja) acompanha cada candidatura:
+
+- `stage` (`InterestStage`): `NEW` (padrão), `REVIEWING`, `INTERVIEW`,
+  `SELECTED` e `DISCARDED`;
+- `note`: a anotação interna, até 2000 caracteres (vazia apaga);
+- `trackedAt`: quando um dos dois mudou.
+
+`PATCH .../interessados/:userId` com `{ etapa?, nota? }`; campo ausente não
+muda. **O candidato não vê nenhum dos dois**: o detalhe e a lista do membro
+selecionam só a data e as respostas da própria candidatura (há teste para
+isso). Retirar a candidatura apaga o acompanhamento junto.
+
 ### O que vai para o admin
 
 De cada candidato: nome, e-mail, celular e foto, a data e as respostas. Cada
@@ -140,12 +212,20 @@ a tabela de contato e um bloco por candidato com as respostas. Os currículos
 vão à parte. Se a igreja passar de centenas de vagas, separar as
 candidaturas numa rota própria (`ponytail:` no service).
 
-Testes: `src/oportunidades/oportunidades.spec.ts`.
+Testes: `src/oportunidades/oportunidades.spec.ts` e
+`src/oportunidades/propostas-rotas.spec.ts` (a ordem das rotas).
 
 ## Rotas
 
 | Método | Rota | Quem | O que faz |
 | --- | --- | --- | --- |
+| `GET` | `/oportunidades/propostas` | membro de igreja com o módulo | as propostas da pessoa nesta igreja, com a situação (a aprovada vem com os candidatos) |
+| `POST` | `/oportunidades/propostas` | membro de igreja com o módulo | propõe uma vaga (o mesmo corpo da criação do admin, sem `aberta`) |
+| `PUT` | `/oportunidades/propostas/:id` | quem propôs | edita a proposta pendente |
+| `DELETE` | `/oportunidades/propostas/:id` | quem propôs | retira a proposta pendente |
+| `PUT`/`DELETE` | `/oportunidades/propostas/:id/imagem` | quem propôs | troca ou remove a imagem da proposta pendente |
+| `GET` | `/oportunidades/propostas/:id/interessados/:userId/curriculo` | quem propôs | o currículo de um candidato da vaga aprovada |
+| `PATCH` | `/oportunidades/propostas/:id/interessados/:userId` | quem propôs | `{ etapa?, nota? }` de um candidato da vaga aprovada |
 | `GET` | `/oportunidades` | membro de igreja com o módulo | as vagas recebendo candidatura e as encerradas em que se candidatou, com `interessei` e `encerrada` (sem o formulário) |
 | `GET` | `/oportunidades/:id` | membro da igreja da vaga | a vaga com o formulário e `minhaCandidatura`; encerrada só para quem se candidatou |
 | `POST` | `/oportunidades/:id/interesse` | membro da igreja da vaga | candidata-se (multipart: `respostas` + `curriculo`) |
@@ -156,7 +236,16 @@ Testes: `src/oportunidades/oportunidades.spec.ts`.
 | `PUT` | `/churches/:churchId/oportunidades/:id/imagem` | admin da igreja | troca a imagem (multipart: `imagem`, até 5 MB, e `cor`, a cor dominante dela em `#rrggbb`, opcional) |
 | `DELETE` | `/churches/:churchId/oportunidades/:id/imagem` | admin da igreja | remove a imagem |
 | `GET` | `/churches/:churchId/oportunidades/:id/interessados/:userId/curriculo` | admin da igreja | o PDF do currículo do candidato |
+| `PATCH` | `/churches/:churchId/oportunidades/:id/interessados/:userId` | admin da igreja | `{ etapa?, nota? }`: o acompanhamento do candidato |
+| `POST` | `/churches/:churchId/oportunidades/:id/aprovar` | admin da igreja | aprova a proposta pendente |
+| `POST` | `/churches/:churchId/oportunidades/:id/recusar` | admin da igreja | `{ motivo? }`: recusa a proposta pendente |
 | `DELETE` | `/churches/:churchId/oportunidades/:id` | admin da igreja | exclui a vaga, as candidaturas e os arquivos |
+
+`PropostasDeOportunidadeController` é registrado **antes** de
+`OportunidadesController` no módulo: senão `GET /oportunidades/:id` (com
+`ParseUUIDPipe`) pegaria `/oportunidades/propostas` e responderia `400`. O
+teste `propostas-rotas.spec.ts` monta os controllers na ordem real do módulo
+e confere.
 
 O app mobile (`ic-app`) usa as rotas do membro. O `POST` sem corpo continua
 valendo para vaga sem campo obrigatório; com algum obrigatório, o app antigo
@@ -165,8 +254,11 @@ recebe `400` com a mensagem.
 ## Banco
 
 `Opportunity` (`opportunities`): igreja, título, empresa, descrição, local,
-`isOpen`, `closesAt`, quem publicou (`createdById`, `SetNull` se a conta for
-apagada), datas e `data`. `data` é um JSON livre, como `Event.data`:
+`isOpen`, `closesAt`, `status` (`OpportunityStatus`: `PENDING`, `APPROVED`,
+`REJECTED`; padrão `PENDING`), quem publicou (`createdById`), quem propôs
+(`proposedById`), quem decidiu (`reviewedById`, `reviewedAt`), o motivo da
+recusa (`rejectionReason`), datas e `data`. As três pessoas são `SetNull` se
+a conta for apagada. `data` é um JSON livre, como `Event.data`:
 
 ```json
 {
@@ -185,8 +277,9 @@ apagada), datas e `data`. `data` é um JSON livre, como `Event.data`:
 
 `closesAt` é coluna, e não JSON, porque a consulta filtra por ela.
 
-`OpportunityInterest` (`opportunity_interests`): o par vaga + pessoa, a data
-e `answers`, um JSON (objeto) por id do campo:
+`OpportunityInterest` (`opportunity_interests`): o par vaga + pessoa, a data,
+o acompanhamento (`stage`, `note`, `trackedAt`) e `answers`, um JSON (objeto)
+por id do campo:
 
 ```json
 {
@@ -207,8 +300,23 @@ Migrations:
   `{}`) na vaga, `answers` (padrão `{}`) na candidatura e `OPPORTUNITY` no
   enum `NotificationType`. As vagas que já existiam ficam sem formulário.
 
-As duas foram testadas aplicando todas as migrations num Postgres vazio (o
-banco bateu com o schema) e com o service real nele.
+- `20261122120000_acompanhamento_de_candidaturas`: o enum
+  `InterestStage` e as colunas `stage` (padrão `NEW`), `note` e
+  `trackedAt` na candidatura. As que já existiam entram como `NEW`.
+- `20261121120000_propostas_de_oportunidade`: o enum `OpportunityStatus`,
+  as colunas `status` (padrão `PENDING`), `proposedById`, `reviewedById`,
+  `reviewedAt` e `rejectionReason`, e `OPPORTUNITY_PROPOSAL` e
+  `OPPORTUNITY_PROPOSAL_ANSWERED` no `NotificationType`. **As vagas que já
+  existiam passam a `APPROVED`** (`UPDATE` na própria migration):
+  continuam no ar.
+
+Todas foram testadas aplicando as migrations num Postgres vazio (o banco
+bateu com o schema) e com o service real nele. A última também foi aplicada
+sobre um banco com uma vaga já gravada, que continuou `APPROVED`. O fluxo de
+propostas inteiro foi conferido no banco real: propor, invisível aos
+membros, edição de outra pessoa ou igreja barrada, aprovar (segunda
+aprovação `409`), candidatar, quem propôs ver os candidatos e perder o
+acesso ao mudar de igreja, recusar com motivo, retirar e o limite de 5.
 
 ## Auditoria
 

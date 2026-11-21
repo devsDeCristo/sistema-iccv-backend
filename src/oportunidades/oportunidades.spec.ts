@@ -17,6 +17,8 @@ jest.mock('./bucket', () => ({
 const VAGA = {
   id: 'vaga-1',
   churchId: 'igreja-1',
+  status: 'APPROVED',
+  proposedById: null as string | null,
   isOpen: true,
   closesAt: null as Date | null,
   data: {} as any,
@@ -36,6 +38,12 @@ function montar({
   modulos = [ChurchModule.OPPORTUNITIES] as ChurchModule[],
   vaga = VAGA as any,
 } = {}) {
+  const bate = (where: any) =>
+    !!vaga &&
+    Object.entries(where).every(
+      ([chave, valor]) =>
+        (valor !== null && typeof valor === 'object') || vaga[chave] === valor,
+    );
   const prisma = {
     user: {
       findUnique: jest.fn(async () => ({ memberChurch: igrejaDoMembro })),
@@ -49,12 +57,9 @@ function montar({
       })),
     },
     opportunity: {
-      // o `where` traz a igreja: vaga de outra igreja não é achada
-      findFirst: jest.fn(async ({ where }: any) =>
-        vaga && where.id === vaga.id && where.churchId === vaga.churchId
-          ? vaga
-          : null,
-      ),
+      // todo campo simples do `where` tem que bater: vaga de outra igreja,
+      // de outra pessoa ou noutra situação não é achada
+      findFirst: jest.fn(async ({ where }: any) => (bate(where) ? vaga : null)),
       findUnique: jest.fn(
         async () =>
           vaga && {
@@ -71,9 +76,25 @@ function montar({
         interests: [],
       })),
       update: jest.fn(async ({ data }: any) => ({ ...data, interests: [] })),
+      updateMany: jest.fn(async ({ where }: any) => ({
+        count: bate(where) ? 1 : 0,
+      })),
+      deleteMany: jest.fn(async ({ where }: any) => ({
+        count: bate(where) ? 1 : 0,
+      })),
+      count: jest.fn(async () => 0),
       delete: jest.fn(),
     },
+    userChurchRole: {
+      findMany: jest.fn(async () => [{ userId: 'admin' }]),
+    },
+    notificationRecipient: { deleteMany: jest.fn() },
     opportunityInterest: {
+      update: jest.fn(async ({ data }: any) => ({
+        stage: data.stage ?? 'NEW',
+        note: data.note ?? null,
+        trackedAt: data.trackedAt,
+      })),
       create: jest.fn(),
       findMany: jest.fn(async () => []),
       deleteMany: jest.fn(),
@@ -340,6 +361,316 @@ describe('OportunidadesService', () => {
     expect(data.data.formulario).toEqual(formularioPadrao());
     expect(data.closesAt.toISOString()).toBe('2027-01-01T02:59:59.999Z');
     expect(prisma.opportunity.findUnique).toHaveBeenCalled();
+  });
+});
+
+describe('propostas de vaga dos membros', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const PROPOSTA = {
+    ...VAGA,
+    id: 'prop-1',
+    status: 'PENDING',
+    proposedById: 'u1',
+  };
+  const DTO = { titulo: 'Caixa', empresa: 'Padaria', descricao: 'Balcão' };
+
+  it('a proposta vai para a igreja do cadastro, pendente, e avisa os admins', async () => {
+    const { service, prisma } = montar({
+      igrejaDoMembro: { id: 'igreja-1', status: 'ACTIVE' },
+    });
+    // o aviso relê a proposta recém-criada
+    prisma.opportunity.findUnique.mockResolvedValueOnce({
+      title: 'Caixa',
+      churchId: 'igreja-1',
+      proposedById: 'u1',
+      proposedBy: { fullName: 'Fulana' },
+    } as any);
+    await service.propor('u1', { ...DTO, aberta: false } as any);
+    const { data } = (prisma.opportunity.create as jest.Mock).mock.calls[0][0];
+    expect(data).toMatchObject({
+      churchId: 'igreja-1',
+      status: 'PENDING',
+      proposedById: 'u1',
+      createdById: 'u1',
+      // `aberta` não é do membro: a proposta nasce aberta, o admin decide
+      isOpen: true,
+    });
+    expect(prisma.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: 'OPPORTUNITY_PROPOSAL' }),
+      }),
+    );
+  });
+
+  it('quem não é membro (ou é de igreja sem o módulo) não propõe', async () => {
+    for (const opcoes of [
+      { igrejaDoMembro: null },
+      { modulos: [ChurchModule.EVENTS] },
+    ]) {
+      const { service, prisma } = montar(opcoes as any);
+      await expect(service.propor('u1', DTO)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(prisma.opportunity.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('no máximo 5 propostas esperando ao mesmo tempo', async () => {
+    const { service, prisma } = montar();
+    prisma.opportunity.count.mockResolvedValue(5);
+    await expect(service.propor('u1', DTO)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(prisma.opportunity.create).not.toHaveBeenCalled();
+  });
+
+  it('a descrição é limpa: script some, e só script não é descrição', async () => {
+    const { service, prisma } = montar();
+    await service.propor('u1', {
+      ...DTO,
+      descricao: '<p>Oi<img src=x onerror=alert(1)></p><script>x()</script>',
+    });
+    const { data } = (prisma.opportunity.create as jest.Mock).mock.calls[0][0];
+    expect(data.description).toBe('<p>Oi</p>');
+    await expect(
+      service.propor('u1', { ...DTO, descricao: '<script>x()</script>' }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('a proposta pendente ou recusada não aparece nem recebe candidatura', async () => {
+    for (const status of ['PENDING', 'REJECTED']) {
+      const { service, prisma } = montar({ vaga: { ...VAGA, status } });
+      await expect(service.detalhe('u2', 'vaga-1')).rejects.toMatchObject({
+        status: 404,
+      });
+      await expect(service.interessar('u2', 'vaga-1')).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(prisma.opportunityInterest.create).not.toHaveBeenCalled();
+    }
+    const { service, prisma } = montar();
+    await service.abertas('u2');
+    const { where } = (prisma.opportunity.findMany as jest.Mock).mock
+      .calls[0][0];
+    expect(where.status).toBe('APPROVED');
+  });
+
+  it('quem propôs edita a pendente; aberta não é dele', async () => {
+    const { service, prisma } = montar({ vaga: PROPOSTA });
+    await service.editarProposta('u1', 'prop-1', {
+      titulo: 'Caixa II',
+      aberta: false,
+    });
+    const chamada = (prisma.opportunity.updateMany as jest.Mock).mock
+      .calls[0][0];
+    expect(chamada.where).toMatchObject({
+      id: 'prop-1',
+      proposedById: 'u1',
+      status: 'PENDING',
+    });
+    expect(chamada.data).toEqual({ title: 'Caixa II' });
+  });
+
+  it('ninguém mexe na proposta de outra pessoa, nem na já decidida', async () => {
+    const { service } = montar({ vaga: PROPOSTA });
+    await expect(
+      service.editarProposta('u2', 'prop-1', { titulo: 'x' }),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(service.retirarProposta('u2', 'prop-1')).rejects.toMatchObject(
+      { status: 404 },
+    );
+
+    const aprovada = montar({ vaga: { ...PROPOSTA, status: 'APPROVED' } });
+    await expect(
+      aprovada.service.editarProposta('u1', 'prop-1', { titulo: 'x' }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      aprovada.service.retirarProposta('u1', 'prop-1'),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(aprovada.prisma.opportunity.updateMany).not.toHaveBeenCalled();
+    expect(aprovada.prisma.opportunity.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('proposta de outra igreja (de antes de mudar) não é alcançada', async () => {
+    const { service } = montar({
+      igrejaDoMembro: { id: 'igreja-2', status: 'ACTIVE' },
+      vaga: PROPOSTA,
+    });
+    await expect(
+      service.editarProposta('u1', 'prop-1', { titulo: 'x' }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('o admin decidindo no meio: a edição e a retirada levam 409', async () => {
+    const { service, prisma } = montar({ vaga: PROPOSTA });
+    prisma.opportunity.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.editarProposta('u1', 'prop-1', { titulo: 'x' }),
+    ).rejects.toMatchObject({ status: 409 });
+    prisma.opportunity.deleteMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.retirarProposta('u1', 'prop-1')).rejects.toMatchObject(
+      { status: 409 },
+    );
+  });
+
+  it('o admin aprova só a pendente, numa instrução só', async () => {
+    const { service, prisma } = montar({ vaga: PROPOSTA });
+    prisma.opportunity.findFirst.mockResolvedValueOnce(PROPOSTA as any);
+    await service.aprovar('igreja-1', 'prop-1', 'admin');
+    const chamada = (prisma.opportunity.updateMany as jest.Mock).mock
+      .calls[0][0];
+    expect(chamada.where).toEqual({
+      id: 'prop-1',
+      churchId: 'igreja-1',
+      status: 'PENDING',
+    });
+    expect(chamada.data).toMatchObject({
+      status: 'APPROVED',
+      reviewedById: 'admin',
+    });
+    // o aviso "nova proposta" sai do sininho dos admins
+    expect(prisma.notificationRecipient.deleteMany).toHaveBeenCalled();
+  });
+
+  it('dois admins decidindo juntos: o segundo leva 409', async () => {
+    const { service, prisma } = montar({ vaga: PROPOSTA });
+    prisma.opportunity.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.recusar('igreja-1', 'prop-1', 'admin', 'Já preenchida'),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('a recusa grava o motivo; admin de outra igreja não decide', async () => {
+    const { service, prisma } = montar({ vaga: PROPOSTA });
+    prisma.opportunity.findFirst.mockResolvedValueOnce(PROPOSTA as any);
+    await service.recusar('igreja-1', 'prop-1', 'admin', '  Já preenchida ');
+    expect(
+      (prisma.opportunity.updateMany as jest.Mock).mock.calls[0][0].data,
+    ).toMatchObject({ status: 'REJECTED', rejectionReason: 'Já preenchida' });
+
+    const outra = montar({ vaga: PROPOSTA });
+    await expect(
+      outra.service.aprovar('igreja-2', 'prop-1', 'admin'),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(outra.prisma.opportunity.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('quem propôs baixa o currículo só da vaga dele, aprovada', async () => {
+    const aprovada = { ...PROPOSTA, status: 'APPROVED' };
+    const { service } = montar({ vaga: aprovada });
+    await expect(
+      service.curriculoDaProposta('u2', 'prop-1', 'cand'),
+    ).rejects.toMatchObject({ status: 404 });
+
+    const pendente = montar({ vaga: PROPOSTA });
+    await expect(
+      pendente.service.curriculoDaProposta('u1', 'prop-1', 'cand'),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(bucket.baixarDoBucket).not.toHaveBeenCalled();
+  });
+
+  it('a pendente não leva candidatos na lista de quem propôs', async () => {
+    const { service, prisma } = montar();
+    prisma.opportunity.findMany.mockResolvedValueOnce([
+      { ...PROPOSTA, interests: [{ answers: {}, user: { id: 'x' } }] },
+    ] as any);
+    const [proposta] = await service.minhasPropostas('u1');
+    expect(proposta.interests).toEqual([]);
+    expect(
+      (prisma.opportunity.findMany as jest.Mock).mock.calls[0][0].where,
+    ).toEqual({ churchId: 'igreja-1', proposedById: 'u1' });
+  });
+});
+
+describe('acompanhamento das candidaturas (etapa e anotação)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const APROVADA = {
+    ...VAGA,
+    id: 'prop-1',
+    status: 'APPROVED',
+    proposedById: 'u1',
+  };
+
+  it('o admin muda a etapa e a anotação; nota vazia apaga', async () => {
+    const { service, prisma } = montar();
+    await service.acompanharNoPainel('igreja-1', 'vaga-1', 'cand', {
+      etapa: 'INTERVIEW' as any,
+      nota: '  Entrevista sexta ',
+    });
+    const chamada = (prisma.opportunityInterest.update as jest.Mock).mock
+      .calls[0][0];
+    expect(chamada.where).toEqual({
+      opportunityId_userId: { opportunityId: 'vaga-1', userId: 'cand' },
+    });
+    expect(chamada.data).toMatchObject({
+      stage: 'INTERVIEW',
+      note: 'Entrevista sexta',
+    });
+
+    await service.acompanharNoPainel('igreja-1', 'vaga-1', 'cand', {
+      nota: '   ',
+    });
+    const segunda = (prisma.opportunityInterest.update as jest.Mock).mock
+      .calls[1][0];
+    expect(segunda.data.note).toBeNull();
+    expect(segunda.data).not.toHaveProperty('stage');
+  });
+
+  it('admin de outra igreja não acompanha candidato de vaga alheia', async () => {
+    const { service, prisma } = montar();
+    await expect(
+      service.acompanharNoPainel('igreja-2', 'vaga-1', 'cand', {
+        etapa: 'SELECTED' as any,
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(prisma.opportunityInterest.update).not.toHaveBeenCalled();
+  });
+
+  it('candidatura que não existe (ou foi retirada) é 404', async () => {
+    const { service, prisma } = montar();
+    prisma.opportunityInterest.update.mockRejectedValueOnce({
+      code: 'P2025',
+    });
+    await expect(
+      service.acompanharNoPainel('igreja-1', 'vaga-1', 'ninguem', {
+        etapa: 'SELECTED' as any,
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('quem propôs acompanha só a vaga dele, e só aprovada', async () => {
+    const { service, prisma } = montar({ vaga: APROVADA });
+    await service.acompanharNaProposta('u1', 'prop-1', 'cand', {
+      etapa: 'REVIEWING' as any,
+    });
+    expect(prisma.opportunityInterest.update).toHaveBeenCalledTimes(1);
+
+    await expect(
+      service.acompanharNaProposta('u2', 'prop-1', 'cand', { nota: 'x' }),
+    ).rejects.toMatchObject({ status: 404 });
+
+    const pendente = montar({ vaga: { ...APROVADA, status: 'PENDING' } });
+    await expect(
+      pendente.service.acompanharNaProposta('u1', 'prop-1', 'cand', {
+        nota: 'x',
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(pendente.prisma.opportunityInterest.update).not.toHaveBeenCalled();
+  });
+
+  it('o candidato nunca recebe a etapa nem a anotação', async () => {
+    const { service, prisma } = montar();
+    await service.detalhe('u2', 'vaga-1').catch(() => undefined);
+    const doDetalhe = (prisma.opportunity.findFirst as jest.Mock).mock
+      .calls[0][0].select.interests.select;
+    expect(Object.keys(doDetalhe).sort()).toEqual(['answers', 'createdAt']);
+
+    await service.abertas('u2');
+    const daLista = (prisma.opportunity.findMany as jest.Mock).mock.calls[0][0]
+      .select.interests.select;
+    expect(Object.keys(daLista)).toEqual(['createdAt']);
   });
 });
 

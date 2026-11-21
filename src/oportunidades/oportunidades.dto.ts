@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { InterestStage } from '@prisma/client';
 import {
   IsBoolean,
+  IsEnum,
   IsDateString,
   IsNotEmpty,
   IsObject,
@@ -81,3 +83,33 @@ export class CriarOportunidadeDto {
 export class AtualizarOportunidadeDto extends PartialType(
   CriarOportunidadeDto,
 ) {}
+
+/** A recusa de uma proposta: o motivo é opcional e vai para quem propôs */
+export class RecusarPropostaDto {
+  @ApiPropertyOptional({ example: 'A vaga já foi preenchida' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  motivo?: string;
+}
+
+/**
+ * O acompanhamento de uma candidatura, por quem conduz a vaga: a etapa e a
+ * anotação interna. Campo ausente não muda; `nota` vazia apaga. O candidato
+ * não vê nenhum dos dois.
+ */
+export class AcompanharCandidaturaDto {
+  @ApiPropertyOptional({
+    enum: InterestStage,
+    example: InterestStage.INTERVIEW,
+  })
+  @IsOptional()
+  @IsEnum(InterestStage, { message: 'Etapa inválida' })
+  etapa?: InterestStage;
+
+  @ApiPropertyOptional({ example: 'Liguei dia 22; entrevista na sexta' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  nota?: string;
+}

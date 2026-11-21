@@ -18,7 +18,9 @@ minuto.
 | `CHURCH_REQUEST_AWAITING` — é a sua vez de decidir | quem falta: a tesouraria da igreja (o pastor aprovou) ou o pastor, o líder espiritual (a tesouraria aprovou). Sem pastor cadastrado, ninguém | `SolicitacoesService.decidir`, quando a solicitação fica aguardando (`notificarVezNaSolicitacao`) | `<id>:<status>` |
 | `NEWS` — notícia no ar | membros da igreja que publicou; com evento de público, quem está nele (inscrito ou na lista de espera), de qualquer igreja — a regra do mural | `NewsService.disparaEmSegundoPlano` — criar publicada, publicar o rascunho e o disparo agendado passam por ali | `<id>:<publishedAt>` |
 | `EVENT` — evento aberto ao público | membros da igreja | evento que vira `ACTIVE` (ensaio, `TEST`, não conta): criar, editar e status em massa; e a igreja que sai da implantação (`ChurchService.update` → `notificarEventosDaIgreja`, eventos abertos que não acabaram) | o evento |
-| `OPPORTUNITY` — vaga publicada em Oportunidades | membros da igreja | vaga criada aberta, ou reaberta (`notificarOportunidade`); uma vez por vaga | a vaga |
+| `OPPORTUNITY` — vaga publicada em Oportunidades | membros da igreja (menos quem propôs a vaga) | vaga criada aberta pelo admin, proposta aprovada, ou reaberta (`notificarOportunidade`); só vaga aprovada, em igreja ativa com o módulo; uma vez por vaga | a vaga |
+| `OPPORTUNITY_PROPOSAL` — um membro propôs uma vaga | admins da igreja | `notificarPropostaDeOportunidade`; sai do sininho quando a proposta é decidida, retirada ou excluída (`encerrarPropostaDeOportunidade`) | a proposta |
+| `OPPORTUNITY_PROPOSAL_ANSWERED` — a proposta foi aprovada ou recusada | quem propôs | `notificarRespostaDaProposta`, uma vez por decisão (`<id>:<status>`); a recusa leva o motivo | a proposta |
 
 - **Admin** é o vínculo `UserChurchRole` com `role = ADMIN` nesta igreja. A
   tesouraria não recebe pedido de membro: ela não vê os pedidos em Membros.

@@ -4,7 +4,9 @@ import {
   Delete,
   Get,
   Param,
+  HttpCode,
   ParseUUIDPipe,
+  Patch,
   Post,
   Put,
   Req,
@@ -30,10 +32,123 @@ import { Modulo } from 'src/planos/modulos';
 import { ModuloGuard } from 'src/planos/modulo.guard';
 import { OportunidadesService } from './oportunidades.service';
 import {
+  AcompanharCandidaturaDto,
   AtualizarOportunidadeDto,
   CriarOportunidadeDto,
+  RecusarPropostaDto,
 } from './oportunidades.dto';
 import { LIMITES } from './formulario';
+
+/** O PDF do currículo, como download (o mesmo para o admin e quem propôs) */
+const comoPdf = ({ arquivo, nome }: { arquivo: Buffer; nome: string }) =>
+  new StreamableFile(arquivo, {
+    type: 'application/pdf',
+    disposition: `attachment; filename="curriculo.pdf"; filename*=UTF-8''${encodeURIComponent(
+      nome,
+    )}`,
+  });
+
+/**
+ * As propostas de vaga dos membros. Como no resto do lado do membro, o
+ * service só responde a quem é membro de uma igreja com o módulo, e a igreja
+ * sai do cadastro, nunca da requisição.
+ *
+ * **Registrado antes de `OportunidadesController`** (ver o módulo): lá há
+ * `GET /oportunidades/:id`, que pegaria `/oportunidades/propostas` se viesse
+ * primeiro.
+ */
+@ApiTags('oportunidades')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('oportunidades/propostas')
+export class PropostasDeOportunidadeController {
+  constructor(private readonly service: OportunidadesService) {}
+
+  @ApiOperation({
+    summary:
+      'As propostas da pessoa na igreja dela (a aprovada vem com os candidatos)',
+  })
+  @Get()
+  minhas(@Req() req: any) {
+    return this.service.minhasPropostas(req.user.userId);
+  }
+
+  @ApiOperation({ summary: 'Propõe uma vaga ao admin da igreja' })
+  @Post()
+  propor(@Req() req: any, @Body() dto: CriarOportunidadeDto) {
+    return this.service.propor(req.user.userId, dto);
+  }
+
+  @ApiOperation({ summary: 'Edita a proposta enquanto está pendente' })
+  @Put(':id')
+  editar(
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AtualizarOportunidadeDto,
+  ) {
+    return this.service.editarProposta(req.user.userId, id, dto);
+  }
+
+  @ApiOperation({ summary: 'Retira a proposta enquanto está pendente' })
+  @Delete(':id')
+  retirar(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.retirarProposta(req.user.userId, id);
+  }
+
+  @ApiOperation({ summary: 'Troca a imagem da proposta pendente' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('imagem', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  @Put(':id/imagem')
+  trocarImagem(
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() imagem: Express.Multer.File,
+    @Body('cor') cor?: string,
+  ) {
+    return this.service.trocarImagemDaProposta(
+      req.user.userId,
+      id,
+      imagem,
+      cor,
+    );
+  }
+
+  @ApiOperation({ summary: 'Remove a imagem da proposta pendente' })
+  @Delete(':id/imagem')
+  removerImagem(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.removerImagemDaProposta(req.user.userId, id);
+  }
+
+  @ApiOperation({
+    summary:
+      'Etapa e anotação de um candidato da vaga proposta (aprovada); o candidato não vê',
+  })
+  @Patch(':id/interessados/:userId')
+  acompanhar(
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: AcompanharCandidaturaDto,
+  ) {
+    return this.service.acompanharNaProposta(req.user.userId, id, userId, dto);
+  }
+
+  @ApiOperation({
+    summary: 'O currículo de um candidato da vaga proposta (aprovada)',
+  })
+  @Get(':id/interessados/:userId/curriculo')
+  async curriculo(
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return comoPdf(
+      await this.service.curriculoDaProposta(req.user.userId, id, userId),
+    );
+  }
+}
 
 /**
  * O lado do membro: qualquer pessoa logada chega, mas o service só responde a
@@ -157,6 +272,19 @@ export class OportunidadesDaIgrejaController {
     return this.service.removerImagem(churchId, id);
   }
 
+  @ApiOperation({
+    summary: 'Etapa e anotação de um candidato; o candidato não vê',
+  })
+  @Patch(':id/interessados/:userId')
+  acompanhar(
+    @Param('churchId') churchId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: AcompanharCandidaturaDto,
+  ) {
+    return this.service.acompanharNoPainel(churchId, id, userId, dto);
+  }
+
   @ApiOperation({ summary: 'O currículo (PDF) de um candidato' })
   @Get(':id/interessados/:userId/curriculo')
   async curriculo(
@@ -164,17 +292,34 @@ export class OportunidadesDaIgrejaController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) userId: string,
   ) {
-    const { arquivo, nome } = await this.service.curriculo(
-      churchId,
-      id,
-      userId,
-    );
-    return new StreamableFile(arquivo, {
-      type: 'application/pdf',
-      disposition: `attachment; filename="curriculo.pdf"; filename*=UTF-8''${encodeURIComponent(
-        nome,
-      )}`,
-    });
+    return comoPdf(await this.service.curriculo(churchId, id, userId));
+  }
+
+  @ApiOperation({
+    summary: 'Aprova a proposta de um membro: vai ao ar para os membros',
+  })
+  @HttpCode(200)
+  @Post(':id/aprovar')
+  aprovar(
+    @Param('churchId') churchId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: any,
+  ) {
+    return this.service.aprovar(churchId, id, req.user.userId);
+  }
+
+  @ApiOperation({
+    summary: 'Recusa a proposta: fica arquivada; o motivo vai para quem propôs',
+  })
+  @HttpCode(200)
+  @Post(':id/recusar')
+  recusar(
+    @Param('churchId') churchId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RecusarPropostaDto,
+    @Req() req: any,
+  ) {
+    return this.service.recusar(churchId, id, req.user.userId, dto.motivo);
   }
 
   @ApiOperation({

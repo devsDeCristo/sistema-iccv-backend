@@ -6,17 +6,28 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ChurchModule, ChurchStatus, Prisma } from '@prisma/client';
+import {
+  ChurchModule,
+  ChurchStatus,
+  OpportunityStatus,
+  Prisma,
+} from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { exigirModulo } from 'src/planos/modulos';
 import { contaBloqueadaNaSessao } from 'src/auth/bloqueio';
-import { notificarOportunidade } from 'src/notificacoes/notificar';
+import {
+  encerrarPropostaDeOportunidade,
+  notificarOportunidade,
+  notificarPropostaDeOportunidade,
+  notificarRespostaDaProposta,
+} from 'src/notificacoes/notificar';
 import {
   resolveImageExtension,
   uploadImageFirebase,
 } from 'src/utils/uploadImgFirebase';
 import {
+  AcompanharCandidaturaDto,
   AtualizarOportunidadeDto,
   CriarOportunidadeDto,
 } from './oportunidades.dto';
@@ -33,6 +44,7 @@ import {
   validarRespostas,
 } from './formulario';
 import { apagarDoBucket, baixarDoBucket, salvarNoBucket } from './bucket';
+import { limparDescricao, temTexto } from './descricao';
 
 const CAMPOS = {
   id: true,
@@ -47,15 +59,27 @@ const CAMPOS = {
   updatedAt: true,
 } as const;
 
-/** No painel: quem publicou e quem se candidatou, com o contato e as respostas */
+/**
+ * No painel: a situação, quem publicou (ou propôs) e quem revisou, e quem se
+ * candidatou, com o contato e as respostas
+ */
 const CAMPOS_DA_IGREJA = {
   ...CAMPOS,
+  status: true,
+  rejectionReason: true,
+  reviewedAt: true,
   createdBy: { select: { id: true, fullName: true } },
+  proposedBy: { select: { id: true, fullName: true } },
+  reviewedBy: { select: { id: true, fullName: true } },
   interests: {
     orderBy: { createdAt: 'asc' },
     select: {
       createdAt: true,
       answers: true,
+      // o acompanhamento: só no painel e para quem propôs, nunca ao candidato
+      stage: true,
+      note: true,
+      trackedAt: true,
       user: {
         select: {
           id: true,
@@ -69,11 +93,22 @@ const CAMPOS_DA_IGREJA = {
   },
 } as const;
 
-/** Aberta e no prazo: o que o membro pode ver e onde pode se candidatar */
+/**
+ * O que está no ar para os membros: só a vaga aprovada. A proposta pendente
+ * e a recusada nunca chegam a eles — todo `where` do lado do membro começa
+ * por aqui.
+ */
+const PUBLICADA = { status: OpportunityStatus.APPROVED } as const;
+
+/** Aprovada, aberta e no prazo: onde o membro pode se candidatar */
 const recebendo = (agora = new Date()): Prisma.OpportunityWhereInput => ({
+  ...PUBLICADA,
   isOpen: true,
   OR: [{ closesAt: null }, { closesAt: { gt: agora } }],
 });
+
+/** Quantas propostas pendentes um membro pode ter ao mesmo tempo */
+const LIMITE_DE_PENDENTES = 5;
 
 const vencida = (closesAt: Date | null) => !!closesAt && closesAt <= new Date();
 
@@ -116,7 +151,9 @@ const paraOPainel = ({ data, interests, ...vaga }: any) => {
     cor,
     salario,
     formulario,
-    encerrada: !vaga.isOpen || vencida(vaga.closesAt),
+    encerrada:
+      vaga.status === OpportunityStatus.APPROVED &&
+      (!vaga.isOpen || vencida(vaga.closesAt)),
     interests: interests.map(({ answers, ...i }: any) => ({
       ...i,
       respostas: semCaminho(answers),
@@ -173,6 +210,7 @@ export class OportunidadesService {
     const vagas = await this.prisma.opportunity.findMany({
       where: {
         churchId,
+        ...PUBLICADA,
         OR: [recebendo(), { interests: { some: { userId } } }],
       },
       orderBy: { createdAt: 'desc' },
@@ -194,7 +232,7 @@ export class OportunidadesService {
   async detalhe(userId: string, id: string) {
     const churchId = await this.igrejaDoMembro(userId);
     const vaga = await this.prisma.opportunity.findFirst({
-      where: { id, churchId },
+      where: { id, churchId, ...PUBLICADA },
       select: {
         ...CAMPOS,
         interests: {
@@ -237,7 +275,7 @@ export class OportunidadesService {
   ) {
     const churchId = await this.igrejaDoMembro(userId);
     const vaga = await this.prisma.opportunity.findFirst({
-      where: { id, churchId },
+      where: { id, churchId, ...PUBLICADA },
       select: {
         isOpen: true,
         closesAt: true,
@@ -319,7 +357,7 @@ export class OportunidadesService {
   }
 
   // ponytail: candidaturas vêm junto da lista; separar em rota própria se as vagas passarem de centenas
-  /** As vagas da igreja, abertas e encerradas, com as candidaturas */
+  /** As vagas da igreja, de todas as situações, com as candidaturas */
   async daIgreja(churchId: string) {
     const vagas = await this.prisma.opportunity.findMany({
       where: { churchId },
@@ -341,22 +379,64 @@ export class OportunidadesService {
     return dados;
   }
 
-  async criar(churchId: string, userId: string, dto: CriarOportunidadeDto) {
-    const data: DadosDaVaga = {
-      formulario: formularioPadrao(),
-      ...this.dadosDoDto(dto),
+  /** O que vai para as colunas, de um DTO de criação (admin ou proposta) */
+  private colunasDaCriacao(dto: CriarOportunidadeDto) {
+    return {
+      title: dto.titulo.trim(),
+      company: dto.empresa.trim(),
+      description: descricaoLimpa(dto.descricao),
+      location: dto.local?.trim() || null,
+      closesAt: dto.encerraEm ? fimDoDia(dto.encerraEm) : null,
+      data: {
+        formulario: formularioPadrao(),
+        ...this.dadosDoDto(dto),
+      } as unknown as Prisma.InputJsonObject,
     };
+  }
+
+  /**
+   * O que muda numa edição parcial: campo ausente não muda; `local` vazio
+   * apaga; `encerraEm`/`salario` nulos tiram o prazo e o salário. O
+   * formulário vem inteiro e substitui o anterior — as candidaturas já feitas
+   * guardam a cópia do que responderam. `aberta` só vale para o admin.
+   */
+  private colunasDaEdicao(
+    dto: AtualizarOportunidadeDto,
+    dadosAtuais: Prisma.JsonValue,
+    comAberta: boolean,
+  ): Prisma.OpportunityUpdateManyMutationInput {
+    const novos = this.dadosDoDto(dto);
+    return {
+      ...(dto.titulo !== undefined && { title: dto.titulo.trim() }),
+      ...(dto.empresa !== undefined && { company: dto.empresa.trim() }),
+      ...(dto.descricao !== undefined && {
+        description: descricaoLimpa(dto.descricao),
+      }),
+      ...(dto.local !== undefined && {
+        location: dto.local?.trim() || null,
+      }),
+      ...(comAberta && dto.aberta !== undefined && { isOpen: dto.aberta }),
+      ...(dto.encerraEm !== undefined && {
+        closesAt: dto.encerraEm ? fimDoDia(dto.encerraEm) : null,
+      }),
+      ...(Object.keys(novos).length > 0 && {
+        data: {
+          ...dadosDa(dadosAtuais),
+          ...novos,
+        } as unknown as Prisma.InputJsonObject,
+      }),
+    };
+  }
+
+  /** A vaga do admin já nasce aprovada: ele é quem aprova */
+  async criar(churchId: string, userId: string, dto: CriarOportunidadeDto) {
     const vaga = await this.prisma.opportunity.create({
       data: {
         churchId,
         createdById: userId,
-        title: dto.titulo.trim(),
-        company: dto.empresa.trim(),
-        description: dto.descricao.trim(),
-        location: dto.local?.trim() || null,
+        status: OpportunityStatus.APPROVED,
         isOpen: dto.aberta ?? true,
-        closesAt: dto.encerraEm ? fimDoDia(dto.encerraEm) : null,
-        data: data as unknown as Prisma.InputJsonObject,
+        ...this.colunasDaCriacao(dto),
       },
       select: CAMPOS_DA_IGREJA,
     });
@@ -377,11 +457,7 @@ export class OportunidadesService {
     return vaga;
   }
 
-  /**
-   * Campo ausente não muda; `local` vazio apaga; `encerraEm`/`salario` nulos
-   * tiram o prazo e o salário. O formulário vem inteiro e substitui o
-   * anterior — as candidaturas já feitas guardam a cópia do que responderam.
-   */
+  /** O admin edita qualquer vaga da igreja, inclusive a proposta pendente */
   async atualizar(
     churchId: string,
     id: string,
@@ -389,35 +465,237 @@ export class OportunidadesService {
     quemFez?: string,
   ) {
     const atual = await this.daIgrejaOu404(churchId, id);
-    const novos = this.dadosDoDto(dto);
-    const mudouDados = Object.keys(novos).length > 0;
     const vaga = await this.prisma.opportunity.update({
       where: { id },
-      data: {
-        ...(dto.titulo !== undefined && { title: dto.titulo.trim() }),
-        ...(dto.empresa !== undefined && { company: dto.empresa.trim() }),
-        ...(dto.descricao !== undefined && {
-          description: dto.descricao.trim(),
-        }),
-        ...(dto.local !== undefined && {
-          location: dto.local?.trim() || null,
-        }),
-        ...(dto.aberta !== undefined && { isOpen: dto.aberta }),
-        ...(dto.encerraEm !== undefined && {
-          closesAt: dto.encerraEm ? fimDoDia(dto.encerraEm) : null,
-        }),
-        ...(mudouDados && {
-          data: {
-            ...dadosDa(atual.data),
-            ...novos,
-          } as unknown as Prisma.InputJsonObject,
-        }),
-      },
+      data: this.colunasDaEdicao(dto, atual.data, true),
       select: CAMPOS_DA_IGREJA,
     });
     // publicada encerrada e aberta agora: é aí que os membros ficam sabendo
+    // (proposta pendente não avisa: `notificarOportunidade` só olha aprovada)
     if (dto.aberta) await notificarOportunidade(this.prisma, id, quemFez);
     return paraOPainel(vaga);
+  }
+
+  /**
+   * Aprova a proposta: vai ao ar para os membros. Só sai de pendente, e numa
+   * instrução só (`updateMany` com a situação no `where`): dois admins
+   * decidindo ao mesmo tempo, ou quem propôs editando enquanto isso, não se
+   * atropelam — quem chega depois leva 409.
+   */
+  async aprovar(churchId: string, id: string, quemFez: string) {
+    await this.decidir(churchId, id, quemFez, {
+      status: OpportunityStatus.APPROVED,
+      rejectionReason: null,
+      isOpen: true,
+    });
+    await notificarOportunidade(this.prisma, id, quemFez);
+    return this.daIgrejaUma(churchId, id);
+  }
+
+  /** Recusa a proposta: fica arquivada no painel; quem propôs vê o motivo */
+  async recusar(
+    churchId: string,
+    id: string,
+    quemFez: string,
+    motivo?: string,
+  ) {
+    await this.decidir(churchId, id, quemFez, {
+      status: OpportunityStatus.REJECTED,
+      rejectionReason: motivo?.trim() || null,
+    });
+    return this.daIgrejaUma(churchId, id);
+  }
+
+  private async decidir(
+    churchId: string,
+    id: string,
+    quemFez: string,
+    data: Prisma.OpportunityUpdateManyMutationInput,
+  ) {
+    await this.daIgrejaOu404(churchId, id);
+    const { count } = await this.prisma.opportunity.updateMany({
+      where: { id, churchId, status: OpportunityStatus.PENDING },
+      data: { ...data, reviewedById: quemFez, reviewedAt: new Date() },
+    });
+    if (!count) {
+      throw new ConflictException('Esta proposta já foi decidida');
+    }
+    await encerrarPropostaDeOportunidade(this.prisma, id);
+    await notificarRespostaDaProposta(this.prisma, id, quemFez);
+  }
+
+  private async daIgrejaUma(churchId: string, id: string) {
+    const vaga = await this.prisma.opportunity.findFirst({
+      where: { id, churchId },
+      select: CAMPOS_DA_IGREJA,
+    });
+    return paraOPainel(vaga);
+  }
+
+  // ---- propostas dos membros ----------------------------------------------
+
+  /**
+   * As propostas da pessoa na igreja de que ela é membro agora. A aprovada
+   * vem com os candidatos (quem propôs os vê, como o admin); a pendente e a
+   * recusada, sem. Proposta feita em outra igreja (antes de mudar) não
+   * aparece: o acesso é pela igreja de agora.
+   */
+  async minhasPropostas(userId: string) {
+    const churchId = await this.igrejaDoMembro(userId);
+    const vagas = await this.prisma.opportunity.findMany({
+      where: { churchId, proposedById: userId },
+      orderBy: { createdAt: 'desc' },
+      select: CAMPOS_DA_IGREJA,
+    });
+    return vagas.map((v) =>
+      paraOPainel(
+        v.status === OpportunityStatus.APPROVED ? v : { ...v, interests: [] },
+      ),
+    );
+  }
+
+  /**
+   * Um membro propõe uma vaga: vai para a igreja do cadastro dele (nunca uma
+   * vinda da requisição), pendente, e os admins são avisados. Até
+   * `LIMITE_DE_PENDENTES` esperando ao mesmo tempo, para ninguém encher a
+   * fila do admin.
+   */
+  async propor(userId: string, dto: CriarOportunidadeDto) {
+    const churchId = await this.igrejaDoMembro(userId);
+    const pendentes = await this.prisma.opportunity.count({
+      where: {
+        churchId,
+        proposedById: userId,
+        status: OpportunityStatus.PENDING,
+      },
+    });
+    if (pendentes >= LIMITE_DE_PENDENTES) {
+      throw new ConflictException(
+        `Você já tem ${LIMITE_DE_PENDENTES} propostas esperando o admin. Aguarde a resposta de alguma.`,
+      );
+    }
+    const vaga = await this.prisma.opportunity.create({
+      data: {
+        churchId,
+        createdById: userId,
+        proposedById: userId,
+        status: OpportunityStatus.PENDING,
+        isOpen: true,
+        ...this.colunasDaCriacao(dto),
+      },
+      select: CAMPOS_DA_IGREJA,
+    });
+    await notificarPropostaDeOportunidade(this.prisma, vaga.id);
+    return paraOPainel({ ...vaga, interests: [] });
+  }
+
+  /**
+   * A proposta da própria pessoa, nesta igreja, na situação pedida. De outra
+   * pessoa ou de outra igreja é 404; na situação errada (já decidida), 409.
+   */
+  private async minhaProposta(
+    userId: string,
+    id: string,
+    status: OpportunityStatus,
+  ) {
+    const churchId = await this.igrejaDoMembro(userId);
+    const vaga = await this.prisma.opportunity.findFirst({
+      where: { id, churchId, proposedById: userId },
+      select: { id: true, data: true, status: true, churchId: true },
+    });
+    if (!vaga) throw new NotFoundException('Proposta não encontrada');
+    if (vaga.status !== status) {
+      throw new ConflictException(
+        status === OpportunityStatus.PENDING
+          ? 'Esta proposta já foi decidida pelo admin'
+          : 'Esta proposta não foi aprovada',
+      );
+    }
+    return vaga;
+  }
+
+  /**
+   * Quem propôs edita enquanto está pendente. A situação vai no `where` da
+   * gravação: se o admin decidiu no meio, nada muda e a pessoa leva 409.
+   */
+  async editarProposta(
+    userId: string,
+    id: string,
+    dto: AtualizarOportunidadeDto,
+  ) {
+    const atual = await this.minhaProposta(
+      userId,
+      id,
+      OpportunityStatus.PENDING,
+    );
+    const { count } = await this.prisma.opportunity.updateMany({
+      where: { id, proposedById: userId, status: OpportunityStatus.PENDING },
+      data: this.colunasDaEdicao(dto, atual.data, false),
+    });
+    if (!count) {
+      throw new ConflictException('Esta proposta já foi decidida pelo admin');
+    }
+    const vaga = await this.prisma.opportunity.findUnique({
+      where: { id },
+      select: CAMPOS_DA_IGREJA,
+    });
+    return paraOPainel({ ...vaga, interests: [] });
+  }
+
+  /** Retira a proposta pendente: some do painel, com a imagem */
+  async retirarProposta(userId: string, id: string) {
+    await this.minhaProposta(userId, id, OpportunityStatus.PENDING);
+    const { count } = await this.prisma.opportunity.deleteMany({
+      where: { id, proposedById: userId, status: OpportunityStatus.PENDING },
+    });
+    if (!count) {
+      throw new ConflictException('Esta proposta já foi decidida pelo admin');
+    }
+    await encerrarPropostaDeOportunidade(this.prisma, id);
+    await this.apagar([caminhoDaImagem(id)]);
+  }
+
+  async trocarImagemDaProposta(
+    userId: string,
+    id: string,
+    file: Express.Multer.File,
+    cor?: string,
+  ) {
+    const vaga = await this.minhaProposta(
+      userId,
+      id,
+      OpportunityStatus.PENDING,
+    );
+    return this.gravarImagem(vaga, file, cor);
+  }
+
+  async removerImagemDaProposta(userId: string, id: string) {
+    const vaga = await this.minhaProposta(
+      userId,
+      id,
+      OpportunityStatus.PENDING,
+    );
+    return this.tirarImagem(vaga);
+  }
+
+  /**
+   * Quem propôs acompanha os candidatos da vaga dele (aprovada), com as
+   * mesmas regras de ver os candidatos: membro desta igreja, com o módulo.
+   */
+  async acompanharNaProposta(
+    userId: string,
+    id: string,
+    candidatoId: string,
+    dto: AcompanharCandidaturaDto,
+  ) {
+    await this.minhaProposta(userId, id, OpportunityStatus.APPROVED);
+    return this.acompanhar(id, candidatoId, dto);
+  }
+
+  /** O currículo de um candidato, para quem propôs a vaga (aprovada) */
+  async curriculoDaProposta(userId: string, id: string, candidatoId: string) {
+    await this.minhaProposta(userId, id, OpportunityStatus.APPROVED);
+    return this.lerCurriculo(id, candidatoId);
   }
 
   /**
@@ -431,15 +709,27 @@ export class OportunidadesService {
     file: Express.Multer.File,
     cor?: string,
   ) {
-    const atual = await this.daIgrejaOu404(churchId, id);
+    return this.gravarImagem(await this.daIgrejaOu404(churchId, id), file, cor);
+  }
+
+  async removerImagem(churchId: string, id: string) {
+    return this.tirarImagem(await this.daIgrejaOu404(churchId, id));
+  }
+
+  /** Grava a imagem de uma vaga já conferida (do admin ou de quem propôs) */
+  private async gravarImagem(
+    vaga: { id: string; data: Prisma.JsonValue },
+    file: Express.Multer.File,
+    cor?: string,
+  ) {
     if (!file) throw new BadRequestException('Envie a imagem');
     resolveImageExtension(file);
-    const { url } = await uploadImageFirebase(file, caminhoDaImagem(id));
+    const { url } = await uploadImageFirebase(file, caminhoDaImagem(vaga.id));
     await this.prisma.opportunity.update({
-      where: { id },
+      where: { id: vaga.id },
       data: {
         data: {
-          ...dadosDa(atual.data),
+          ...dadosDa(vaga.data),
           imagemUrl: url,
           cor: /^#[0-9a-f]{6}$/i.test(cor ?? '')
             ? cor.toLowerCase()
@@ -450,21 +740,66 @@ export class OportunidadesService {
     return { imagemUrl: url };
   }
 
-  async removerImagem(churchId: string, id: string) {
-    const atual = await this.daIgrejaOu404(churchId, id);
+  private async tirarImagem(vaga: { id: string; data: Prisma.JsonValue }) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- a cor vai junto com a imagem
-    const { imagemUrl, cor, ...resto } = dadosDa(atual.data);
+    const { imagemUrl, cor, ...resto } = dadosDa(vaga.data);
     await this.prisma.opportunity.update({
-      where: { id },
+      where: { id: vaga.id },
       data: { data: resto as unknown as Prisma.InputJsonObject },
     });
-    if (imagemUrl) await this.apagar([caminhoDaImagem(id)]);
+    if (imagemUrl) await this.apagar([caminhoDaImagem(vaga.id)]);
     return { imagemUrl: null };
+  }
+
+  /** O admin acompanha os candidatos de uma vaga da igreja dele */
+  async acompanharNoPainel(
+    churchId: string,
+    id: string,
+    candidatoId: string,
+    dto: AcompanharCandidaturaDto,
+  ) {
+    await this.daIgrejaOu404(churchId, id);
+    return this.acompanhar(id, candidatoId, dto);
+  }
+
+  /**
+   * A etapa e a anotação de uma candidatura desta vaga (a vaga já foi
+   * conferida por quem chama). Campo ausente não muda; nota vazia apaga.
+   */
+  private async acompanhar(
+    id: string,
+    candidatoId: string,
+    dto: AcompanharCandidaturaDto,
+  ) {
+    try {
+      const c = await this.prisma.opportunityInterest.update({
+        where: {
+          opportunityId_userId: { opportunityId: id, userId: candidatoId },
+        },
+        data: {
+          ...(dto.etapa !== undefined && { stage: dto.etapa }),
+          ...(dto.nota !== undefined && { note: dto.nota.trim() || null }),
+          trackedAt: new Date(),
+        },
+        select: { stage: true, note: true, trackedAt: true },
+      });
+      return c;
+    } catch (erro) {
+      // a candidatura foi retirada no meio, ou nunca foi desta vaga
+      if (erro?.code === 'P2025') {
+        throw new NotFoundException('Candidatura não encontrada');
+      }
+      throw erro;
+    }
   }
 
   /** O currículo de um candidato, para o admin da igreja da vaga */
   async curriculo(churchId: string, id: string, userId: string) {
     await this.daIgrejaOu404(churchId, id);
+    return this.lerCurriculo(id, userId);
+  }
+
+  private async lerCurriculo(id: string, userId: string) {
     const candidatura = await this.prisma.opportunityInterest.findUnique({
       where: { opportunityId_userId: { opportunityId: id, userId } },
       select: { answers: true },
@@ -488,6 +823,7 @@ export class OportunidadesService {
       select: { answers: true },
     });
     await this.prisma.opportunity.delete({ where: { id } });
+    await encerrarPropostaDeOportunidade(this.prisma, id);
     await this.apagar([
       caminhoDaImagem(id),
       ...caminhosDosCurriculos(candidaturas),
@@ -507,6 +843,13 @@ export class OportunidadesService {
 }
 
 const caminhoDaImagem = (id: string) => `oportunidades/${id}/imagem`;
+
+/** A descrição limpa (ver `descricao.ts`); vazia depois de limpar é recusada */
+function descricaoLimpa(html: string) {
+  const limpa = limparDescricao(html);
+  if (!temTexto(limpa)) throw new BadRequestException('Descreva a vaga');
+  return limpa;
+}
 
 function conferirCurriculo(file: Express.Multer.File) {
   // o mime vem do cliente: confere também a assinatura do PDF

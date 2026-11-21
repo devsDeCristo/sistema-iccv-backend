@@ -5,6 +5,7 @@ import {
   ChurchStatus,
   EventStatus,
   NotificationType,
+  OpportunityStatus,
   PrismaClient,
 } from '@prisma/client';
 import { Role } from 'src/auth/roles';
@@ -416,13 +417,16 @@ export const notificarOportunidade = (
         title: true,
         company: true,
         isOpen: true,
+        status: true,
+        proposedById: true,
         churchId: true,
         church: {
           select: { status: true, plan: { select: { modules: true } } },
         },
       },
     });
-    if (!o?.isOpen) return;
+    // proposta pendente ou recusada não está no ar: só a aprovada avisa
+    if (!o?.isOpen || o.status !== OpportunityStatus.APPROVED) return;
     // o super admin publica em qualquer igreja (o plano não vale para ele):
     // sem o módulo, ou com a igreja desativada, o membro não abriria a vaga —
     // o aviso levaria a uma tela que diz que a igreja não divulga vagas
@@ -441,7 +445,101 @@ export const notificarOportunidade = (
         body: `${o.title} · ${o.company}`,
         churchId: o.churchId,
       },
-      await publicoDa(prisma, o.churchId),
+      // quem propôs já recebe "proposta aprovada": não leva o aviso em dobro
+      (
+        await publicoDa(prisma, o.churchId)
+      ).filter((id) => id !== o.proposedById),
+      quemFez,
+    );
+  });
+
+/**
+ * Um membro propôs uma vaga: avisa os admins da igreja da proposta, que
+ * aprovam ou recusam no painel. Uma vez por proposta.
+ */
+export const notificarPropostaDeOportunidade = (
+  prisma: Prisma,
+  opportunityId: string,
+) =>
+  seguro(`proposta de oportunidade ${opportunityId}`, async () => {
+    const o = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      select: {
+        title: true,
+        churchId: true,
+        proposedById: true,
+        proposedBy: { select: { fullName: true } },
+      },
+    });
+    if (!o?.proposedById) return;
+    await notificar(
+      prisma,
+      {
+        type: NotificationType.OPPORTUNITY_PROPOSAL,
+        sourceId: opportunityId,
+        title: 'Nova proposta de vaga',
+        body: `${o.proposedBy?.fullName}: ${o.title}`,
+        churchId: o.churchId,
+      },
+      await vinculadosDa(prisma, o.churchId),
+      o.proposedById,
+    );
+  });
+
+/**
+ * A proposta saiu da fila (aprovada, recusada, retirada ou apagada): o aviso
+ * some do sininho dos admins, que levaria a uma aba onde ela já não está.
+ */
+export const encerrarPropostaDeOportunidade = (
+  prisma: Prisma,
+  opportunityId: string,
+) =>
+  seguro(`fim da proposta ${opportunityId}`, async () => {
+    await prisma.notificationRecipient.deleteMany({
+      where: {
+        notification: {
+          type: NotificationType.OPPORTUNITY_PROPOSAL,
+          sourceId: opportunityId,
+        },
+      },
+    });
+  });
+
+/** O admin aprovou ou recusou a proposta: avisa quem propôs */
+export const notificarRespostaDaProposta = (
+  prisma: Prisma,
+  opportunityId: string,
+  quemFez?: string,
+) =>
+  seguro(`resposta da proposta ${opportunityId}`, async () => {
+    const o = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      select: {
+        title: true,
+        status: true,
+        churchId: true,
+        proposedById: true,
+        rejectionReason: true,
+      },
+    });
+    if (!o?.proposedById || o.status === OpportunityStatus.PENDING) return;
+    const aprovada = o.status === OpportunityStatus.APPROVED;
+    await notificar(
+      prisma,
+      {
+        type: NotificationType.OPPORTUNITY_PROPOSAL_ANSWERED,
+        sourceId: `${opportunityId}:${o.status}`,
+        title: aprovada
+          ? 'Proposta de vaga aprovada'
+          : 'Proposta de vaga recusada',
+        body: aprovada
+          ? `${o.title} está no ar para os membros`
+          : o.rejectionReason
+          ? `${o.title} — ${o.rejectionReason}`
+          : o.title,
+        churchId: o.churchId,
+      },
+      [o.proposedById],
       quemFez,
     );
   });
