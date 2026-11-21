@@ -16,6 +16,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -75,6 +76,17 @@ export class CriarSolicitacaoDto {
   @ApiProperty({ enum: MINISTERIOS, example: 'Louvor' })
   @IsIn(MINISTERIOS, { message: 'Escolha o ministério que está pedindo' })
   ministerio: string;
+
+  @ApiPropertyOptional({
+    description: 'Com "Outro": qual é o ministério. Ignorado nos demais',
+    example: 'Teatro',
+  })
+  @ValidateIf((dto) => dto.ministerio === 'Outro')
+  @Aparar()
+  @IsString({ message: 'Diga qual é o ministério' })
+  @IsNotEmpty({ message: 'Diga qual é o ministério' })
+  @MaxLength(60)
+  ministerioOutro?: string;
 
   @ApiProperty({ example: 'Microfones para o culto jovem' })
   @Aparar()
@@ -151,4 +163,58 @@ export class DecidirDto {
   @IsString()
   @MaxLength(1000)
   resposta?: string;
+}
+
+/**
+ * As abas do painel: as situações agrupadas por etapa do trâmite. A tela tem
+ * as mesmas (`ETAPAS` em `src/features/solicitacoes/constants.ts`, no
+ * `ic-front`).
+ */
+export const ETAPAS: Record<string, ChurchRequestStatus[]> = {
+  novas: [ChurchRequestStatus.REQUESTED, ChurchRequestStatus.IN_REVIEW],
+  'em-aprovacao': [
+    ChurchRequestStatus.AWAITING_TREASURY,
+    ChurchRequestStatus.AWAITING_PASTOR,
+  ],
+  aceitas: [
+    ChurchRequestStatus.ACCEPTED,
+    ChurchRequestStatus.PARTIALLY_ACCEPTED,
+  ],
+  recusadas: [ChurchRequestStatus.REJECTED],
+};
+
+/** "Sua vez": o que espera a decisão de quem está logado (pastor ou tesouraria) */
+export const SUA_VEZ = 'sua-vez';
+
+/** A lista do painel, paginada, as novas primeiro */
+export class ListarSolicitacoesDto {
+  @ApiPropertyOptional({ enum: [...Object.keys(ETAPAS), SUA_VEZ] })
+  @IsOptional()
+  @IsIn([...Object.keys(ETAPAS), SUA_VEZ])
+  etapa?: string;
+
+  @ApiPropertyOptional({ enum: MINISTERIOS })
+  @IsOptional()
+  @IsIn(MINISTERIOS)
+  ministerio?: string;
+
+  @ApiPropertyOptional({ enum: ['desc', 'asc'], default: 'desc' })
+  @IsOptional()
+  @IsIn(['desc', 'asc'])
+  ordem?: 'desc' | 'asc';
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 25, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }

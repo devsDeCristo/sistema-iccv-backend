@@ -9,6 +9,7 @@ import {
   ChurchModule,
   ChurchRequestStatus,
   ChurchStatus,
+  Prisma,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Role } from 'src/auth/roles';
@@ -21,12 +22,16 @@ import {
 import {
   CriarSolicitacaoDto,
   DecidirDto,
+  ETAPAS,
+  ListarSolicitacoesDto,
   MudarStatusDto,
+  SUA_VEZ,
 } from './solicitacoes.dto';
 
 const CAMPOS = {
   id: true,
   ministry: true,
+  ministryOther: true,
   title: true,
   description: true,
   status: true,
@@ -136,6 +141,8 @@ export class SolicitacoesService {
         churchId: igreja.id,
         requesterId: userId,
         ministry: dto.ministerio,
+        ministryOther:
+          dto.ministerio === 'Outro' ? dto.ministerioOutro ?? null : null,
         title: dto.titulo.trim(),
         description: dto.descricao.trim(),
         items: {
@@ -153,13 +160,75 @@ export class SolicitacoesService {
     return criada;
   }
 
-  /** As solicitações da igreja, com quem pediu e as decisões, as novas primeiro */
-  daIgreja(churchId: string) {
-    return this.prisma.churchRequest.findMany({
-      where: { churchId },
-      orderBy: { createdAt: 'desc' },
-      select: CAMPOS_DA_IGREJA,
-    });
+  /**
+   * As solicitações da igreja, com quem pediu e as decisões: uma página, as
+   * novas primeiro (ou as antigas, `ordem: 'asc'`), da etapa e do ministério
+   * pedidos. Junto, as contagens de cada aba, no mesmo filtro de ministério —
+   * "Sua vez" é o que espera a decisão de quem está logado (`papel`).
+   */
+  async daIgreja(
+    churchId: string,
+    userId: string,
+    dto: ListarSolicitacoesDto = {},
+  ) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 25;
+    const { lado } = await this.papel(churchId, userId);
+
+    const base: Prisma.ChurchRequestWhereInput = {
+      churchId,
+      ...(dto.ministerio && { ministry: dto.ministerio }),
+    };
+    // em aberto, e o lado de quem está logado ainda não decidiu
+    const daVez: Prisma.ChurchRequestWhereInput | null = lado
+      ? {
+          ...base,
+          status: { notIn: DECIDIDA },
+          ...(lado === 'PASTOR'
+            ? { pastorDecision: null }
+            : { treasuryDecision: null }),
+        }
+      : null;
+    const where: Prisma.ChurchRequestWhereInput =
+      dto.etapa === SUA_VEZ
+        ? daVez ?? { id: { in: [] } }
+        : dto.etapa
+        ? { ...base, status: { in: ETAPAS[dto.etapa] } }
+        : base;
+
+    const [items, total, porSituacao, suaVez] = await Promise.all([
+      this.prisma.churchRequest.findMany({
+        where,
+        orderBy: { createdAt: dto.ordem ?? 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: CAMPOS_DA_IGREJA,
+      }),
+      this.prisma.churchRequest.count({ where }),
+      this.prisma.churchRequest.groupBy({
+        by: ['status'],
+        where: base,
+        _count: { _all: true },
+      }),
+      daVez ? this.prisma.churchRequest.count({ where: daVez }) : 0,
+    ]);
+
+    const contar = (situacoes: ChurchRequestStatus[]) =>
+      porSituacao
+        .filter((grupo) => situacoes.includes(grupo.status))
+        .reduce((soma, grupo) => soma + grupo._count._all, 0);
+    const contagens = {
+      todas: contar(Object.values(ChurchRequestStatus)),
+      ...Object.fromEntries(
+        Object.entries(ETAPAS).map(([etapa, situacoes]) => [
+          etapa,
+          contar(situacoes),
+        ]),
+      ),
+      [SUA_VEZ]: suaVez,
+    };
+
+    return { items, total, page, limit, contagens };
   }
 
   /**

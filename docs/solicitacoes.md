@@ -21,7 +21,10 @@ existem.
 - **Ministério:** um da lista fixa `MINISTERIOS` (`solicitacoes.dto.ts`):
   Louvor, Mídia, Som e iluminação, Infantil, Jovens, Recepção, Intercessão,
   Ação social, Diaconia, Ensino, Casais e Outro. Fica como texto no banco, para
-  a lista crescer sem migração; a tela tem a mesma lista.
+  a lista crescer sem migração; a tela tem a mesma lista. Com "Outro", a
+  pessoa diz qual é (`ministerioOutro`, obrigatório, até 60): vai para
+  `ministryOther`, e `ministry` segue "Outro" — é por ele que o painel
+  filtra (desde 21/11/2026).
 - **Produtos:** de 1 a 20 por pedido, cada um com nome (até 120), quantidade
   (1 a 999) e link opcional, na ordem em que a pessoa listou (`position`).
 - **Link do produto:** opcional, até 500 caracteres, só `http://` ou
@@ -110,7 +113,7 @@ módulo Tesouraria.
 | --- | --- | --- | --- |
 | `GET` | `/solicitacoes/minhas` | qualquer logado | as solicitações da pessoa, com a igreja |
 | `POST` | `/solicitacoes` | membro de uma igreja com o módulo | `{ ministerio, titulo, descricao, produtos: [{ nome, quantidade, link? }] }` |
-| `GET` | `/churches/:churchId/solicitacoes` | admin ou tesouraria da igreja | as solicitações da igreja, com quem pediu |
+| `GET` | `/churches/:churchId/solicitacoes` | admin ou tesouraria da igreja | `?etapa=&ministerio=&ordem=&page=&limit=` → `{ items, total, page, limit, contagens }`: uma página (25 por padrão, até 100), as novas primeiro. `etapa`: `novas`, `em-aprovacao`, `aceitas`, `recusadas` ou `sua-vez` (em aberto e sem a decisão do lado de quem está logado). `contagens`: `todas`, cada etapa e `sua-vez`, no filtro de ministério |
 | `GET` | `/churches/:churchId/solicitacoes/papel` | admin ou tesouraria da igreja | `{ lado: 'PASTOR' \| 'TESOURARIA' \| null, temPastor, temTesouraria, exigeTesouraria }` — como quem está logado decide aqui |
 | `PATCH` | `/churches/:churchId/solicitacoes/:id/status` | admin ou tesouraria da igreja | `{ status?, resposta? }` — `status` só `REQUESTED` ou `IN_REVIEW`, e só antes de qualquer decisão |
 | `POST` | `/churches/:churchId/solicitacoes/:id/decisao` | o pastor ou a tesouraria da igreja | `{ aprova, produtosAceitos?, resposta? }` — `resposta` obrigatória para recusar |

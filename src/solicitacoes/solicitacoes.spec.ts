@@ -70,6 +70,20 @@ describe('SolicitacoesService', () => {
     ]);
   });
 
+  it('"Outro" grava qual é o ministério; os demais, não', async () => {
+    const { service, criadas } = montar();
+    await service.criar('membro-1', {
+      ...pedido,
+      ministerio: 'Outro',
+      ministerioOutro: 'Teatro',
+    });
+    await service.criar('membro-1', { ...pedido, ministerioOutro: 'Teatro' });
+    expect(criadas.map((c) => [c.ministry, c.ministryOther])).toEqual([
+      ['Outro', 'Teatro'],
+      ['Louvor', null],
+    ]);
+  });
+
   it('quem não é membro de nenhuma igreja não pede', async () => {
     const { service, criadas } = montar({ igrejaDoMembro: null });
     await expect(service.criar('u1', pedido)).rejects.toMatchObject({
@@ -439,6 +453,93 @@ describe('SolicitacoesService.mudarStatus — o que o admin faz à mão', () => 
   });
 });
 
+describe('SolicitacoesService.daIgreja — a lista paginada do painel', () => {
+  function montarLista(lider = 'pastor-1') {
+    const churchRequest = {
+      findMany: jest.fn<Promise<any>, [any]>(async () => [{ id: 'sol-1' }]),
+      count: jest.fn(async () => 7),
+      groupBy: jest.fn<Promise<any>, [any]>(async () => [
+        { status: 'REQUESTED', _count: { _all: 2 } },
+        { status: 'IN_REVIEW', _count: { _all: 1 } },
+        { status: 'AWAITING_TREASURY', _count: { _all: 3 } },
+        { status: 'REJECTED', _count: { _all: 4 } },
+      ]),
+    };
+    const prisma = {
+      church: {
+        findUnique: jest.fn(async () => ({
+          spiritualLeaderId: lider,
+          plan: { modules: [ChurchModule.REQUESTS] },
+        })),
+      },
+      userChurchRole: { findMany: jest.fn(async () => []) },
+      churchRequest,
+    };
+    return { service: new SolicitacoesService(prisma as any), churchRequest };
+  }
+
+  it('pagina, filtra pela etapa e pelo ministério, e conta as abas', async () => {
+    const { service, churchRequest } = montarLista();
+    const lista = await service.daIgreja('igreja-1', 'pastor-1', {
+      etapa: 'novas',
+      ministerio: 'Louvor',
+      page: 3,
+      limit: 10,
+    });
+    expect(churchRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          churchId: 'igreja-1',
+          ministry: 'Louvor',
+          status: { in: ['REQUESTED', 'IN_REVIEW'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: 20,
+        take: 10,
+      }),
+    );
+    // as contagens ignoram a etapa, mas seguem o filtro de ministério
+    expect(churchRequest.groupBy.mock.calls[0][0].where).toEqual({
+      churchId: 'igreja-1',
+      ministry: 'Louvor',
+    });
+    expect(lista).toMatchObject({
+      total: 7,
+      page: 3,
+      limit: 10,
+      contagens: {
+        todas: 10,
+        novas: 3,
+        'em-aprovacao': 3,
+        aceitas: 0,
+        recusadas: 4,
+        'sua-vez': 7,
+      },
+    });
+  });
+
+  it('"Sua vez" do pastor: em aberto e sem a decisão dele', async () => {
+    const { service, churchRequest } = montarLista();
+    await service.daIgreja('igreja-1', 'pastor-1', { etapa: 'sua-vez' });
+    expect(churchRequest.findMany.mock.calls[0][0].where).toEqual({
+      churchId: 'igreja-1',
+      status: { notIn: ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'REJECTED'] },
+      pastorDecision: null,
+    });
+  });
+
+  it('quem não decide não tem vez', async () => {
+    const { service, churchRequest } = montarLista();
+    const lista = await service.daIgreja('igreja-1', 'admin-1', {
+      etapa: 'sua-vez',
+    });
+    expect(churchRequest.findMany.mock.calls[0][0].where).toEqual({
+      id: { in: [] },
+    });
+    expect(lista.contagens['sua-vez']).toBe(0);
+  });
+});
+
 describe('CriarSolicitacaoDto', () => {
   const erros = (dados: any) =>
     validate(plainToInstance(CriarSolicitacaoDto, dados)).then((lista) =>
@@ -454,6 +555,22 @@ describe('CriarSolicitacaoDto', () => {
         produtos: [{ nome: '  ', quantidade: 1 }],
       }),
     ).toEqual(expect.arrayContaining(['titulo', 'descricao', 'produtos']));
+  });
+
+  it('com "Outro", pede qual é o ministério', async () => {
+    expect(await erros({ ...pedido, ministerio: 'Outro' })).toEqual([
+      'ministerioOutro',
+    ]);
+    expect(
+      await erros({ ...pedido, ministerio: 'Outro', ministerioOutro: '  ' }),
+    ).toEqual(['ministerioOutro']);
+    expect(
+      await erros({
+        ...pedido,
+        ministerio: 'Outro',
+        ministerioOutro: 'Teatro',
+      }),
+    ).toEqual([]);
   });
 
   it('apara as pontas e aceita o pedido', async () => {

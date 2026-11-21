@@ -1672,18 +1672,21 @@ enum ChurchRequestStatus {
 /// (`User.memberChurchId`), nunca uma escolhida no pedido. Se ela sair da
 /// igreja depois, o pedido fica com a igreja a que foi feito.
 model ChurchRequest {
-  id          String              @id @default(uuid())
-  churchId    String
-  requesterId String
+  id            String              @id @default(uuid())
+  churchId      String
+  requesterId   String
   /// O ministério que pede, de uma lista fixa (`MINISTERIOS` em
   /// `src/solicitacoes`): é texto, e não enum, para a lista crescer sem
   /// migração
-  ministry    String
-  title       String
-  description String
-  status      ChurchRequestStatus @default(REQUESTED)
+  ministry      String
+  /// Com "Outro": qual é o ministério (o teatro, a dança). Nulo nos demais;
+  /// `ministry` segue "Outro", e é por ele que o painel filtra
+  ministryOther String?
+  title         String
+  description   String
+  status        ChurchRequestStatus @default(REQUESTED)
   /// O que o admin respondeu: o motivo do indeferimento, o prazo da compra
-  response    String?
+  response      String?
 
   /// A decisão do pastor: nula enquanto ele não decidiu; `true` aprovou (os
   /// produtos que ele aprovou ficam em `ChurchRequestItem.pastorAccepted`),

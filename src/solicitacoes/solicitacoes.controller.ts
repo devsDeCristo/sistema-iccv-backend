@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +23,7 @@ import { SolicitacoesService } from './solicitacoes.service';
 import {
   CriarSolicitacaoDto,
   DecidirDto,
+  ListarSolicitacoesDto,
   MudarStatusDto,
 } from './solicitacoes.dto';
 
@@ -64,10 +66,17 @@ export class SolicitacoesController {
 export class SolicitacoesDaIgrejaController {
   constructor(private readonly service: SolicitacoesService) {}
 
-  @ApiOperation({ summary: 'As solicitações feitas à igreja' })
+  @ApiOperation({
+    summary:
+      'As solicitações feitas à igreja: uma página, com as contagens de cada aba',
+  })
   @Get()
-  listar(@Param('churchId') churchId: string) {
-    return this.service.daIgreja(churchId);
+  listar(
+    @Param('churchId') churchId: string,
+    @Query() dto: ListarSolicitacoesDto,
+    @Req() req: any,
+  ) {
+    return this.service.daIgreja(churchId, req.user.userId, dto);
   }
 
   @ApiOperation({
