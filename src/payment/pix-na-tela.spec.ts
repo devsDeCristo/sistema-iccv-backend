@@ -358,3 +358,24 @@ describe('lançamento manual não herda o gateway', () => {
     );
   });
 });
+
+describe('forma do pedido', () => {
+  // `formaDoPedido` decide também o reaproveitamento do checkout aberto: com
+  // "nenhuma forma", o Pix já gerado não casava e cada clique fazia outro QR
+  const { formaDoPedido } = jest.requireActual('./payment.service');
+
+  it('a pedida, quando é uma das oferecidas', () => {
+    const formas = [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD];
+    expect(formaDoPedido(formas, PaymentMethod.PIX)).toBe(PaymentMethod.PIX);
+    expect(formaDoPedido(formas, PaymentMethod.BOLETO)).toBeUndefined();
+    expect(formaDoPedido(formas)).toBeUndefined();
+  });
+
+  it('uma forma só é a forma do pedido, sem pergunta', () => {
+    expect(formaDoPedido([PaymentMethod.PIX])).toBe(PaymentMethod.PIX);
+  });
+
+  it('gateway sem escolha não tem forma', () => {
+    expect(formaDoPedido([], PaymentMethod.PIX)).toBeUndefined();
+  });
+});

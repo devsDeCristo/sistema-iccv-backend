@@ -68,8 +68,31 @@ no front nem em DTO nenhum. E a validação não pode divergir do formulário,
 porque as duas leem a mesma fonte.
 
 Um campo pode ser `toggle`: vira chave de liga/desliga na tela, vale `'true'`
-ou fica ausente, e o backend recusa qualquer outro valor. Hoje só o "Aceitar
-Pix" do PayPal.
+ou fica ausente, e o backend recusa qualquer outro valor. Hoje nenhum: o
+"Aceitar Pix" do PayPal virou o campo de formas.
+
+Dois tipos de campo decidem **o que o checkout oferece** e moram no cofre como
+os outros não-secretos (`src/gateways/core/opcoes-de-pagamento.ts`):
+
+- `methods` (chave `enabledMethods`): lista separada por vírgula, só com formas
+  que o gateway declarou — o salvar recusa o resto e repetição. Vazio é
+  **todas**: integração antiga continua oferecendo o que sempre ofereceu.
+- `installmentsMax` (chave `maxInstallments`): inteiro de 1 até o teto do
+  gateway (12 nos três). Vazio é o padrão do gateway.
+
+Como cada adapter traduz:
+
+| Gateway      | Formas                                                     | Parcelas                                                                 |
+| ------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Mercado Pago | `payment_methods.excluded_payment_types` com as desmarcadas (Pix é `bank_transfer`, boleto é `ticket`); saldo em conta não sai | `payment_methods.installments`                                           |
+| PagBank      | `payment_methods` só com as marcadas                       | `payment_methods_configs` → `INSTALLMENTS_LIMIT` (texto), só com crédito |
+| Ton          | `accepted_payment_methods`; a forma padrão vira a primeira aceita quando o Pix sai; os blocos `credit_card` e `pix` só vão com a forma aceita | as parcelas sem juros de sempre (mesma chave)                            |
+| InfinitePay  | a API não aceita                                           | a API não aceita                                                         |
+| PayPal       | Pix e "Cartão ou conta PayPal" (`methodLabels`); padrão só o cartão (`defaultMethods`) — ver `docs/paypal.md` | a API não aceita; o parcelamento é configurado na conta PayPal |
+
+O DTO do PagBank chamava o campo de `payment_method_configs`; a API é
+`payment_methods_configs`. Ninguém usava, e o nome foi corrigido junto.
+Teste: `src/gateways/opcoes-de-pagamento.spec.ts`.
 
 ### `allowedHostSuffixes` não é capricho
 

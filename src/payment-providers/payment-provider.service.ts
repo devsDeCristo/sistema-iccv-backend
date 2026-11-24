@@ -482,6 +482,32 @@ export class PaymentProviderService {
         );
       }
 
+      if (campo.methods) {
+        const formas = valor.split(',');
+        const ofertadas: string[] = campo.methods;
+        if (
+          formas.some((forma) => !ofertadas.includes(forma)) ||
+          new Set(formas).size !== formas.length
+        ) {
+          throw new BadRequestException(
+            `${campo.label}: escolha só entre as que esta integração oferece`,
+          );
+        }
+      }
+
+      if (campo.installmentsMax) {
+        const parcelas = Number(valor);
+        if (
+          !Number.isInteger(parcelas) ||
+          parcelas < 1 ||
+          parcelas > campo.installmentsMax
+        ) {
+          throw new BadRequestException(
+            `${campo.label} vai de 1 a ${campo.installmentsMax}`,
+          );
+        }
+      }
+
       resultado[campo.key] = valor;
     }
 

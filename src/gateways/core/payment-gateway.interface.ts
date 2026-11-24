@@ -35,7 +35,9 @@ export interface PaymentGateway {
   /**
    * As formas entre as quais o inscrito escolhe **antes** de o checkout ser
    * criado. Ausente, ou com menos de duas, não há o que perguntar — que é o
-   * caso de todo gateway cuja página já oferece as formas lado a lado.
+   * caso de todo gateway cuja página já oferece as formas lado a lado. Com
+   * uma só, ela é a forma do pedido (o PayPal só com Pix): o serviço a trata
+   * como escolhida, inclusive para reaproveitar o checkout aberto.
    *
    * Existe por causa do PayPal: lá o Pix e a carteira/cartão são pedidos
    * diferentes, e o tipo do pedido tem que ser decidido na criação. Recebe o

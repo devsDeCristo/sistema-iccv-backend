@@ -15,6 +15,12 @@ import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto } from '../core/discount';
 import {
+  campoDeFormas,
+  campoDeParcelas,
+  formasEscolhidas,
+  parcelasEscolhidas,
+} from '../core/opcoes-de-pagamento';
+import {
   GatewayCharge,
   GatewayContext,
   GatewayHealth,
@@ -38,6 +44,22 @@ import { cabecalho } from '../pagbank/pagbank.gateway';
  *    da igreja, numa segunda chamada. É mais trabalho e é melhor: o corpo do
  *    POST deixa de ser fonte de verdade sobre dinheiro.
  */
+/** As formas que a igreja pode ligar e desligar no Checkout Pro */
+const FORMAS: PaymentMethod[] = [
+  PaymentMethod.PIX,
+  PaymentMethod.BOLETO,
+  PaymentMethod.CREDIT_CARD,
+  PaymentMethod.DEBIT_CARD,
+];
+
+/** `payment_type_id` do Mercado Pago. No Brasil o Pix é `bank_transfer`. */
+const TIPO_NO_MERCADO_PAGO: Partial<Record<PaymentMethod, string>> = {
+  PIX: 'bank_transfer',
+  BOLETO: 'ticket',
+  CREDIT_CARD: 'credit_card',
+  DEBIT_CARD: 'debit_card',
+};
+
 @Injectable()
 export class MercadoPagoGateway implements PaymentGateway {
   private readonly logger = new Logger(MercadoPagoGateway.name);
@@ -74,6 +96,8 @@ export class MercadoPagoGateway implements PaymentGateway {
         secret: true,
         help: 'Painel › Webhooks. Sem ela o sistema recusa os retornos.',
       },
+      campoDeFormas(FORMAS),
+      campoDeParcelas(12),
     ],
     docsUrl:
       'https://www.mercadopago.com.br/developers/pt/docs/checkout-pro/landing',
@@ -87,6 +111,8 @@ export class MercadoPagoGateway implements PaymentGateway {
   ): Promise<HostedCheckoutResult> {
     const itens = aplicarDesconto(pedido.items, pedido.discountCents);
     const [nome, ...sobrenome] = pedido.customer.name.trim().split(/\s+/);
+    const formas = formasEscolhidas(ctx.credentials.enabledMethods, FORMAS);
+    const parcelas = parcelasEscolhidas(ctx.credentials.maxInstallments, 12);
 
     const payload = {
       external_reference: pedido.referenceId,
@@ -116,6 +142,14 @@ export class MercadoPagoGateway implements PaymentGateway {
         success: pedido.redirectUrl,
         failure: pedido.redirectUrl,
         pending: pedido.redirectUrl,
+      },
+      // O Checkout Pro só sabe excluir: o que a igreja desmarcou sai por tipo.
+      // Saldo em conta não sai nunca — o Mercado Pago não deixa.
+      payment_methods: {
+        excluded_payment_types: FORMAS.filter((f) => !formas.includes(f)).map(
+          (f) => ({ id: TIPO_NO_MERCADO_PAGO[f] }),
+        ),
+        ...(parcelas && { installments: parcelas }),
       },
       auto_return: 'approved',
       notification_url: pedido.paymentNotificationUrl,

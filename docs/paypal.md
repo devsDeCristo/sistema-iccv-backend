@@ -67,12 +67,25 @@ pedido é a referência pedida antes de devolver qualquer coisa.
 |---|---|---|
 | `clientId` | Client ID da aplicação REST | não — é público em qualquer integração com o SDK do PayPal |
 | `clientSecret` | Secret da mesma aplicação | sim |
-| `pix` | chave "Aceitar Pix" (`'true'` ou ausente) | não |
+| `enabledMethods` | formas de pagamento: `PIX`, `CREDIT_CARD` ou as duas | não |
 
-`pix` é o primeiro campo `toggle` do sistema: a tela desenha uma chave em vez de
-uma caixa de texto, e desligado é o campo ausente. Nasce desligado porque a
-conta PayPal precisa ter o Pix habilitado — ligar sem isso é oferecer ao
-inscrito uma opção que dá erro.
+As formas são o mesmo campo dos outros gateways (blocos na etapa Pagamento),
+com duas diferenças declaradas no adapter:
+
+- **Padrão só o cartão** (`defaultMethods`): a conta PayPal precisa ter o Pix
+  habilitado, e oferecer sem isso é dar ao inscrito uma opção que dá erro.
+- **`CREDIT_CARD` aparece como "Cartão ou conta PayPal"** (`methodLabels`): a
+  página do PayPal junta crédito, débito e saldo, e não dá para oferecer um sem
+  os outros.
+
+Só o Pix marcado é válido: o pedido sai direto em Pix, sem perguntar.
+
+Até nov/2026 o Pix era a chave `pix` (`toggle`). O adapter ainda a lê enquanto
+`enabledMethods` não foi salvo, e a migração
+`20261124200000_paypal_formas_de_pagamento` copia a dica para a tela abrir com o
+Pix marcado — a credencial é cifrada e o banco não a altera. Parcelas não são
+configuráveis pela API: o parcelamento (2 a 12x sem juros) é ativado na conta
+PayPal da igreja.
 
 Saem de **developer.paypal.com › Apps & Credentials**. **Sandbox e Live são
 abas diferentes, com credenciais diferentes e endereços diferentes**
@@ -231,8 +244,8 @@ PayPal.
    inscrição vira paga. Sem o webhook cadastrado, o botão **Conferir no
    gateway** da Tesouraria (perfil dev) força a captura.
 4. Para o Pix: habilite o Pix na conta sandbox (ver
-   [Habilitar na conta](#habilitar-na-conta)), ligue **Aceitar Pix** na
-   configuração e pague de novo. A pergunta da forma de pagamento aparece, e
+   [Habilitar na conta](#habilitar-na-conta)), marque **Pix** nas formas de
+   pagamento da configuração e pague de novo. A pergunta da forma de pagamento aparece, e
    escolhendo Pix abre a tela do QR. Sem webhook, o botão **Já paguei** da
    própria tela confere no PayPal.
 
@@ -246,8 +259,11 @@ dado de cartão envolvido.
 ### A escolha
 
 `PaymentGateway.paymentMethodChoices(ctx)` é opcional, e só este adapter o
-implementa: devolve `[PIX, CREDIT_CARD]` quando a igreja ligou a chave "Aceitar
-Pix", e lista vazia quando não. Em `createCheckout` (serviço de pagamento):
+implementa: devolve as formas marcadas. Com as duas, o inscrito escolhe; com
+uma só, não há pergunta e o serviço a trata como a forma do pedido
+(`formaDoPedido`). Isso importa além da criação: o checkout aberto só é
+reaproveitado se for da mesma forma, e quando a forma única não voltava, o Pix
+já gerado nunca casava — cada clique em "pagar" fazia um QR novo. Em `createCheckout` (serviço de pagamento):
 
 - lista com duas formas e nenhuma escolha válida no corpo (`method`) → a
   resposta é `{ choice: { provider, label, methods } }`, **sem link e sem

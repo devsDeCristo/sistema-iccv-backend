@@ -17,6 +17,7 @@ import {
   GatewayResourceNotFoundError,
 } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
+import { campoDeFormas, formasEscolhidas } from '../core/opcoes-de-pagamento';
 import {
   GatewayCharge,
   GatewayContext,
@@ -53,6 +54,9 @@ const PIX_VALIDADE_MAXIMA = 259200;
  * habilitado. É o único gateway com essa escolha; os outros oferecem as
  * formas lado a lado na página deles.
  */
+/** As formas do PayPal: o Pix na tela do sistema, e a página dele para o resto */
+const FORMAS = [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD] as const;
+
 @Injectable()
 export class PayPalGateway implements PaymentGateway {
   constructor(private readonly client: PayPalClient) {}
@@ -84,14 +88,15 @@ export class PayPalGateway implements PaymentGateway {
         secret: true,
         help: 'Na mesma tela do Client ID, em "Secret key".',
       },
-      {
-        key: 'pix',
-        label: 'Aceitar Pix',
-        required: false,
-        secret: false,
-        toggle: true,
-        help: 'Ligue só depois de ativar o Pix na conta PayPal (Configurações da conta › Produtos e serviços › Formas de pagamento). Sem isso, quem escolher Pix recebe erro.',
-      },
+      campoDeFormas(FORMAS, {
+        // Pix só quando a igreja marcar: sem estar ativo na conta PayPal,
+        // quem escolhe Pix recebe erro
+        defaultMethods: [PaymentMethod.CREDIT_CARD],
+        // a página do PayPal junta crédito, débito e saldo: não dá para
+        // oferecer um sem os outros
+        methodLabels: { CREDIT_CARD: 'Cartão ou conta PayPal' },
+        help: 'Pix só depois de ativá-lo na conta PayPal (Configurações da conta › Produtos e serviços › Formas de pagamento). Sem isso, quem escolher Pix recebe erro.',
+      }),
     ],
     docsUrl: 'https://developer.paypal.com/docs/api/orders/v2/',
     // O PayPal assina, mas a assinatura não é o que segura a baixa: ver
@@ -101,10 +106,26 @@ export class PayPalGateway implements PaymentGateway {
     webhookChannels: [{ key: 'payments', label: 'Notificação de pagamento' }],
   };
 
+  /**
+   * Com as duas formas, o inscrito escolhe antes; com uma só, não há o que
+   * perguntar, e ela volta assim mesmo: é a forma do pedido, e o serviço
+   * precisa dela para reaproveitar o checkout aberto da mesma forma.
+   */
   paymentMethodChoices(ctx: GatewayContext): PaymentMethod[] {
-    return ctx.credentials.pix === 'true'
-      ? [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD]
-      : [];
+    return this.formas(ctx);
+  }
+
+  /**
+   * As formas ligadas. Antes das caixas, o Pix era a chave `pix`: enquanto a
+   * igreja não salvar o formulário novo, é ela que vale.
+   */
+  private formas(ctx: GatewayContext): PaymentMethod[] {
+    const { enabledMethods, pix } = ctx.credentials;
+    if (!enabledMethods && pix === 'true') return [...FORMAS];
+
+    return formasEscolhidas(enabledMethods, FORMAS, [
+      PaymentMethod.CREDIT_CARD,
+    ]);
   }
 
   async createCheckout(
@@ -116,7 +137,12 @@ export class PayPalGateway implements PaymentGateway {
     // a mesma conta evita dois números diferentes para a mesma cobrança.
     const itens = aplicarDesconto(pedido.items, pedido.discountCents);
     const total = reais(totalEmCentavos(itens));
-    const querPix = pedido.paymentMethod === PaymentMethod.PIX;
+    const formas = this.formas(ctx);
+    // a escolha do inscrito, ou o Pix quando ele é a única forma ligada
+    const querPix =
+      formas.includes(PaymentMethod.PIX) &&
+      (pedido.paymentMethod === PaymentMethod.PIX ||
+        !formas.includes(PaymentMethod.CREDIT_CARD));
     const retorno = {
       return_url: pedido.redirectUrl,
       cancel_url: pedido.redirectUrl,

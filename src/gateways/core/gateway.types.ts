@@ -33,6 +33,21 @@ export interface CredentialField {
    */
   toggle?: boolean;
   /**
+   * Escolha das formas de pagamento: a tela desenha uma caixa por forma e o
+   * valor gravado é a lista separada por vírgula (`PIX,CREDIT_CARD`). Vazio é
+   * "todas", ver `formasEscolhidas`.
+   */
+  methods?: PaymentMethod[];
+  /**
+   * O que vale enquanto o campo nunca foi salvo; sem isto, todas. O PayPal
+   * começa só no cartão: Pix sem estar ativo na conta dá erro para o inscrito.
+   */
+  defaultMethods?: PaymentMethod[];
+  /** Nome da forma neste gateway, quando o genérico não diz a verdade */
+  methodLabels?: Partial<Record<PaymentMethod, string>>;
+  /** Teto de parcelas no cartão: a tela desenha um seletor de 1 até este número */
+  installmentsMax?: number;
+  /**
    * Quando o campo é uma URL de API, os únicos domínios aceitos.
    *
    * Sem isto, um admin (ou quem tomasse a conta de um) apontaria a integração

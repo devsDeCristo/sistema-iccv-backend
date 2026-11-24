@@ -12,6 +12,11 @@ import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
+  campoDeFormas,
+  campoDeParcelas,
+  formasEscolhidas,
+} from '../core/opcoes-de-pagamento';
+import {
   GatewayCharge,
   GatewayContext,
   GatewayHealth,
@@ -39,6 +44,19 @@ const MINUTO = 60 * 1000;
  * para um endereço próprio — é a única parte da integração que pode mudar sem
  * o resto mudar junto.
  */
+/** As formas do checkout do Ton, na ordem em que sempre foram enviadas */
+const FORMAS = [
+  PaymentMethod.CREDIT_CARD,
+  PaymentMethod.PIX,
+  PaymentMethod.BOLETO,
+] as const;
+
+const TIPO_NO_TON: Record<(typeof FORMAS)[number], string> = {
+  CREDIT_CARD: 'credit_card',
+  PIX: 'pix',
+  BOLETO: 'boleto',
+};
+
 @Injectable()
 export class TonGateway implements PaymentGateway {
   private readonly logger = new Logger(TonGateway.name);
@@ -71,14 +89,12 @@ export class TonGateway implements PaymentGateway {
         secret: true,
         help: 'Configurada junto da URL de notificação no painel. Sem ela, o sistema confere cada aviso consultando o pedido na API.',
       },
-      {
-        key: 'maxInstallments',
-        label: 'Parcelas no cartão',
-        required: false,
-        secret: false,
-        placeholder: '1',
-        help: 'Quantas parcelas sem juros oferecer. Acima de 1, a taxa das parcelas fica com a igreja.',
-      },
+      campoDeFormas(FORMAS),
+      // mesma chave de antes (`maxInstallments`): o que já está gravado vale
+      campoDeParcelas(
+        12,
+        'Quantas parcelas sem juros oferecer. Acima de 1, a taxa das parcelas fica com a igreja.',
+      ),
       {
         key: 'baseUrl',
         label: 'URL da API (opcional)',
@@ -98,6 +114,7 @@ export class TonGateway implements PaymentGateway {
     ctx: GatewayContext,
   ): Promise<HostedCheckoutResult> {
     const cred = this.cred(ctx);
+    const formas = formasEscolhidas(ctx.credentials.enabledMethods, FORMAS);
     const itens = aplicarDesconto(pedido.items, pedido.discountCents);
     const total = totalEmCentavos(itens);
 
@@ -134,19 +151,30 @@ export class TonGateway implements PaymentGateway {
           payment_method: 'checkout',
           checkout: {
             expires_in: minutos,
-            default_payment_method: 'pix',
-            accepted_payment_methods: ['credit_card', 'pix', 'boleto'],
+            // a forma padrão precisa estar entre as aceitas, senão o
+            // Pagar.me recusa o pedido
+            default_payment_method: formas.includes(PaymentMethod.PIX)
+              ? 'pix'
+              : TIPO_NO_TON[formas[0]],
+            accepted_payment_methods: formas.map((f) => TIPO_NO_TON[f]),
             success_url: pedido.redirectUrl,
             customer_editable: false,
             skip_checkout_success_page: false,
-            credit_card: {
-              statement_descriptor: pedido.softDescriptor.slice(0, 13),
-              // Sem juros e com o total igual ao valor da compra: quem escolhe
-              // parcelar não paga a mais, e a taxa fica com a igreja — daí o
-              // padrão ser 1 e a escolha ser explícita na configuração.
-              installments: this.parcelas(cred, total),
-            },
-            pix: { expires_in: minutos * 60 },
+            // a configuração de cada forma só vai junto dela: a desmarcada
+            // não leva bloco nenhum
+            ...(formas.includes(PaymentMethod.CREDIT_CARD) && {
+              credit_card: {
+                statement_descriptor: pedido.softDescriptor.slice(0, 13),
+                // Sem juros e com o total igual ao valor da compra: quem
+                // escolhe parcelar não paga a mais, e a taxa fica com a
+                // igreja — daí o padrão ser 1 e a escolha ser explícita na
+                // configuração.
+                installments: this.parcelas(cred, total),
+              },
+            }),
+            ...(formas.includes(PaymentMethod.PIX) && {
+              pix: { expires_in: minutos * 60 },
+            }),
           },
         },
       ],

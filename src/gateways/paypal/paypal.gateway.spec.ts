@@ -230,8 +230,11 @@ describe('PayPal — Pix na tela do sistema', () => {
     const gateway = new PayPalGateway({} as any);
 
     // Desligado é o padrão: a conta PayPal precisa ter o Pix habilitado, e
-    // oferecer sem isso é oferecer um botão que dá erro.
-    expect(gateway.paymentMethodChoices(ctx)).toEqual([]);
+    // oferecer sem isso é oferecer um botão que dá erro. Uma forma só não é
+    // pergunta: é a forma do pedido.
+    expect(gateway.paymentMethodChoices(ctx)).toEqual([
+      PaymentMethod.CREDIT_CARD,
+    ]);
     expect(gateway.paymentMethodChoices(comPix)).toEqual([
       PaymentMethod.PIX,
       PaymentMethod.CREDIT_CARD,
@@ -558,5 +561,66 @@ describe('PayPal — consulta e captura', () => {
       GatewayResourceNotFoundError,
     );
     expect(client.getOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('PayPal — formas de pagamento do cadastro', () => {
+  const com = (credenciais: object) => ({
+    ...ctx,
+    credentials: { ...ctx.credentials, ...credenciais },
+  });
+
+  it('nada salvo é só cartão: Pix sem estar ativo na conta dá erro', () => {
+    expect(new PayPalGateway({} as any).paymentMethodChoices(ctx)).toEqual([
+      PaymentMethod.CREDIT_CARD,
+    ]);
+  });
+
+  it('Pix e cartão marcados: o inscrito escolhe antes', () => {
+    expect(
+      new PayPalGateway({} as any).paymentMethodChoices(
+        com({ enabledMethods: 'PIX,CREDIT_CARD' }),
+      ),
+    ).toEqual([PaymentMethod.PIX, PaymentMethod.CREDIT_CARD]);
+  });
+
+  it('a chave antiga `pix` continua valendo até o formulário novo ser salvo', () => {
+    const gateway = new PayPalGateway({} as any);
+    expect(gateway.paymentMethodChoices(com({ pix: 'true' }))).toHaveLength(2);
+    // salvo o formulário novo, ele manda
+    expect(
+      gateway.paymentMethodChoices(
+        com({ pix: 'true', enabledMethods: 'CREDIT_CARD' }),
+      ),
+    ).toEqual([PaymentMethod.CREDIT_CARD]);
+  });
+
+  it('só Pix: não pergunta e o pedido sai em Pix', async () => {
+    const client = {
+      createOrder: jest.fn().mockResolvedValue({
+        id: 'ORDER-PIX',
+        payment_source: {
+          pix: { qr_payload: '00020101...6304E7DB', qr_expiry: '3600' },
+        },
+      }),
+    };
+    const gateway = new PayPalGateway(client as any);
+    const soPix = com({ enabledMethods: 'PIX' });
+
+    // uma forma só: não há pergunta, e ela é a forma do pedido
+    expect(gateway.paymentMethodChoices(soPix)).toEqual([PaymentMethod.PIX]);
+
+    const resultado = await gateway.createCheckout(
+      {
+        ...request,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+      soPix,
+    );
+
+    expect(
+      client.createOrder.mock.calls[0][0].payment_source.pix,
+    ).toBeDefined();
+    expect(resultado.pix?.code).toContain('00020101');
   });
 });

@@ -9,6 +9,12 @@ import { createHash } from 'crypto';
 import { PagbankClient, PagbankCredenciais } from './pagbank.client';
 import { CreatePagbankCheckoutDto } from './dto/create-checkout.dto';
 import { PaymentGateway } from '../core/payment-gateway.interface';
+import {
+  campoDeFormas,
+  campoDeParcelas,
+  formasEscolhidas,
+  parcelasEscolhidas,
+} from '../core/opcoes-de-pagamento';
 import { metodoNaoMapeado } from '../core/gateway-http';
 import {
   GatewayCharge,
@@ -30,6 +36,14 @@ import {
  * retorno, que não existia — até então qualquer POST na URL de notificação era
  * aceito como se fosse do PagBank.
  */
+/** As formas do checkout PagBank, na ordem em que sempre foram enviadas */
+const FORMAS = [
+  PaymentMethod.CREDIT_CARD,
+  PaymentMethod.DEBIT_CARD,
+  PaymentMethod.BOLETO,
+  PaymentMethod.PIX,
+] as const;
+
 @Injectable()
 export class PagbankGateway implements PaymentGateway {
   private readonly logger = new Logger(PagbankGateway.name);
@@ -64,6 +78,8 @@ export class PagbankGateway implements PaymentGateway {
         allowedHostSuffixes: ['pagseguro.com', 'pagbank.com.br'],
         help: 'Deixe em branco para usar o endereço oficial do ambiente escolhido.',
       },
+      campoDeFormas(FORMAS),
+      campoDeParcelas(12),
     ],
     docsUrl: 'https://developer.pagbank.com.br/reference/criar-checkout',
     signsWebhook: true,
@@ -77,6 +93,9 @@ export class PagbankGateway implements PaymentGateway {
     pedido: HostedCheckoutRequest,
     ctx: GatewayContext,
   ): Promise<HostedCheckoutResult> {
+    const formas = formasEscolhidas(ctx.credentials.enabledMethods, FORMAS);
+    const parcelas = parcelasEscolhidas(ctx.credentials.maxInstallments, 12);
+
     const payload: CreatePagbankCheckoutDto = {
       reference_id: pedido.referenceId,
       soft_descriptor: pedido.softDescriptor,
@@ -100,12 +119,19 @@ export class PagbankGateway implements PaymentGateway {
         quantity: item.quantity,
         unit_amount: item.unitAmountCents,
       })),
-      payment_methods: [
-        { type: 'CREDIT_CARD' },
-        { type: 'DEBIT_CARD' },
-        { type: 'BOLETO' },
-        { type: 'PIX' },
-      ],
+      payment_methods: formas.map((type) => ({ type })),
+      // O teto vale só para cartão de crédito, e só se ele estiver na lista
+      ...(parcelas &&
+        formas.includes(PaymentMethod.CREDIT_CARD) && {
+          payment_methods_configs: [
+            {
+              type: 'CREDIT_CARD',
+              config_options: [
+                { option: 'INSTALLMENTS_LIMIT', value: String(parcelas) },
+              ],
+            },
+          ],
+        }),
     };
 
     const resultado = await this.client.createCheckout(

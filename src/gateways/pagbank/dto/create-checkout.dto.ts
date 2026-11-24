@@ -51,7 +51,7 @@ export class CreatePagbankCheckoutDto {
     type: [PagbankPaymentMethodConfigDto],
     required: false,
   })
-  payment_method_configs?: PagbankPaymentMethodConfigDto[];
+  payment_methods_configs?: PagbankPaymentMethodConfigDto[];
 
   @ApiProperty({ example: 'https://app.com/success', required: false })
   redirect_url?: string;

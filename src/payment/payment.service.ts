@@ -114,6 +114,24 @@ const SELECT_ITEM_DE_PRODUTO = {
   },
 } satisfies Prisma.PaymentProductItemSelect;
 
+/**
+ * A forma do pedido, entre as que o gateway oferece para escolher.
+ *
+ * A pedida pelo inscrito, se for uma delas. Com uma forma só não há pergunta,
+ * e ela é a forma do pedido (o PayPal só com Pix): sem isto o checkout de Pix
+ * aberto nunca era reaproveitado — a comparação com o checkout ativo via
+ * "nenhuma forma" — e cada clique em "pagar" gerava um QR novo.
+ */
+export function formaDoPedido(
+  formas: PaymentMethod[],
+  pedida?: PaymentMethod,
+): PaymentMethod | undefined {
+  return (
+    formas.find((forma) => forma === pedida) ??
+    (formas.length === 1 ? formas[0] : undefined)
+  );
+}
+
 @Injectable()
 export class PaymentService {
   constructor(
@@ -320,7 +338,7 @@ export class PaymentService {
        */
       const formas =
         casaDaIgreja.gateway.paymentMethodChoices?.(casaDaIgreja.context) ?? [];
-      const formaEscolhida = formas.find((forma) => forma === dto.method);
+      const formaEscolhida = formaDoPedido(formas, dto.method);
 
       if (formas.length > 1 && !formaEscolhida) {
         return {
