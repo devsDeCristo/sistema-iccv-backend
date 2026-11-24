@@ -1313,7 +1313,7 @@ export class PaymentService {
         })),
     );
 
-    if (!comprasAvulsas.length) return linhasDeInscricao;
+    if (!comprasAvulsas.length) return this.comQuemDeuBaixa(linhasDeInscricao);
 
     // o pagamento guarda só o id da pessoa: os dados dela vêm numa consulta
     // só, para a página inteira
@@ -1329,7 +1329,90 @@ export class PaymentService {
       purchaseType: 'PRODUCTS' as const,
     }));
 
-    return [...linhasDeInscricao, ...linhasAvulsas];
+    return this.comQuemDeuBaixa([...linhasDeInscricao, ...linhasAvulsas]);
+  }
+
+  /**
+   * Quem marcou como pago, nas baixas manuais.
+   *
+   * Sai de `payment_logs`, que já grava quem fez cada mudança no dinheiro, e
+   * não de uma coluna nova. A linha que conta é a da passagem para pago
+   * (`statusBefore` diferente de pago): depois disso o pagamento ainda muda —
+   * a entrega dos produtos, por exemplo — e essa escrita também leva
+   * `statusAfter: PAID`, com outra pessoa no `actorId`.
+   *
+   * Baixa feita antes de existir o `payment_logs` fica sem nome: `paidBy` nulo.
+   */
+  private async comQuemDeuBaixa<
+    T extends {
+      id?: string;
+      status?: PaymentStatus;
+      receivedFrom?: PaymentReceived;
+    },
+  >(linhas: T[]) {
+    const manuais = linhas
+      .filter(
+        (l) =>
+          l.id &&
+          l.status === PaymentStatus.PAID &&
+          l.receivedFrom === PaymentReceived.EXTERNAL,
+      )
+      .map((l) => l.id!);
+
+    const baixas = manuais.length
+      ? await this.prisma.paymentLog.findMany({
+          where: {
+            paymentId: { in: manuais },
+            model: 'Payment',
+            statusAfter: PaymentStatus.PAID,
+            OR: [
+              { statusBefore: null },
+              { statusBefore: { not: PaymentStatus.PAID } },
+            ],
+            actorId: { not: null },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { paymentId: true, actorId: true, createdAt: true },
+        })
+      : [];
+
+    // a mais recente de cada pagamento (a lista vem da mais nova para a mais velha)
+    const porPagamento = new Map<string, (typeof baixas)[number]>();
+    for (const baixa of baixas) {
+      if (!porPagamento.has(baixa.paymentId!)) {
+        porPagamento.set(baixa.paymentId!, baixa);
+      }
+    }
+
+    const atores = porPagamento.size
+      ? await this.prisma.user.findMany({
+          where: {
+            id: {
+              in: [
+                ...new Set([...porPagamento.values()].map((b) => b.actorId!)),
+              ],
+            },
+          },
+          select: { id: true, fullName: true },
+        })
+      : [];
+    const nomePorId = new Map(atores.map((a) => [a.id, a.fullName]));
+
+    return linhas.map((linha) => {
+      const baixa = linha.id ? porPagamento.get(linha.id) : undefined;
+
+      return {
+        ...linha,
+        paidBy: baixa
+          ? {
+              id: baixa.actorId!,
+              // administrador removido depois: o registro continua, sem nome
+              fullName: nomePorId.get(baixa.actorId!) ?? null,
+              at: baixa.createdAt,
+            }
+          : null,
+      };
+    });
   }
 
   async findPaymentsByUser(userId: string, eventId?: string) {

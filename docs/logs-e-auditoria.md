@@ -90,7 +90,15 @@ restante das mudanças em `changes` (json de diffs, campo a campo). Campo
 o marcador `(atualizado)`. Consulta: `GET
 /events/:idEvent/payments/logs` (rota `ADMIN_AREA_ROLES`, protegida por
 `EventTenantGuard`, então cada igreja só vê o próprio caixa) — implementada em
-`src/payment/payment.service.ts`. O detalhe da reconciliação com os gateways
+`src/payment/payment.service.ts`.
+
+**Quem deu baixa manual** também sai daqui, sem coluna própria em `Payment`:
+`GET /events/:idEvent/payments` devolve `paidBy` (`{ id, fullName, at }`) nos
+pagamentos `PAID` com `receivedFrom: EXTERNAL`, a partir da linha mais recente
+em que o status **passou** para pago (`statusBefore` diferente de `PAID`). O
+filtro importa: a entrega de produtos grava `PAID → PAID` com outra pessoa no
+`actorId`. Baixa anterior ao `PaymentLog` volta `paidBy: null`. Teste:
+`src/payment/quem-deu-baixa.spec.ts`. O detalhe da reconciliação com os gateways
 (PagBank/Mercado Pago) está em `docs/pagamentos.md`.
 
 ## Log de atividades (`src/logs`)
