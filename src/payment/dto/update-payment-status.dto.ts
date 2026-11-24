@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PaymentStatus, PaymentMethod } from '@prisma/client';
-import { IsEnum, IsOptional } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsEnum, IsNumber, IsOptional, Max, Min } from 'class-validator';
 
 /**
  * O `paymentId` **não** está aqui de propósito.
@@ -29,7 +30,16 @@ export class UpdatePaymentStatusDto {
   @IsOptional()
   receiptFile?: Express.Multer.File;
 
-  @ApiProperty({ type: 'string', required: false })
+  /**
+   * Desconto da inscrição em pontos percentuais, de 0 a 100 (zero é "sem
+   * desconto"). Ausente não mexe no que está gravado. Vem como texto no
+   * multipart, daí o `@Type`.
+   */
+  @ApiProperty({ type: 'number', required: false, minimum: 0, maximum: 100 })
   @IsOptional()
-  discountsAppliedId?: string;
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  discountPercent?: number;
 }

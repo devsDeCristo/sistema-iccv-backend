@@ -286,13 +286,4 @@ export class PaymentController {
       req.user?.userId,
     );
   }
-
-  // ===============================
-  // Gambis
-  // ===============================
-  @ApiOperation({ summary: 'Get discounts' })
-  @Get('discounts')
-  getDiscounts() {
-    return this.paymentService.getDiscounts();
-  }
 }

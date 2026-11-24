@@ -141,6 +141,7 @@ const ID_FIELD_LABELS: Record<string, string> = {
   calledById: 'Chamado por',
   churchId: 'Igreja',
   discountId: 'Desconto',
+  discountPercent: 'Desconto (%)',
   doneById: 'Concluído por',
   eventId: 'Evento',
   groupId: 'Grupo',

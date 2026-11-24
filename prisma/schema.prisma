@@ -540,8 +540,11 @@ model EventOnUsersRolesRegistration {
   userId             String
   eventId            String
   roleRegistrationId String
-  discountId         String?
-  discount           Discounts?        @relation(fields: [discountId], references: [id])
+  /// Desconto sobre o preço do ingresso, em pontos percentuais (12.5 é 12,5%).
+  /// Nulo é sem desconto. Antes era um id na tabela `discounts`, global e
+  /// sem igreja; virou número porque o percentual é tudo o que importa e
+  /// quem dá baixa escolhe o valor na hora.
+  discountPercent    Float?
   role               RolesRegistration @relation(fields: [roleRegistrationId], references: [id], onDelete: Cascade)
   eventOnUsers       EventOnUsers      @relation("EventOnUsersRoles", fields: [userId, eventId], references: [userId, eventId], onDelete: Cascade)
   payment            Payment?
@@ -549,7 +552,6 @@ model EventOnUsersRolesRegistration {
   @@id([userId, eventId, roleRegistrationId])
   @@index([eventId])
   @@index([roleRegistrationId])
-  @@index([discountId])
 }
 
 model GroupRoles {
@@ -585,17 +587,6 @@ model RolesRegistration {
 
   @@index([groupId])
   @@map("roles_registration_types")
-}
-
-model Discounts {
-  id          String                          @id @default(uuid())
-  percentage  Float
-  description String
-  createdAt   DateTime                        @default(now())
-  updatedAt   DateTime                        @updatedAt
-  registers   EventOnUsersRolesRegistration[]
-
-  @@map("discounts")
 }
 
 model Payment {

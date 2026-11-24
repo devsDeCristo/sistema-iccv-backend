@@ -126,12 +126,11 @@ function nothingChanged(before: any, after: any): boolean {
 }
 
 /**
- * As tabelas do dinheiro.
- *
- * `Discounts` entra junto com as duas de pagamento: mexer no percentual muda o
- * que cada pessoa deve, mesmo sem tocar em cobrança nenhuma.
+ * As tabelas do dinheiro. A tabela `Discounts` também entrava aqui; saiu em
+ * nov/2026, quando o desconto virou o percentual gravado na própria inscrição
+ * (`EventOnUsersRolesRegistration.discountPercent`).
  */
-const FINANCE_MODELS = new Set(['Payment', 'PaymentCheckout', 'Discounts']);
+const FINANCE_MODELS = new Set(['Payment', 'PaymentCheckout']);
 
 /** Carimbo de tempo muda em todo save e não é notícia financeira */
 const FINANCE_NOISE = new Set(['createdAt', 'updatedAt', 'updateAt']);

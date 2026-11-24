@@ -277,6 +277,20 @@ R$ 300 vira `IN_ANALYSIS`.
 
 ---
 
+### Desconto da inscrição
+
+`EventOnUsersRolesRegistration.discountPercent`: pontos percentuais sobre o
+preço do ingresso (12.5 é 12,5%), nulo é sem desconto. Entra só na criação do
+checkout (`totalDiscount` em `createCheckout`), não altera `Payment.amount`. Quem
+define é o modal de pagamento (`PUT /payments/:paymentId`, campo
+`discountPercent` de 0 a 100 com até duas casas; zero grava nulo, ausente não
+mexe). Teste: `src/payment/desconto.spec.ts`.
+
+Até nov/2026 era `discountId`, apontando para a tabela `discounts` — global,
+sem igreja, com percentual em fração (0.1). A migração
+`20261124210000_desconto_em_percentual` copiou o percentual de cada inscrição
+(×100) e removeu a coluna, a tabela e a rota `GET /discounts`.
+
 ## 6.1. Forma de pagamento e gateway da baixa
 
 Toda baixa feita pelo gateway — aviso, reconciliação, a conferência antes de um

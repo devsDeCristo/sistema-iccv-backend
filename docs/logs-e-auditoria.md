@@ -80,7 +80,8 @@ comparar dois valores omitidos e iguais.
 
 ## Trilha do dinheiro (`PaymentLog`)
 
-Quando a escrita é em `Payment`, `PaymentCheckout` ou `Discounts`
+Quando a escrita é em `Payment` ou `PaymentCheckout` (`Discounts` também
+entrava, até a tabela sair em nov/2026 — ver `docs/pagamentos.md`)
 (`FINANCE_MODELS`), o mesmo middleware grava **também** uma linha em
 `PaymentLog`, em paralelo à linha genérica de `Log` (uma não substitui a
 outra). Ela guarda `amountBefore/After`, `statusBefore/After`, `source`

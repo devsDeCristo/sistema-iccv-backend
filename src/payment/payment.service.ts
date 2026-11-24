@@ -298,7 +298,7 @@ export class PaymentService {
         },
         include: {
           checkouts: true,
-          eventUserRole: { select: { role: true, discount: true } },
+          eventUserRole: { select: { role: true, discountPercent: true } },
           productItems: {
             include: {
               variant: {
@@ -550,16 +550,13 @@ export class PaymentService {
         });
 
       // Calcula desconto
-      const totalDiscount = unpaidPayments.reduce((acc, payment) => {
-        const discount = payment.eventUserRole?.discount;
-        if (discount) {
-          return (
-            acc +
-            discount.percentage * (payment.eventUserRole?.role?.price || 0)
-          );
-        }
-        return acc;
-      }, 0);
+      const totalDiscount = unpaidPayments.reduce(
+        (acc, payment) =>
+          acc +
+          ((payment.eventUserRole?.discountPercent ?? 0) / 100) *
+            (payment.eventUserRole?.role?.price || 0),
+        0,
+      );
 
       /**
        * Os produtos: os que foram junto do ingresso e as compras avulsas, com
@@ -1123,12 +1120,12 @@ export class PaymentService {
           }),
           // desconto é da inscrição; compra avulsa de produto não tem onde
           // guardar, e o update aninhado estouraria sem a relação
-          ...(payload.discountsAppliedId &&
+          // Ausente é "não mexi"; zero é "sem desconto" e grava nulo. Antes só
+          // um id gravava, e escolher "Nenhum" não tirava o desconto.
+          ...(payload.discountPercent !== undefined &&
             payment.roleRegistrationId && {
               eventUserRole: {
-                update: {
-                  discountId: payload?.discountsAppliedId || null,
-                },
+                update: { discountPercent: payload.discountPercent || null },
               },
             }),
           payload: {
@@ -1273,7 +1270,7 @@ export class PaymentService {
         include: {
           rolesRegistration: {
             select: {
-              discount: { select: { id: true } },
+              discountPercent: true,
               payment: {
                 include: {
                   // quem compra o quê: é por aqui que a organização separa
@@ -1327,7 +1324,7 @@ export class PaymentService {
           groupId: rr.role?.groupId,
           groupName: rr.role?.group?.name,
           roleName: rr.role?.description,
-          discountsAppliedId: rr.discount?.id,
+          discountPercent: rr.discountPercent,
         })),
     );
 
@@ -1727,16 +1724,6 @@ export class PaymentService {
         group: w.rolesRegistration!.group.name,
         price: w.rolesRegistration!.price,
       })),
-    }));
-  }
-
-  //gambis
-  async getDiscounts() {
-    const data = await this.prisma.discounts.findMany();
-    return data.map((d) => ({
-      id: d.id,
-      description: d.description,
-      percentage: d.percentage,
     }));
   }
 }

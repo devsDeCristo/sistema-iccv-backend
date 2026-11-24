@@ -78,27 +78,6 @@ async function main() {
       );
     }
 
-    //inserir os descontos padrão se não existirem de 0 a 100 com passo de 10
-    const existingDiscounts = await prisma.discounts.findMany();
-    if (existingDiscounts.length === 0) {
-      console.log('➕ Inserindo descontos padrão...');
-      const discountPromises = [];
-      for (let i = 0; i <= 100; i += 10) {
-        discountPromises.push(
-          prisma.discounts.create({
-            data: {
-              description: `Desconto de ${i}%`,
-              percentage: i / 100,
-            },
-          }),
-        );
-      }
-      await Promise.all(discountPromises);
-      console.log('✅ Descontos padrão inseridos com sucesso');
-    } else {
-      console.log('ℹ️  Descontos já existem, pulando inserção padrão.');
-    }
-
     console.log('🎉 Seed executado com sucesso!');
   } catch (error) {
     console.error('❌ Erro durante o seed:', error.message);
