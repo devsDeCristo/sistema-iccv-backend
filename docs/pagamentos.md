@@ -212,6 +212,28 @@ Se um adapter mudar de comportamento aqui, esse mapa tem que mudar junto, ou a
 tela manda a pessoa fazer trabalho à toa — ou, pior, fica calada sobre um
 cadastro que ela precisa fazer.
 
+### A URL existe antes do primeiro salvar
+
+Os painéis pedem a URL para só então mostrar a assinatura secreta, e a
+assinatura é campo do nosso formulário. Se a URL só nascesse no salvar, o
+cadastro travava: não dá para salvar sem a assinatura, não dá para ter a
+assinatura sem a URL.
+
+`POST /churches/:churchId/payment-providers/:provider/webhook-draft` gera o
+segredo e devolve a URL **sem gravar nada**, junto de um `webhookDraft`: o
+segredo cifrado pelo cofre, com igreja e gateway no contexto do selo
+(`webhook-draft:<igreja>:<gateway>`, separado do selo das credenciais). O
+formulário manda esse `webhookDraft` no primeiro `PUT`, e o `salvar` adota o
+segredo em vez de gerar outro — a URL que a pessoa colou no painel é a que
+passa a valer.
+
+- Rascunho de outra igreja ou adulterado é recusado com `400`. Gerar outro em
+  silêncio deixaria no painel uma URL que não existe.
+- Integração já gravada ignora o rascunho: o segredo existente é preservado,
+  como sempre.
+- Para integração já gravada, a rota devolve a URL atual e `webhookDraft: null`.
+- Teste: `src/payment-providers/webhook-draft.spec.ts`.
+
 ---
 
 ## 6. Conferência de valor

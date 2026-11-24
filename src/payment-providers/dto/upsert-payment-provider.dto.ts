@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentProviderMode } from '@prisma/client';
-import { IsBoolean, IsEnum, IsObject, IsOptional } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class UpsertPaymentProviderDto {
   @ApiPropertyOptional({
@@ -42,4 +48,12 @@ export class UpsertPaymentProviderDto {
   })
   @IsObject()
   credentials: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description:
+      'O `webhookDraft` devolvido pela rota `webhook-draft`. No primeiro salvar, faz a integração nascer com a URL que já foi mostrada (e cadastrada no painel) durante o cadastro.',
+  })
+  @IsOptional()
+  @IsString()
+  webhookDraft?: string;
 }

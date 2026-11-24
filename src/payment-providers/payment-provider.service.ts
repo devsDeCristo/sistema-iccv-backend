@@ -29,6 +29,10 @@ import { SELECT_MODULOS, cobraOnline, modulosDa } from 'src/planos/modulos';
 /** Teto por campo. Nenhuma credencial de gateway chega perto disso. */
 const TAMANHO_MAXIMO = 2000;
 
+/** Separado do selo da credencial: um envelope não se passa pelo outro */
+const contextoDoRascunho = (churchId: string, provider: PaymentProvider) =>
+  `webhook-draft:${churchId}:${provider}`;
+
 @Injectable()
 export class PaymentProviderService {
   private readonly logger = new Logger(PaymentProviderService.name);
@@ -158,10 +162,13 @@ export class PaymentProviderService {
       atuais,
     );
 
-    // Preserva o segredo já cadastrado do outro lado; só nasce um novo quando
-    // a configuração também é nova.
+    // Preserva o segredo já cadastrado do outro lado. Configuração nova usa o
+    // do rascunho, cuja URL a pessoa já pode ter cadastrado no painel durante
+    // o cadastro; sem rascunho, nasce um novo.
     credenciais[CHAVE_DO_WEBHOOK] =
-      atuais[CHAVE_DO_WEBHOOK] || this.crypto.gerarSegredoDeWebhook();
+      atuais[CHAVE_DO_WEBHOOK] ||
+      this.abrirRascunho(dto.webhookDraft, churchId, provider) ||
+      this.crypto.gerarSegredoDeWebhook();
 
     const envelope = this.crypto.cifrar(
       credenciais,
@@ -223,6 +230,61 @@ export class PaymentProviderService {
     );
 
     return this.paraTela(atualizado);
+  }
+
+  /**
+   * A URL de notificação antes de a integração existir.
+   *
+   * Os painéis (Mercado Pago, Ton, PayPal) pedem a URL para só então mostrar a
+   * assinatura secreta, e a assinatura é campo do nosso formulário: sem isto,
+   * o cadastro travava num ovo e galinha. Nada é gravado aqui — o segredo
+   * volta selado em `webhookDraft`, e o primeiro `salvar` o adota.
+   *
+   * O selo leva igreja e casa no contexto: o rascunho de uma igreja não abre
+   * no salvar de outra. Integração já gravada devolve a URL que está valendo.
+   */
+  async rascunhoDeWebhook(churchId: string, provider: PaymentProvider) {
+    this.exigirCofre();
+
+    const existente = await this.buscar(churchId, provider);
+    if (existente) {
+      return { webhooks: this.urlsDeWebhook(existente), webhookDraft: null };
+    }
+
+    const segredo = this.crypto.gerarSegredoDeWebhook();
+    const descriptor = this.registry.descriptor(provider);
+
+    return {
+      webhooks: descriptor.webhookChannels.map((canal) => ({
+        key: canal.key,
+        label: canal.label,
+        url: montarUrlDeWebhook(provider, segredo, canal.key),
+      })),
+      webhookDraft: this.crypto.cifrar(
+        segredo,
+        contextoDoRascunho(churchId, provider),
+      ),
+    };
+  }
+
+  private abrirRascunho(
+    rascunho: string | undefined,
+    churchId: string,
+    provider: PaymentProvider,
+  ): string | null {
+    if (!rascunho) return null;
+
+    try {
+      return this.crypto.decifrar<string>(
+        rascunho,
+        contextoDoRascunho(churchId, provider),
+      );
+    } catch {
+      // Gerar outro em silêncio deixaria no painel uma URL que não existe
+      throw new BadRequestException(
+        'O endereço de notificação gerado no cadastro não é válido. Feche e abra o formulário de novo.',
+      );
+    }
   }
 
   /**

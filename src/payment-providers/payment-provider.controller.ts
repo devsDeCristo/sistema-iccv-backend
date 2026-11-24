@@ -132,6 +132,20 @@ export class PaymentProviderController {
   }
 
   @ApiOperation({
+    summary: 'URL de notificação para usar durante o cadastro',
+    description:
+      'Não grava nada. Devolve a URL e um `webhookDraft`, que vai no primeiro salvar para a integração nascer com essa mesma URL. Integração já salva devolve a URL atual.',
+  })
+  @Post('churches/:churchId/payment-providers/:provider/webhook-draft')
+  @HttpCode(200)
+  rascunhoDeWebhook(
+    @Param('churchId') churchId: string,
+    @Param('provider', ProviderSlugPipe) provider: PaymentProvider,
+  ) {
+    return this.service.rascunhoDeWebhook(churchId, provider);
+  }
+
+  @ApiOperation({
     summary: 'Gera um novo segredo para a URL de notificação',
     description:
       'A URL antiga para de ser aceita na hora. Cadastre a nova no painel do provedor em seguida.',
