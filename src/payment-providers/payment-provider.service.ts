@@ -178,6 +178,10 @@ export class PaymentProviderService {
     const mode = dto.mode ?? existente?.mode ?? PaymentProviderMode.PRODUCTION;
     const enabled = dto.enabled ?? existente?.enabled ?? false;
 
+    // O modo pode vir do que já está gravado, e não do corpo: ligar uma
+    // integração em sandbox também é coisa de dev
+    if (enabled) await this.exigirDevParaSandbox(mode, actorId);
+
     const dados = {
       mode,
       enabled,
@@ -215,19 +219,36 @@ export class PaymentProviderService {
     return this.paraTela(config);
   }
 
-  /** Torna esta a casa que recebe os novos checkouts da igreja. */
-  async definirPadrao(churchId: string, provider: PaymentProvider) {
+  /**
+   * A chave do card: só uma integração cobra por vez.
+   *
+   * Ligar faz desta a que cobra e desliga as demais; desligar a deixa sem
+   * padrão também. Não toca em credencial.
+   */
+  async definirAtivo(
+    churchId: string,
+    provider: PaymentProvider,
+    enabled: boolean,
+    actorId?: string,
+  ) {
     const config = await this.exigir(churchId, provider);
 
-    if (!config.enabled) {
-      throw new BadRequestException(
-        'Ligue a integração antes de torná-la a forma de pagamento padrão.',
-      );
+    if (enabled) {
+      // Sandbox ligada cobra inscrição de verdade com dinheiro de teste
+      await this.exigirDevParaSandbox(config.mode, actorId);
+      // Credencial que este ambiente não abre faria todo checkout falhar
+      this.exigirCofre();
+      this.abrirCofre(config);
     }
 
-    const atualizado = await this.prisma.$transaction((tx) =>
-      this.ajustarPadrao(tx, churchId, provider, true),
-    );
+    const atualizado = await this.prisma.$transaction(async (tx) => {
+      await tx.paymentProviderConfig.update({
+        where: { id: config.id },
+        data: { enabled, updatedById: actorId ?? null },
+      });
+
+      return this.ajustarPadrao(tx, churchId, provider, enabled);
+    });
 
     return this.paraTela(atualizado);
   }
@@ -282,7 +303,7 @@ export class PaymentProviderService {
     } catch {
       // Gerar outro em silêncio deixaria no painel uma URL que não existe
       throw new BadRequestException(
-        'O endereço de notificação gerado no cadastro não é válido. Feche e abra o formulário de novo.',
+        'O endereço de notificação gerado no cadastro não é válido. Recarregue a página e cadastre no painel o endereço novo.',
       );
     }
   }
@@ -375,7 +396,8 @@ export class PaymentProviderService {
   // ----------------------------------------------------------------------
 
   /**
-   * Um padrão por igreja, trocado em transação.
+   * Um padrão por igreja, trocado em transação. A que vira padrão desliga as
+   * demais: só uma integração fica ligada por vez.
    *
    * Fora de transação existe uma janela em que duas casas são a padrão ao
    * mesmo tempo — e `paraIgreja` usa `findFirst`, então o checkout daquele
@@ -390,7 +412,7 @@ export class PaymentProviderService {
     if (viraPadrao) {
       await tx.paymentProviderConfig.updateMany({
         where: { churchId, provider: { not: provider } },
-        data: { isDefault: false },
+        data: { isDefault: false, enabled: false },
       });
     }
 
@@ -586,7 +608,7 @@ export class PaymentProviderService {
 
     if (ator?.role !== Role.DEV) {
       throw new ForbiddenException(
-        'Só o perfil dev pode colocar uma integração em sandbox',
+        'Só o perfil dev pode colocar ou ligar uma integração em sandbox',
       );
     }
   }

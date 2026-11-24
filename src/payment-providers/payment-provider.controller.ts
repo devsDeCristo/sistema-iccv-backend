@@ -80,7 +80,7 @@ export class PaymentProviderController {
    * decisão de plataforma. Deixar o admin da igreja desligar daria a ele um
    * jeito de parar a reconciliação das cobranças que ele mesmo abriu.
    *
-   * `module` é um segmento e `:provider/default` são dois: uma rota não casa no
+   * `module` é um segmento e `:provider/enabled` são dois: uma rota não casa no
    * lugar da outra.
    */
   @ApiOperation({ summary: 'Ligar ou desligar a cobrança online da igreja' })
@@ -108,13 +108,24 @@ export class PaymentProviderController {
     return this.service.salvar(churchId, provider, dto, req.user?.userId);
   }
 
-  @ApiOperation({ summary: 'Define a integração padrão da igreja' })
-  @Patch('churches/:churchId/payment-providers/:provider/default')
-  definirPadrao(
+  @ApiOperation({
+    summary: 'Liga ou desliga uma integração',
+    description:
+      'Só uma cobra por vez: ligar torna esta a integração da igreja e desliga as demais. Não mexe em credencial.',
+  })
+  @Patch('churches/:churchId/payment-providers/:provider/enabled')
+  definirAtivo(
     @Param('churchId') churchId: string,
     @Param('provider', ProviderSlugPipe) provider: PaymentProvider,
+    @Body() dto: DefinirCobrancaDto,
+    @Req() req: any,
   ) {
-    return this.service.definirPadrao(churchId, provider);
+    return this.service.definirAtivo(
+      churchId,
+      provider,
+      dto.enabled,
+      req.user?.userId,
+    );
   }
 
   @ApiOperation({

@@ -291,6 +291,27 @@ entrou (`Payment.provider`).
   Separada da que cria o `WALLET`, porque o Postgres não deixa usar um valor de
   enum na mesma transação que o criou.
 
+### Ligar e desligar uma integração
+
+`PATCH /churches/:churchId/payment-providers/:provider/enabled` com
+`{ enabled }` — é a chave do card na tela, que substituiu o "Usar esta" (a rota
+`PATCH .../:provider/default` saiu). **Só uma integração fica ligada por vez**:
+ligar torna esta a padrão e `ajustarPadrao` desliga as demais (`enabled` e
+`isDefault` falsos), na mesma transação — vale também para o `salvar` com
+`makeDefault`. Desligar tira o padrão junto. Não toca em credencial (o `PUT` de
+salvar exigiria reenviar os campos e apagaria os não secretos que não viessem). `enabled` só
+governa cobrança nova: aviso e reconciliação das cobranças já abertas seguem.
+Ligar exige, antes de mexer em qualquer linha:
+
+- **dev, se a integração estiver em sandbox** — vale também para o `salvar`, que
+  confere o modo final (o gravado, quando o corpo não manda). Sandbox ligada
+  aceita inscrição real e o dinheiro nunca entra; antes, o "Usar esta" deixava o
+  admin fazer isso sem passar pela trava do modo;
+- **credencial que este ambiente consegue abrir** — ligar uma integração
+  cifrada com chave que não está aqui derrubava todo checkout da igreja.
+
+Teste: `src/payment-providers/definir-ativo.spec.ts`.
+
 ## 7. Cobrança online por igreja
 
 Substituiu as duas variáveis globais. A igreja cobra com o módulo **Eventos** no plano **e** a cobrança ligada nela (`Church.modulePayment`, que o dev/super admin alterna em `PATCH /churches/:churchId/payment-providers/module`) — ver `docs/planos.md`. As respostas seguem com o nome `modulePayment`, já calculado. Sem cobrança:
