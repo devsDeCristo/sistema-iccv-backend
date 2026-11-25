@@ -67,6 +67,26 @@ O checkout é criado com:
 
 O backend procura o link cuja relação é `PAY` e envia esse endereço para o frontend. A API do PagBank continua responsável pela coleta dos dados sensíveis de pagamento.
 
+## Pix na tela do sistema (orders)
+
+Com o Pix marcado, ele sai do `/checkouts` e vira uma **order** (`POST
+/orders`) com a cobrança `payment_method.type: "PIX"` e
+`pix.expiration_date`; o copia e cola volta em `charges[0].qr_code.text`. O
+`qr_codes` do topo da order **não** é Pix do banco: é o QR da carteira PagBank
+("Pagar com PagBank", com `arrangements: ["PAGBANK"]`).
+
+- Consulta: `GET /orders/{id}`, com o id guardado como `checkoutId`
+  (`ORDE_…`). A busca `GET /charges?reference_id=` continua para as cobranças
+  de checkout — é a que roda em produção —, mas a documentação não diz que ela
+  alcança as de order.
+- Aviso: vai para `notification_urls` (a mesma URL de pagamento). Se a busca
+  por referência não achar a cobrança e o aviso for de uma order (`ORDE_…`), a
+  confirmação vai pela order, com a nossa credencial.
+- Não há como cancelar a order antes de paga; o QR vence no prazo dele.
+- A conta precisa de chave Pix ativa (de preferência aleatória).
+
+Ver `docs/pagamentos.md`, "Pix na tela do sistema".
+
 ## Webhooks
 
 O PagBank envia notificações para os canais de checkout e pagamento. A integração confere o header `x-authenticity-token`, calculado como SHA-256 de:

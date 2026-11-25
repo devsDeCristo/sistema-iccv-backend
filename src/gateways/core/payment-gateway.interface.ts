@@ -39,8 +39,9 @@ export interface PaymentGateway {
    * uma só, ela é a forma do pedido (o PayPal só com Pix): o serviço a trata
    * como escolhida, inclusive para reaproveitar o checkout aberto.
    *
-   * Existe por causa do PayPal: lá o Pix e a carteira/cartão são pedidos
-   * diferentes, e o tipo do pedido tem que ser decidido na criação. Recebe o
+   * Existe por causa do Pix na nossa tela (PayPal, Mercado Pago, PagBank,
+   * Ton): o Pix é uma order com QR dinâmico, e o resto vai para o checkout do
+   * gateway — o tipo do pedido tem que ser decidido na criação. Recebe o
    * contexto porque a resposta depende da configuração da igreja (a conta
    * precisa ter o Pix habilitado).
    */
@@ -60,8 +61,9 @@ export interface PaymentGateway {
    * cobrança nenhuma vez" são a mesma coisa aqui, mas quem chama precisa poder
    * distinguir isso de uma casa fora do ar.
    *
-   * @param checkoutId o id que `createCheckout` devolveu. Só o PayPal usa: a
-   * API de Orders não busca por referência, só pelo id do pedido.
+   * @param checkoutId o id que `createCheckout` devolveu. Usam o PayPal (a API
+   * de Orders dele não busca por referência) e o Pix na nossa tela do Mercado
+   * Pago (`ORD…`) e do PagBank (`ORDE_…`): a order é consultada pelo id.
    */
   listCharges(
     referenceId: string,

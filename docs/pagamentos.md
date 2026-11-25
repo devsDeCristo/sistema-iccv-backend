@@ -182,6 +182,42 @@ ninguém atravessar. Ver a armadilha nº 3 mais abaixo.
 
 ---
 
+## 4.1. Pix na tela do sistema
+
+Com o Pix marcado nas formas de pagamento, nos gateways **PayPal, Mercado Pago,
+PagBank e Ton** o Pix sai do checkout hospedado e é pago na nossa tela
+(`/eventos/:id/pagamento/pix/:referenceId`), com **QR dinâmico** criado na API
+de pedidos do gateway: valor e validade desta cobrança, e um identificador que
+o gateway amarra ao pagamento — é o que dá a baixa automática. As outras formas
+seguem no checkout. A InfinitePay fica de fora: a API dela só gera link.
+
+A regra é uma só (`src/gateways/core/opcoes-de-pagamento.ts`):
+
+- `escolhasComPixNaTela`: sem Pix, nada a perguntar; só Pix, `[PIX]` (não é
+  pergunta, é a forma do pedido — ver `formaDoPedido`); Pix e mais alguma,
+  `[PIX, CREDIT_CARD]`, onde `CREDIT_CARD` quer dizer "o checkout do gateway",
+  com o que estiver ligado lá;
+- `querPixNaTela`: o pedido sai em Pix quando o inscrito escolheu ou quando é a
+  única forma;
+- `formasDoCheckout`: o checkout leva as formas ligadas menos o Pix;
+- `rotuloDoCheckout`: o nome da outra saída na pergunta (`choice.checkoutLabel`);
+- `pixIndisponivel`: a recusa do gateway na criação vira 422 "O Pix não está
+  disponível agora. Escolha outra forma de pagamento." — o caso comum é a conta
+  sem chave Pix, que no checkout só escondia o Pix.
+
+| Gateway      | Cria                                                                      | Código                                        | Consulta e aviso |
+| ------------ | ------------------------------------------------------------------------- | --------------------------------------------- | ---------------- |
+| Mercado Pago | `POST /v1/orders` (`type: online`, `payment_method: { id: pix, type: bank_transfer }`, `expiration_time` em ISO 8601) | `transactions.payments[0].payment_method.qr_code` | `GET /v1/orders/{id}` pelo `checkoutId` (`ORD…`); aviso do tipo `order`, que **só chega pela URL do painel** com o evento "Order" marcado — order não tem URL própria |
+| PagBank      | `POST /orders` com `charges[].payment_method.type: PIX` (o `qr_codes` do topo é a carteira PagBank, outro produto) | `charges[0].qr_code.text`                     | `GET /orders/{id}` pelo `checkoutId` (`ORDE_…`); o aviso vai para `notification_urls` e, se a busca por referência não achar a cobrança, é confirmado pela order |
+| Ton          | o mesmo `POST /orders`, com pagamento `pix` em vez de `checkout`          | `charges[0].last_transaction.qr_code`         | os caminhos de sempre: o pedido tem o nosso `code` |
+
+Pix substituído (o inscrito gerou outro): no Mercado Pago a order é cancelada
+(`POST /v1/orders/{id}/cancel`); no Ton o pedido é fechado; no PagBank não há
+como cancelar antes de pagar, e o QR vence no prazo dele (1 h).
+
+Testes: `src/gateways/pix-na-tela.spec.ts` (e `opcoes-de-pagamento.spec.ts`
+para o checkout sem o Pix).
+
 ## 5. Webhooks
 
 `/webhooks/<casa>/<segredo>/<canal>`

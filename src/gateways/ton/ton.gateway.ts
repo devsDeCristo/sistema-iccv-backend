@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   PaymentMethod,
   PaymentProvider,
@@ -14,7 +18,12 @@ import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
   campoDeFormas,
   campoDeParcelas,
+  escolhasComPixNaTela,
+  formasDoCheckout,
   formasEscolhidas,
+  PIX_INDISPONIVEL,
+  pixIndisponivel,
+  querPixNaTela,
 } from '../core/opcoes-de-pagamento';
 import {
   GatewayCharge,
@@ -123,7 +132,8 @@ export class TonGateway implements PaymentGateway {
       Math.round((pedido.expiresAt.getTime() - Date.now()) / MINUTO),
     );
 
-    const payload = {
+    // o mesmo pedido nos dois caminhos; muda só o pagamento
+    const base = {
       code: pedido.referenceId,
       closed: false,
       customer: {
@@ -146,6 +156,17 @@ export class TonGateway implements PaymentGateway {
         quantity: item.quantity,
         amount: item.unitAmountCents,
       })),
+    };
+
+    if (querPixNaTela(formas, pedido.paymentMethod)) {
+      return this.criarPix(base, minutos, cred, ctx);
+    }
+
+    // o Pix ligado é pago na nossa tela: no checkout ficam as outras
+    const doCheckout = formasDoCheckout(formas);
+
+    const payload = {
+      ...base,
       payments: [
         {
           payment_method: 'checkout',
@@ -153,16 +174,14 @@ export class TonGateway implements PaymentGateway {
             expires_in: minutos,
             // a forma padrão precisa estar entre as aceitas, senão o
             // Pagar.me recusa o pedido
-            default_payment_method: formas.includes(PaymentMethod.PIX)
-              ? 'pix'
-              : TIPO_NO_TON[formas[0]],
-            accepted_payment_methods: formas.map((f) => TIPO_NO_TON[f]),
+            default_payment_method: TIPO_NO_TON[doCheckout[0]],
+            accepted_payment_methods: doCheckout.map((f) => TIPO_NO_TON[f]),
             success_url: pedido.redirectUrl,
             customer_editable: false,
             skip_checkout_success_page: false,
             // a configuração de cada forma só vai junto dela: a desmarcada
             // não leva bloco nenhum
-            ...(formas.includes(PaymentMethod.CREDIT_CARD) && {
+            ...(doCheckout.includes(PaymentMethod.CREDIT_CARD) && {
               credit_card: {
                 statement_descriptor: pedido.softDescriptor.slice(0, 13),
                 // Sem juros e com o total igual ao valor da compra: quem
@@ -171,9 +190,6 @@ export class TonGateway implements PaymentGateway {
                 // configuração.
                 installments: this.parcelas(cred, total),
               },
-            }),
-            ...(formas.includes(PaymentMethod.PIX) && {
-              pix: { expires_in: minutos * 60 },
             }),
           },
         },
@@ -189,6 +205,70 @@ export class TonGateway implements PaymentGateway {
       // cancelar, e cancelar é a única coisa que fazemos com esse id depois.
       checkoutId: pedidoCriado?.id,
       payUrl: checkout?.payment_url ?? '',
+      raw: pedidoCriado,
+    };
+  }
+
+  /** Com Pix ligado, o inscrito escolhe entre o Pix na nossa tela e o checkout */
+  paymentMethodChoices(ctx: GatewayContext): PaymentMethod[] {
+    return escolhasComPixNaTela(
+      formasEscolhidas(ctx.credentials.enabledMethods, FORMAS),
+    );
+  }
+
+  /**
+   * O Pix pago na nossa tela: o mesmo pedido, com pagamento `pix` em vez de
+   * `checkout`. O QR é dinâmico (valor e validade deste pedido), e a baixa
+   * chega pelos mesmos caminhos do checkout — o pedido tem o nosso `code`.
+   */
+  private async criarPix(
+    base: Record<string, unknown>,
+    minutos: number,
+    cred: TonCredenciais,
+    ctx: GatewayContext,
+  ): Promise<HostedCheckoutResult> {
+    const pedidoCriado = await this.client
+      .createOrder(
+        {
+          ...base,
+          payments: [
+            { payment_method: 'pix', pix: { expires_in: minutos * 60 } },
+          ],
+        },
+        cred,
+        ctx.mode,
+      )
+      .catch((erro) => {
+        throw pixIndisponivel(erro);
+      });
+
+    const transacao = pedidoCriado?.charges?.[0]?.last_transaction;
+    const code: string | undefined = transacao?.qr_code;
+
+    // Conta sem Pix habilitado: o pedido nasce, mas a transação falha e não
+    // traz código. Fecha o pedido para ele não ficar pendurado.
+    if (!code) {
+      this.logger.warn(
+        `Ton — pedido de Pix ${pedidoCriado?.id} sem código (transação ${transacao?.status}).`,
+      );
+      if (pedidoCriado?.id) {
+        this.client
+          .cancelOrder(pedidoCriado.id, cred, ctx.mode)
+          .catch(() => undefined);
+      }
+      throw new UnprocessableEntityException(PIX_INDISPONIVEL);
+    }
+
+    return {
+      checkoutId: pedidoCriado.id,
+      // sem página do lado de lá: o link é a nossa tela do QR
+      payUrl: '',
+      pix: {
+        code,
+        expiresAt: transacao?.expires_at
+          ? new Date(transacao.expires_at)
+          : new Date(Date.now() + minutos * MINUTO),
+      },
       raw: pedidoCriado,
     };
   }
@@ -382,7 +462,8 @@ export class TonGateway implements PaymentGateway {
 
     return {
       status: mapearStatus(charge.status),
-      method: mapearMetodo(charge.payment_method),
+      // a resposta da criação traz "Pix" com maiúscula; a do pagamento, "pix"
+      method: mapearMetodo(charge.payment_method?.toLowerCase?.()),
       createdAt: new Date(charge.created_at ?? Date.now()),
       paidAmountCents: typeof pago === 'number' ? pago : null,
       payload: {

@@ -87,13 +87,18 @@ describe('Formas de pagamento e parcelas', () => {
       }),
     );
 
+    // o Pix ligado é pago na nossa tela, e sai do checkout junto das desmarcadas
     expect(c.enviado.corpo.payment_methods).toEqual({
-      excluded_payment_types: [{ id: 'ticket' }, { id: 'debit_card' }],
+      excluded_payment_types: [
+        { id: 'bank_transfer' },
+        { id: 'ticket' },
+        { id: 'debit_card' },
+      ],
       installments: 6,
     });
   });
 
-  it('Mercado Pago sem escolha não exclui nada nem limita', async () => {
+  it('Mercado Pago sem escolha só tira o Pix (vai para a nossa tela) e não limita', async () => {
     const c = cliente('createPreference');
     await new MercadoPagoGateway(c).createCheckout(
       pedido,
@@ -101,7 +106,7 @@ describe('Formas de pagamento e parcelas', () => {
     );
 
     expect(c.enviado.corpo.payment_methods).toEqual({
-      excluded_payment_types: [],
+      excluded_payment_types: [{ id: 'bank_transfer' }],
     });
   });
 
@@ -115,10 +120,8 @@ describe('Formas de pagamento e parcelas', () => {
       }),
     );
 
-    expect(c.enviado.corpo.payment_methods).toEqual([
-      { type: 'CREDIT_CARD' },
-      { type: 'PIX' },
-    ]);
+    // o Pix ligado é pago na nossa tela: no checkout fica só o crédito
+    expect(c.enviado.corpo.payment_methods).toEqual([{ type: 'CREDIT_CARD' }]);
     expect(c.enviado.corpo.payment_methods_configs).toEqual([
       {
         type: 'CREDIT_CARD',
@@ -132,12 +135,12 @@ describe('Formas de pagamento e parcelas', () => {
     await new PagbankGateway(c).createCheckout(
       pedido,
       ctx(PaymentProvider.PAGBANK, {
-        enabledMethods: 'PIX',
+        enabledMethods: 'BOLETO',
         maxInstallments: '3',
       }),
     );
 
-    expect(c.enviado.corpo.payment_methods).toEqual([{ type: 'PIX' }]);
+    expect(c.enviado.corpo.payment_methods).toEqual([{ type: 'BOLETO' }]);
     expect(c.enviado.corpo.payment_methods_configs).toBeUndefined();
   });
 

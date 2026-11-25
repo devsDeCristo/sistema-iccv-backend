@@ -107,6 +107,52 @@ export class MercadoPagoClient {
     }
   }
 
+  /**
+   * Cria uma order — hoje, só a de Pix pago na nossa tela.
+   *
+   * @param idempotencyKey a nossa referência: a chave é obrigatória na API de
+   * orders, e repetir o pedido devolve a mesma order em vez de abrir outra.
+   */
+  async createOrder(
+    payload: Record<string, unknown>,
+    cred: MercadoPagoCredenciais,
+    idempotencyKey: string,
+  ) {
+    try {
+      const { data } = await this.http(cred).post('/v1/orders', payload, {
+        headers: { 'X-Idempotency-Key': idempotencyKey },
+      });
+      return data;
+    } catch (err: any) {
+      falhaDoGateway(this.logger, 'Mercado Pago', 'criar order', err);
+    }
+  }
+
+  /** A order inteira; nula quando o Mercado Pago não a conhece */
+  async getOrder(orderId: string, cred: MercadoPagoCredenciais) {
+    try {
+      const { data } = await this.http(cred).get(`/v1/orders/${orderId}`);
+      return data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return null;
+      falhaDoGateway(this.logger, 'Mercado Pago', 'obter order', err);
+    }
+  }
+
+  /**
+   * Cancela uma order ainda não paga. A API só aceita em `action_required` ou
+   * `created`; paga, ela responde 409 — e aí não há o que cancelar mesmo.
+   */
+  async cancelOrder(orderId: string, cred: MercadoPagoCredenciais) {
+    try {
+      await this.http(cred).post(`/v1/orders/${orderId}/cancel`, undefined, {
+        headers: { 'X-Idempotency-Key': `cancelar-${orderId}` },
+      });
+    } catch (err: any) {
+      falhaDoGateway(this.logger, 'Mercado Pago', 'cancelar order', err);
+    }
+  }
+
   /** Quem é o dono deste access token */
   async me(cred: MercadoPagoCredenciais) {
     const { data } = await this.http(cred).get('/users/me');

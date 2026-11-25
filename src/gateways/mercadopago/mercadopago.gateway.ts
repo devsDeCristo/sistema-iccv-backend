@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   PaymentMethod,
   PaymentProvider,
@@ -13,12 +17,17 @@ import {
 import { PaymentGateway } from '../core/payment-gateway.interface';
 import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
-import { aplicarDesconto } from '../core/discount';
+import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
   campoDeFormas,
   campoDeParcelas,
+  escolhasComPixNaTela,
+  formasDoCheckout,
   formasEscolhidas,
   parcelasEscolhidas,
+  PIX_INDISPONIVEL,
+  pixIndisponivel,
+  querPixNaTela,
 } from '../core/opcoes-de-pagamento';
 import {
   GatewayCharge,
@@ -94,7 +103,9 @@ export class MercadoPagoGateway implements PaymentGateway {
         label: 'Assinatura secreta do webhook',
         required: true,
         secret: true,
-        help: 'Painel › Webhooks. Sem ela o sistema recusa os retornos.',
+        // "Order" é o aviso do Pix pago na nossa tela: order não tem URL
+        // própria, e sem o evento marcado a baixa espera a conferência
+        help: 'Painel › Webhooks. Marque os eventos Pagamentos e Order (Mercado Pago). Sem a assinatura o sistema recusa os retornos.',
       },
       campoDeFormas(FORMAS),
       campoDeParcelas(12),
@@ -113,6 +124,13 @@ export class MercadoPagoGateway implements PaymentGateway {
     const [nome, ...sobrenome] = pedido.customer.name.trim().split(/\s+/);
     const formas = formasEscolhidas(ctx.credentials.enabledMethods, FORMAS);
     const parcelas = parcelasEscolhidas(ctx.credentials.maxInstallments, 12);
+
+    if (querPixNaTela(formas, pedido.paymentMethod)) {
+      return this.criarPix(pedido, totalEmCentavos(itens), ctx);
+    }
+
+    // o Pix ligado é pago na nossa tela: no checkout ficam as outras
+    const doCheckout = formasDoCheckout(formas);
 
     const payload = {
       external_reference: pedido.referenceId,
@@ -146,9 +164,9 @@ export class MercadoPagoGateway implements PaymentGateway {
       // O Checkout Pro só sabe excluir: o que a igreja desmarcou sai por tipo.
       // Saldo em conta não sai nunca — o Mercado Pago não deixa.
       payment_methods: {
-        excluded_payment_types: FORMAS.filter((f) => !formas.includes(f)).map(
-          (f) => ({ id: TIPO_NO_MERCADO_PAGO[f] }),
-        ),
+        excluded_payment_types: FORMAS.filter(
+          (f) => !doCheckout.includes(f),
+        ).map((f) => ({ id: TIPO_NO_MERCADO_PAGO[f] })),
         ...(parcelas && { installments: parcelas }),
       },
       auto_return: 'approved',
@@ -171,10 +189,111 @@ export class MercadoPagoGateway implements PaymentGateway {
     };
   }
 
+  /** Com Pix ligado, o inscrito escolhe entre o Pix na nossa tela e o checkout */
+  paymentMethodChoices(ctx: GatewayContext): PaymentMethod[] {
+    return escolhasComPixNaTela(
+      formasEscolhidas(ctx.credentials.enabledMethods, FORMAS),
+    );
+  }
+
+  /**
+   * O Pix pago na nossa tela, pela API de orders (`POST /v1/orders`).
+   *
+   * QR dinâmico: valor e validade desta cobrança, e a order leva a nossa
+   * referência em `external_reference`. Duas diferenças da preferência:
+   *
+   * - não há URL de aviso por order — o aviso chega pela URL cadastrada no
+   *   painel, com tipo `order` (ver `parseWebhook`);
+   * - os pagamentos de uma order não aparecem na busca de pagamentos, então a
+   *   consulta vai pela order, pelo id que guardamos como `checkoutId`.
+   */
+  private async criarPix(
+    pedido: HostedCheckoutRequest,
+    totalCentavos: number,
+    ctx: GatewayContext,
+  ): Promise<HostedCheckoutResult> {
+    const [nome, ...sobrenome] = pedido.customer.name.trim().split(/\s+/);
+    const total = (totalCentavos / 100).toFixed(2);
+    const minutos = Math.max(
+      5,
+      Math.round((pedido.expiresAt.getTime() - Date.now()) / 60000),
+    );
+
+    const order = await this.client
+      .createOrder(
+        {
+          type: 'online',
+          processing_mode: 'automatic',
+          external_reference: pedido.referenceId,
+          total_amount: total,
+          description: pedido.eventName.slice(0, 150),
+          payer: {
+            email: pedido.customer.email,
+            first_name: nome,
+            last_name: sobrenome.join(' ') || nome,
+            identification: {
+              type: 'CPF',
+              number: pedido.customer.taxId.replace(/\D/g, ''),
+            },
+          },
+          transactions: {
+            payments: [
+              {
+                amount: total,
+                payment_method: { id: 'pix', type: 'bank_transfer' },
+                expiration_time: `PT${minutos}M`,
+              },
+            ],
+          },
+        },
+        this.cred(ctx),
+        pedido.referenceId,
+      )
+      .catch((erro) => {
+        throw pixIndisponivel(erro);
+      });
+
+    const pagamento = order?.transactions?.payments?.[0];
+    const code: string | undefined = pagamento?.payment_method?.qr_code;
+
+    if (!code) {
+      this.logger.warn(
+        `Mercado Pago — order de Pix ${order?.id} sem código (${order?.status}/${order?.status_detail}).`,
+      );
+      throw new UnprocessableEntityException(PIX_INDISPONIVEL);
+    }
+
+    return {
+      checkoutId: order.id,
+      // sem página do lado de lá: o link é a nossa tela do QR
+      payUrl: '',
+      pix: {
+        code,
+        expiresAt: pagamento?.date_of_expiration
+          ? new Date(pagamento.date_of_expiration)
+          : new Date(Date.now() + minutos * 60000),
+      },
+      raw: order,
+    };
+  }
+
+  /**
+   * @param checkoutId quando é uma order (`ORD…`, o Pix na nossa tela), a
+   * consulta vai por ela: pagamento de order não aparece na busca de
+   * pagamentos por referência.
+   */
   async listCharges(
     referenceId: string,
     ctx: GatewayContext,
+    checkoutId?: string,
   ): Promise<GatewayCharge[]> {
+    if (ehOrder(checkoutId)) {
+      const order = await this.client.getOrder(checkoutId, this.cred(ctx));
+      if (!order)
+        throw new GatewayResourceNotFoundError('Mercado Pago', referenceId);
+      return [this.paraChargeDaOrder(order)];
+    }
+
     const pagamentos = await this.client.searchPayments(
       referenceId,
       this.cred(ctx),
@@ -191,6 +310,13 @@ export class MercadoPagoGateway implements PaymentGateway {
   }
 
   async inactivateCheckout(checkoutId: string, ctx: GatewayContext) {
+    // o Pix substituído: a order não paga é cancelada, para o QR antigo não
+    // receber depois de outro ter sido gerado
+    if (ehOrder(checkoutId)) {
+      await this.client.cancelOrder(checkoutId, this.cred(ctx));
+      return;
+    }
+
     await this.client.expirePreference(checkoutId, this.cred(ctx));
   }
 
@@ -250,6 +376,32 @@ export class MercadoPagoGateway implements PaymentGateway {
     ctx: GatewayContext,
   ): Promise<GatewayWebhookEvent> {
     const tipo = req.body?.type ?? req.body?.topic ?? req.query?.type;
+
+    // O Pix na nossa tela é uma order, e o aviso dela vem com tipo `order`. O
+    // corpo só aponta a order; o estado vem da API, com a nossa credencial.
+    if (tipo === 'order') {
+      const orderId = this.idDoPagamento(req);
+      const order = orderId
+        ? await this.client.getOrder(orderId, this.cred(ctx))
+        : null;
+
+      if (!order?.external_reference) {
+        return {
+          kind: 'ignored',
+          reason: 'order sem referência externa — não é deste sistema',
+        };
+      }
+
+      const charge = this.paraChargeDaOrder(order);
+      return {
+        kind: 'payment',
+        referenceId: order.external_reference,
+        status: charge.status,
+        method: charge.method,
+        paidAmountCents: charge.paidAmountCents,
+        payload: charge.payload,
+      };
+    }
 
     // Chegam avisos de estorno, contestação e pedido comercial na mesma URL
     if (tipo !== 'payment') {
@@ -385,6 +537,34 @@ export class MercadoPagoGateway implements PaymentGateway {
     };
   }
 
+  /** A order como cobrança: o estado e o valor são os da order inteira */
+  private paraChargeDaOrder(order: any): GatewayCharge {
+    const pagamento = order?.transactions?.payments?.[0];
+    // reais em texto ("120.00"), como tudo na API de orders
+    const pago = Number(order?.total_paid_amount);
+
+    return {
+      status: mapearStatusDaOrder(order?.status),
+      method: mapearMetodo(pagamento?.payment_method?.type),
+      createdAt: new Date(
+        order?.created_date ?? order?.date_created ?? Date.now(),
+      ),
+      paidAmountCents:
+        order?.total_paid_amount !== undefined && Number.isFinite(pago)
+          ? Math.round(pago * 100)
+          : null,
+      payload: {
+        payment_method: {
+          type: pagamento?.payment_method?.type,
+          id: pagamento?.payment_method?.id,
+        },
+        codeTransaction: String(pagamento?.id ?? order?.id),
+        receipt: pagamento?.payment_method?.ticket_url ?? null,
+      },
+      raw: order,
+    };
+  }
+
   private cred(ctx: GatewayContext): MercadoPagoCredenciais {
     return {
       accessToken: ctx.credentials.accessToken,
@@ -415,6 +595,35 @@ function mapearMetodo(tipo?: string): PaymentMethod {
       return PaymentMethod.BOLETO;
     default:
       return metodoNaoMapeado('Mercado Pago', tipo);
+  }
+}
+
+/** Order do Pix na nossa tela: `ORD…`. Preferência tem outro formato. */
+function ehOrder(checkoutId?: string): checkoutId is string {
+  return !!checkoutId && checkoutId.startsWith('ORD');
+}
+
+/**
+ * Estados da order (documentação "Status de order"). Pago é `processed`
+ * (`accredited`); Pix esperando é `action_required` (`waiting_transfer`);
+ * expirado vem como `canceled` ou `failed` com detalhe `expired`.
+ */
+function mapearStatusDaOrder(status?: string): PaymentStatus {
+  switch (status) {
+    case 'processed':
+      return PaymentStatus.PAID;
+    case 'processing':
+      return PaymentStatus.IN_ANALYSIS;
+    case 'canceled':
+      return PaymentStatus.CANCELED;
+    case 'failed':
+      return PaymentStatus.DECLINED;
+    case 'refunded':
+    case 'charged_back':
+      return PaymentStatus.REFUNDED;
+    // `created` e `action_required`: ainda não pago
+    default:
+      return PaymentStatus.WAITING;
   }
 }
 

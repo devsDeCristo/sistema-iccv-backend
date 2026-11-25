@@ -30,6 +30,7 @@ import {
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
 import { HostedCheckoutRequest } from 'src/gateways/core/gateway.types';
 import { totalCobradoEmCentavos } from 'src/gateways/core/discount';
+import { rotuloDoCheckout } from 'src/gateways/core/opcoes-de-pagamento';
 import { conferirValorPago } from './amount-check';
 import {
   CANAL_DE_CHECKOUT,
@@ -330,7 +331,8 @@ export class PaymentService {
       }
 
       /**
-       * O gateway pede que o inscrito escolha a forma antes? Só o PayPal: lá o
+       * O gateway pede que o inscrito escolha a forma antes? Todo gateway com
+       * Pix na nossa tela (PayPal, Mercado Pago, PagBank, Ton): lá o
        * Pix e o cartão são pedidos diferentes. Sem a escolha (ou com uma que o
        * gateway não ofereceu), a resposta é a pergunta, e não um link — e sai
        * daqui, antes de qualquer escrita. Nos outros gateways a lista vem
@@ -347,6 +349,12 @@ export class PaymentService {
             provider: casaDaIgreja.config.provider,
             label: casaDaIgreja.gateway.descriptor.label,
             methods: formas,
+            // o nome da outra saída, com o que a igreja ligou no checkout:
+            // "Cartão ou boleto", "Cartão ou conta PayPal"…
+            checkoutLabel: rotuloDoCheckout(
+              casaDaIgreja.gateway.descriptor.fields,
+              casaDaIgreja.context.credentials,
+            ),
           },
         };
       }
@@ -664,7 +672,8 @@ export class PaymentService {
       // ============================
       const result = await gateway.createCheckout(pedido, context);
 
-      // Pix sem página no gateway (PayPal): o link é a nossa tela do QR, que
+      // Pix pago na nossa tela (PayPal, Mercado Pago, PagBank, Ton): o link é
+      // a nossa tela do QR, que
       // busca o código no servidor pela referência
       const linkPay = result.pix
         ? `${frontendUrl}/eventos/${eventId}/pagamento/pix/${pedido.referenceId}`

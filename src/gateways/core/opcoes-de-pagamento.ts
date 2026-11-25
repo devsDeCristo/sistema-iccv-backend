@@ -1,4 +1,6 @@
+import { UnprocessableEntityException } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
+import { GatewayRequestError } from './gateway.errors';
 import { CredentialField } from './gateway.types';
 
 /**
@@ -60,4 +62,87 @@ export function parcelasEscolhidas(
   const n = Number(valor);
 
   return valor && Number.isInteger(n) && n >= 1 ? Math.min(n, teto) : null;
+}
+
+/**
+ * O Pix na tela do sistema.
+ *
+ * Com o Pix ligado, ele sai do checkout do gateway e passa a ser pago aqui,
+ * com QR dinâmico criado pela API de pedidos do gateway; as outras formas
+ * continuam no checkout. A pergunta ao inscrito é entre as duas coisas, e
+ * `CREDIT_CARD` é o nome da segunda: "o checkout do gateway", com o que
+ * estiver ligado lá (cartão, boleto, saldo).
+ */
+export const CHECKOUT_DO_GATEWAY = PaymentMethod.CREDIT_CARD;
+
+/** O que perguntar: nada sem Pix; só o Pix quando é a única forma; senão as duas saídas */
+export function escolhasComPixNaTela(formas: PaymentMethod[]): PaymentMethod[] {
+  if (!formas.includes(PaymentMethod.PIX)) return [];
+
+  return formas.some((forma) => forma !== PaymentMethod.PIX)
+    ? [PaymentMethod.PIX, CHECKOUT_DO_GATEWAY]
+    : [PaymentMethod.PIX];
+}
+
+/** O pedido sai em Pix: escolhido pelo inscrito, ou por ser a única forma ligada */
+export function querPixNaTela(
+  formas: PaymentMethod[],
+  pedida?: PaymentMethod,
+): boolean {
+  if (!formas.includes(PaymentMethod.PIX)) return false;
+
+  return (
+    pedida === PaymentMethod.PIX ||
+    formas.every((forma) => forma === PaymentMethod.PIX)
+  );
+}
+
+/** As formas do checkout do gateway: o Pix ligado vai para a nossa tela, e não para lá */
+export function formasDoCheckout<T extends PaymentMethod>(formas: T[]): T[] {
+  return formas.filter((forma) => forma !== PaymentMethod.PIX);
+}
+
+/**
+ * O nome da segunda saída da pergunta, com o que a igreja ligou: "Cartão",
+ * "Boleto", "Cartão ou boleto". O gateway pode dar o seu (`methodLabels`): no
+ * PayPal é "Cartão ou conta PayPal".
+ */
+export function rotuloDoCheckout(
+  campos: CredentialField[],
+  credenciais: Record<string, string>,
+): string {
+  const campo = (campos ?? []).find((c) => c.methods);
+  const proprio = campo?.methodLabels?.[CHECKOUT_DO_GATEWAY];
+  if (proprio) return proprio;
+
+  const formas = formasEscolhidas(
+    credenciais?.[CAMPO_DE_FORMAS],
+    campo?.methods ?? [],
+    campo?.defaultMethods,
+  );
+  const partes = [
+    formas.some(
+      (f) => f === PaymentMethod.CREDIT_CARD || f === PaymentMethod.DEBIT_CARD,
+    ) && 'cartão',
+    formas.includes(PaymentMethod.BOLETO) && 'boleto',
+  ].filter((parte): parte is string => !!parte);
+
+  const texto = partes.length ? partes.join(' ou ') : 'outras formas';
+  return texto[0].toUpperCase() + texto.slice(1);
+}
+
+export const PIX_INDISPONIVEL =
+  'O Pix não está disponível agora. Escolha outra forma de pagamento.';
+
+/**
+ * A recusa do gateway ao criar o Pix vira uma mensagem que o inscrito entende.
+ *
+ * O caso comum é a conta da igreja sem chave Pix: no checkout o gateway só
+ * escondia o Pix, e aqui a criação falha. Melhor dizer "escolha outra forma"
+ * do que mostrar "não foi possível falar com o gateway".
+ */
+export function pixIndisponivel(erro: unknown): unknown {
+  return erro instanceof GatewayRequestError
+    ? new UnprocessableEntityException(PIX_INDISPONIVEL)
+    : erro;
 }

@@ -90,6 +90,8 @@ describe('createCheckout — escolha da forma de pagamento', () => {
       provider: PaymentProvider.PAYPAL,
       label: 'PayPal',
       methods: [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD],
+      // sem campo de formas no gateway falso, o nome genérico
+      checkoutLabel: 'Outras formas',
     });
     expect(createCheckout).not.toHaveBeenCalled();
     expect(banco.$transaction).not.toHaveBeenCalled();

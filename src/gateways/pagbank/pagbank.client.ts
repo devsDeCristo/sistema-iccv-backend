@@ -72,6 +72,41 @@ export class PagbankClient {
     }
   }
 
+  /** Cria uma order — hoje, só a de Pix pago na nossa tela */
+  async createOrder(
+    payload: Record<string, unknown>,
+    cred: PagbankCredenciais,
+    mode: PaymentProviderMode,
+  ) {
+    try {
+      const { data } = await this.http(cred, mode).post('/orders', payload);
+      return data;
+    } catch (err: any) {
+      falhaDoGateway(this.logger, 'PagBank', 'criar order', err);
+    }
+  }
+
+  /**
+   * A order inteira, pelo id (`ORDE_…`). É a consulta documentada para a
+   * order de Pix: a busca de cobranças por `reference_id` funciona para as de
+   * checkout, mas a documentação não diz que alcança as de order.
+   */
+  async getOrder(
+    orderId: string,
+    cred: PagbankCredenciais,
+    mode: PaymentProviderMode,
+  ) {
+    try {
+      const { data } = await this.http(cred, mode).get(`/orders/${orderId}`);
+      return data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        throw new GatewayResourceNotFoundError('PagBank', orderId);
+      }
+      falhaDoGateway(this.logger, 'PagBank', 'consultar order', err);
+    }
+  }
+
   /**
    * As cobranças de uma referência.
    *

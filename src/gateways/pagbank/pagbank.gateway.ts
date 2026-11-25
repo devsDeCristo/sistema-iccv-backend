@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   CheckoutStatus,
   PaymentMethod,
@@ -12,10 +16,17 @@ import { PaymentGateway } from '../core/payment-gateway.interface';
 import {
   campoDeFormas,
   campoDeParcelas,
+  escolhasComPixNaTela,
+  formasDoCheckout,
   formasEscolhidas,
   parcelasEscolhidas,
+  PIX_INDISPONIVEL,
+  pixIndisponivel,
+  querPixNaTela,
 } from '../core/opcoes-de-pagamento';
 import { metodoNaoMapeado } from '../core/gateway-http';
+import { aplicarDesconto, totalEmCentavos } from '../core/discount';
+import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import {
   GatewayCharge,
   GatewayContext,
@@ -96,6 +107,13 @@ export class PagbankGateway implements PaymentGateway {
     const formas = formasEscolhidas(ctx.credentials.enabledMethods, FORMAS);
     const parcelas = parcelasEscolhidas(ctx.credentials.maxInstallments, 12);
 
+    if (querPixNaTela(formas, pedido.paymentMethod)) {
+      return this.criarPix(pedido, ctx);
+    }
+
+    // o Pix ligado é pago na nossa tela: no checkout ficam as outras
+    const doCheckout = formasDoCheckout(formas);
+
     const payload: CreatePagbankCheckoutDto = {
       reference_id: pedido.referenceId,
       soft_descriptor: pedido.softDescriptor,
@@ -119,10 +137,10 @@ export class PagbankGateway implements PaymentGateway {
         quantity: item.quantity,
         unit_amount: item.unitAmountCents,
       })),
-      payment_methods: formas.map((type) => ({ type })),
+      payment_methods: doCheckout.map((type) => ({ type })),
       // O teto vale só para cartão de crédito, e só se ele estiver na lista
       ...(parcelas &&
-        formas.includes(PaymentMethod.CREDIT_CARD) && {
+        doCheckout.includes(PaymentMethod.CREDIT_CARD) && {
           payment_methods_configs: [
             {
               type: 'CREDIT_CARD',
@@ -147,31 +165,133 @@ export class PagbankGateway implements PaymentGateway {
     };
   }
 
+  /** Com Pix ligado, o inscrito escolhe entre o Pix na nossa tela e o checkout */
+  paymentMethodChoices(ctx: GatewayContext): PaymentMethod[] {
+    return escolhasComPixNaTela(
+      formasEscolhidas(ctx.credentials.enabledMethods, FORMAS),
+    );
+  }
+
+  /**
+   * O Pix pago na nossa tela, pela API de orders (`POST /orders`).
+   *
+   * Pix do banco é a cobrança com `payment_method.type: "PIX"`, e o copia e
+   * cola volta em `charges[].qr_code.text`. O `qr_codes` do topo da order é
+   * outro produto — o QR da carteira PagBank —, e não serve aqui. A order e a
+   * cobrança levam a nossa referência, e o aviso vai para a mesma URL de
+   * pagamento do checkout.
+   */
+  private async criarPix(
+    pedido: HostedCheckoutRequest,
+    ctx: GatewayContext,
+  ): Promise<HostedCheckoutResult> {
+    const itens = aplicarDesconto(pedido.items, pedido.discountCents);
+
+    const order = await this.client
+      .createOrder(
+        {
+          reference_id: pedido.referenceId,
+          customer: {
+            name: pedido.customer.name,
+            email: pedido.customer.email,
+            tax_id: pedido.customer.taxId.replace(/\D/g, ''),
+            phones: [
+              {
+                country: pedido.customer.phone.country || '55',
+                area: pedido.customer.phone.area,
+                number: pedido.customer.phone.number,
+                type: 'MOBILE',
+              },
+            ],
+          },
+          items: itens.map((item) => ({
+            reference_id: item.referenceId,
+            name: item.name,
+            quantity: item.quantity,
+            unit_amount: item.unitAmountCents,
+          })),
+          charges: [
+            {
+              reference_id: pedido.referenceId,
+              description: pedido.eventName.slice(0, 64),
+              amount: { value: totalEmCentavos(itens), currency: 'BRL' },
+              payment_method: {
+                type: 'PIX',
+                pix: { expiration_date: pedido.expiresAt.toISOString() },
+              },
+            },
+          ],
+          notification_urls: [pedido.paymentNotificationUrl],
+        },
+        this.cred(ctx),
+        ctx.mode,
+      )
+      .catch((erro) => {
+        throw pixIndisponivel(erro);
+      });
+
+    const cobranca = order?.charges?.[0];
+    const code: string | undefined = cobranca?.qr_code?.text;
+
+    // conta sem chave Pix: a cobrança nasce recusada e sem código
+    if (!code) {
+      this.logger.warn(
+        `PagBank — order de Pix ${order?.id} sem código (cobrança ${cobranca?.status}).`,
+      );
+      throw new UnprocessableEntityException(PIX_INDISPONIVEL);
+    }
+
+    const validade = cobranca?.payment_method?.pix?.expiration_date;
+
+    return {
+      checkoutId: order.id,
+      // sem página do lado de lá: o link é a nossa tela do QR
+      payUrl: '',
+      pix: {
+        code,
+        expiresAt: validade ? new Date(validade) : pedido.expiresAt,
+      },
+      raw: order,
+    };
+  }
+
+  /**
+   * @param checkoutId quando é uma order (`ORDE_…`, o Pix na nossa tela), a
+   * consulta vai por ela. As cobranças de checkout seguem pela busca por
+   * referência, que é a que roda em produção.
+   */
   async listCharges(
     referenceId: string,
     ctx: GatewayContext,
+    checkoutId?: string,
   ): Promise<GatewayCharge[]> {
+    if (ehOrder(checkoutId)) {
+      const order = await this.client.getOrder(
+        checkoutId,
+        this.cred(ctx),
+        ctx.mode,
+      );
+      const charges: any[] = order?.charges ?? [];
+      if (!charges.length) {
+        throw new GatewayResourceNotFoundError('PagBank', referenceId);
+      }
+      return charges.map(paraCharge);
+    }
+
     const charges = await this.client.getCharges(
       referenceId,
       this.cred(ctx),
       ctx.mode,
     );
 
-    return charges.map((charge) => ({
-      status: mapearStatus(charge.status),
-      method: mapearMetodo(charge.payment_method?.type),
-      createdAt: new Date(charge.created_at),
-      paidAmountCents: valorPago(charge),
-      payload: {
-        payment_method: charge.payment_method,
-        links: charge.links,
-        codeTransaction: charge.id,
-      },
-      raw: charge,
-    }));
+    return charges.map(paraCharge);
   }
 
   async inactivateCheckout(checkoutId: string, ctx: GatewayContext) {
+    // A order de Pix não tem como ser cancelada antes de paga (a API só
+    // devolve dinheiro de cobrança paga); o QR vence sozinho no prazo dele.
+    if (ehOrder(checkoutId)) return;
+
     await this.client.inactivateCheckout(checkoutId, this.cred(ctx), ctx.mode);
   }
 
@@ -232,14 +352,36 @@ export class PagbankGateway implements PaymentGateway {
       };
     }
 
-    const referenceId: string | undefined =
+    let referenceId: string | undefined =
       body.reference_id ?? body.charges?.[0]?.reference_id;
 
     if (!referenceId) {
       return { kind: 'ignored', reason: 'notificação sem referência' };
     }
 
-    const charges = await this.listCharges(referenceId, ctx);
+    let charges: GatewayCharge[];
+    try {
+      charges = await this.listCharges(referenceId, ctx);
+    } catch (erro) {
+      // A busca por referência é a das cobranças de checkout. A order de Pix
+      // pode não aparecer nela: aí a confirmação vai pela própria order, pelo
+      // id do aviso, e a referência passa a ser a que a API devolve. Fora
+      // desse caso o erro segue, e o PagBank tenta avisar de novo.
+      if (
+        !(erro instanceof GatewayResourceNotFoundError) ||
+        !ehOrder(body.id)
+      ) {
+        throw erro;
+      }
+
+      const order = await this.client.getOrder(
+        body.id,
+        this.cred(ctx),
+        ctx.mode,
+      );
+      referenceId = order?.reference_id ?? referenceId;
+      charges = (order?.charges ?? []).map(paraCharge);
+    }
 
     if (charges.length === 0) {
       this.logger.warn(
@@ -329,6 +471,27 @@ export class PagbankGateway implements PaymentGateway {
 }
 
 /** Quanto entrou, em centavos — a API já devolve nessa unidade */
+/** Order de Pix na nossa tela: `ORDE_…`. O checkout é `CHEC_…`. */
+function ehOrder(id?: unknown): id is string {
+  return typeof id === 'string' && id.startsWith('ORDE_');
+}
+
+/** Uma cobrança do PagBank — a do checkout e a da order têm o mesmo formato */
+function paraCharge(charge: any): GatewayCharge {
+  return {
+    status: mapearStatus(charge.status),
+    method: mapearMetodo(charge.payment_method?.type),
+    createdAt: new Date(charge.created_at ?? Date.now()),
+    paidAmountCents: valorPago(charge),
+    payload: {
+      payment_method: charge.payment_method,
+      links: charge.links,
+      codeTransaction: charge.id,
+    },
+    raw: charge,
+  };
+}
+
 function valorPago(charge: any): number | null {
   const pago = charge?.amount?.summary?.paid;
   return typeof pago === 'number' ? pago : null;

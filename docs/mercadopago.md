@@ -100,6 +100,29 @@ Cancelar não existe no vocabulário deles: o que existe é a janela de validade
 `inactivateCheckout` fecha a preferência empurrando `expiration_date_to` para
 ontem — sem isso o link antigo de um checkout substituído continuaria pagável.
 
+## Pix na tela do sistema (orders)
+
+Com o Pix marcado, ele não vai na preferência (`excluded_payment_types` leva
+`bank_transfer`): vira uma **order** (`POST /v1/orders`, `type: online`,
+`processing_mode: automatic`, `X-Idempotency-Key` = nossa referência) e o QR é
+mostrado na nossa tela. Diferenças da preferência que importam:
+
+- **Não há `notification_url` por order.** O aviso chega pela URL cadastrada
+  no painel, com tipo `order` — e só se o evento **"Order (Mercado Pago)"**
+  estiver marcado em Webhooks. A assinatura é a mesma (`x-signature`, `data.id`
+  em minúsculas — o id da order tem letras). Sem o evento, a baixa espera o
+  "Já paguei" ou a conferência de 3 em 3 horas.
+- **O pagamento de uma order não aparece em `/v1/payments/search`.** A
+  consulta vai por `GET /v1/orders/{id}`, com o id guardado como `checkoutId`
+  (`ORD…`). Estados: `action_required/waiting_transfer` aguardando,
+  `processed/accredited` pago, `canceled` ou `failed` com `expired` vencido.
+  Valores vêm em texto, em reais (`"120.00"`).
+- Pix substituído: `POST /v1/orders/{id}/cancel` (só aceita order não paga).
+- A conta precisa de chave Pix cadastrada; sem ela a criação falha e o inscrito
+  vê "O Pix não está disponível agora".
+
+Ver `docs/pagamentos.md`, "Pix na tela do sistema".
+
 ## Webhooks
 
 ### A assinatura
