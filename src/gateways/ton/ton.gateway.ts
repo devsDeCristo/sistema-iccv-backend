@@ -18,6 +18,7 @@ import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
   campoDeFormas,
   campoDeParcelas,
+  campoDeRepasse,
   escolhasComPixNaTela,
   formasDoCheckout,
   formasEscolhidas,
@@ -104,6 +105,7 @@ export class TonGateway implements PaymentGateway {
         12,
         'Quantas parcelas sem juros oferecer. Acima de 1, a taxa das parcelas fica com a igreja.',
       ),
+      campoDeRepasse(FORMAS),
       {
         key: 'baseUrl',
         label: 'URL da API (opcional)',

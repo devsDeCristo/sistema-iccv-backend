@@ -2448,6 +2448,9 @@ export class EventService {
           name: event.church.name,
           modulePayment: cobraOnline(event.church),
           chargesOnline: await this.registry.igrejaCobraOnline(event.churchId),
+          // a taxa de serviço repassada ao inscrito, para a inscrição e a loja
+          // mostrarem junto do valor; nula sem repasse
+          serviceFee: await this.registry.taxasDeServicoDaIgreja(event.churchId),
         },
       };
 

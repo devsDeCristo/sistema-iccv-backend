@@ -10,6 +10,7 @@ import { SecretCryptoService } from 'src/crypto/secret-crypto.service';
 import { PAYMENT_GATEWAYS, PaymentGateway } from './payment-gateway.interface';
 import { GatewayContext, PaymentGatewayDescriptor } from './gateway.types';
 import { SELECT_MODULOS, cobraOnline } from 'src/planos/modulos';
+import { taxasDeServico } from './opcoes-de-pagamento';
 
 /** A casa, a credencial aberta e a linha do banco, juntas */
 export interface GatewayResolvido {
@@ -113,6 +114,27 @@ export class PaymentGatewayRegistry {
     });
 
     return total > 0 && this.crypto.disponivel;
+  }
+
+  /**
+   * A taxa de serviço que esta igreja repassa ao inscrito, por caminho (Pix na
+   * nossa tela, checkout do gateway) — ver `taxasDeServico`. Nula sem gateway
+   * ativo ou sem repasse.
+   *
+   * Lê a dica da credencial (`credentialsHint`), e não o cofre: as formas e as
+   * taxas não são segredo, e as telas pedem isto a cada carregamento.
+   */
+  async taxasDeServicoDaIgreja(churchId: string) {
+    const config = await this.prisma.paymentProviderConfig.findFirst({
+      where: { churchId, enabled: true, isDefault: true },
+      select: { provider: true, credentialsHint: true },
+    });
+    if (!config) return null;
+
+    return taxasDeServico(
+      this.descriptor(config.provider).fields,
+      (config.credentialsHint ?? {}) as Record<string, string>,
+    );
   }
 
   /**

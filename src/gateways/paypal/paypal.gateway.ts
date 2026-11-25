@@ -17,7 +17,11 @@ import {
   GatewayResourceNotFoundError,
 } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
-import { campoDeFormas, formasEscolhidas } from '../core/opcoes-de-pagamento';
+import {
+  campoDeFormas,
+  campoDeRepasse,
+  formasEscolhidas,
+} from '../core/opcoes-de-pagamento';
 import {
   GatewayCharge,
   GatewayContext,
@@ -97,6 +101,7 @@ export class PayPalGateway implements PaymentGateway {
         methodLabels: { CREDIT_CARD: 'Cartão ou conta PayPal' },
         help: 'Pix só depois de ativá-lo na conta PayPal (Configurações da conta › Produtos e serviços › Formas de pagamento). Sem isso, quem escolher Pix recebe erro.',
       }),
+      campoDeRepasse(FORMAS),
     ],
     docsUrl: 'https://developer.paypal.com/docs/api/orders/v2/',
     // O PayPal assina, mas a assinatura não é o que segura a baixa: ver

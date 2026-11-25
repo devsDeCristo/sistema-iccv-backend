@@ -92,6 +92,10 @@ describe('createCheckout — escolha da forma de pagamento', () => {
       methods: [PaymentMethod.PIX, PaymentMethod.CREDIT_CARD],
       // sem campo de formas no gateway falso, o nome genérico
       checkoutLabel: 'Outras formas',
+      // sem repasse de taxa
+      serviceFee: null,
+      // o pagamento falso não tem valor
+      amountCents: 0,
     });
     expect(createCheckout).not.toHaveBeenCalled();
     expect(banco.$transaction).not.toHaveBeenCalled();

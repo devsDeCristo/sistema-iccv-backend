@@ -9,6 +9,7 @@ import { PaymentGateway } from '../core/payment-gateway.interface';
 import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto } from '../core/discount';
+import { campoDeRepasse } from '../core/opcoes-de-pagamento';
 import {
   GatewayCharge,
   GatewayContext,
@@ -58,6 +59,9 @@ export class InfinitePayGateway implements PaymentGateway {
         placeholder: '$suaigreja',
         help: 'O mesmo apelido que aparece no seu link de pagamento da InfinitePay.',
       },
+      // sem escolha de formas pela API: o link oferece Pix e crédito juntos,
+      // e o repasse vale a maior das duas
+      campoDeRepasse([PaymentMethod.PIX, PaymentMethod.CREDIT_CARD]),
     ],
     docsUrl: 'https://www.infinitepay.io/checkout-documentacao',
     signsWebhook: false,

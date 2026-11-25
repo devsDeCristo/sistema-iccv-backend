@@ -21,6 +21,7 @@ import { aplicarDesconto, totalEmCentavos } from '../core/discount';
 import {
   campoDeFormas,
   campoDeParcelas,
+  campoDeRepasse,
   escolhasComPixNaTela,
   formasDoCheckout,
   formasEscolhidas,
@@ -109,6 +110,7 @@ export class MercadoPagoGateway implements PaymentGateway {
       },
       campoDeFormas(FORMAS),
       campoDeParcelas(12),
+      campoDeRepasse(FORMAS),
     ],
     docsUrl:
       'https://www.mercadopago.com.br/developers/pt/docs/checkout-pro/landing',

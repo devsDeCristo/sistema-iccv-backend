@@ -218,6 +218,46 @@ como cancelar antes de pagar, e o QR vence no prazo dele (1 h).
 Testes: `src/gateways/pix-na-tela.spec.ts` (e `opcoes-de-pagamento.spec.ts`
 para o checkout sem o Pix).
 
+## 4.2. Taxa de serviço (repasse ao inscrito)
+
+A igreja pode repassar a taxa do gateway ao inscrito e receber o valor cheio.
+É um campo do adapter (`fees`, chave `serviceFees`, em
+`src/gateways/core/opcoes-de-pagamento.ts`), declarado nos cinco gateways: um
+percentual por forma, gravado como `PIX=0.99,CREDIT_CARD=4.98` (vazio é
+repasse desligado). O salvar aceita só formas da integração e de 0 a 99,99%
+com até duas casas.
+
+- **Qual percentual vale** (`taxasDeServico`): o Pix pago na nossa tela tem a
+  taxa do Pix; o checkout do gateway tem a **maior** taxa entre as formas que
+  ficam lá — o valor é fechado antes de o inscrito escolher cartão ou boleto, e
+  o pior caso garante que a igreja nunca recebe menos que o cheio. Sem Pix na
+  tela (Pix desmarcado, ou a InfinitePay, que não tem escolha), o checkout
+  leva todas.
+- **A conta é por divisão** (`taxaDeServicoEmCentavos`): R$ 120,00 com 4,98%
+  viram R$ 126,29 (R$ 6,29 de taxa); somar 4,98% daria R$ 126,00 e a igreja
+  receberia menos.
+- **Na cobrança**: a taxa entra como um item "Taxa de serviço" em
+  `createCheckout` (serviço de pagamento), calculada sobre o que a igreja tem a
+  receber (com desconto). `chargedAmountCents` já a inclui — a conferência do
+  valor pago compara com o total cobrado — e `PaymentCheckout.serviceFeeCents`
+  guarda a parte da taxa (migração `20261125010000_taxa_de_servico`).
+  `Payment.amount` não muda: é o que a igreja recebe.
+- **O valor da pergunta** (`choice.amountCents`) sai de `centavosACobrar`, a
+  mesma conta da cobrança (preço da regra e produtos arredondados por item,
+  desconto só sobre o ingresso, arredondado no total) — e é ele que a tela usa
+  para o valor de cada saída, mesmo onde ela tem um total próprio.
+- **Minhas Inscrições recebe o valor com desconto** (`registeredRoles[].amount`):
+  `Payment.amount` é gravado sem desconto, e mandá-lo cru anunciava o valor
+  cheio — e a taxa sobre ele — numa inscrição com desconto.
+- **Para as telas**: `registry.taxasDeServicoDaIgreja` (lê a dica da credencial,
+  não o cofre) vai em `serviceFee` no evento (`church.serviceFee`) e em Minhas
+  Inscrições; a pergunta da forma leva `choice.serviceFee`; a tela do Pix,
+  `serviceFeeCents`.
+- A taxa fixa por transação (o "+ R$ 0,40" do PagBank) não entra: só a parte
+  percentual.
+
+Testes: `src/gateways/taxa-de-servico.spec.ts`.
+
 ## 5. Webhooks
 
 `/webhooks/<casa>/<segredo>/<canal>`

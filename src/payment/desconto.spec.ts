@@ -86,4 +86,36 @@ describe('Desconto em percentual', () => {
     await salvar(undefined);
     expect(gravado[0].eventUserRole).toBeUndefined();
   });
+
+  describe('o valor a receber, na mesma conta da cobrança', () => {
+    const { centavosACobrar } = jest.requireActual('./payment.service');
+
+    it('ingresso + produtos, menos o desconto só sobre o ingresso', () => {
+      expect(
+        centavosACobrar([
+          {
+            eventUserRole: { discountPercent: 50, role: { price: 100 } },
+            productItems: [{ unitPrice: 20, quantity: 2 }],
+          },
+        ]),
+      ).toBe(9000); // 100 − 50 + 2 × 20
+    });
+
+    it('arredonda por item, como os itens da cobrança', () => {
+      // 3 × 0,335 somado em reais e arredondado no fim dá 1,00; por item, 1,02
+      expect(
+        centavosACobrar([
+          { productItems: [{ unitPrice: 0.335, quantity: 3 }] },
+        ]),
+      ).toBe(102);
+    });
+
+    it('compra avulsa sem ingresso e desconto de 100% não ficam negativos', () => {
+      expect(
+        centavosACobrar([
+          { eventUserRole: { discountPercent: 100, role: { price: 80 } } },
+        ]),
+      ).toBe(0);
+    });
+  });
 });

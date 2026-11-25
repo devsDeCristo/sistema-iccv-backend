@@ -495,6 +495,24 @@ export class PaymentProviderService {
         }
       }
 
+      if (campo.fees) {
+        const ofertadas: string[] = campo.fees;
+        const pares = valor.split(',').map((par) => par.split('='));
+        const invalido = pares.some(([forma, texto]) => {
+          const taxa = Number(texto);
+          return (
+            !ofertadas.includes(forma) ||
+            !/^\d{1,2}(\.\d{1,2})?$/.test(texto ?? '') ||
+            !(taxa >= 0 && taxa < 100)
+          );
+        });
+        if (invalido || new Set(pares.map(([f]) => f)).size !== pares.length) {
+          throw new BadRequestException(
+            `${campo.label}: informe de 0 a 99,99% em cada forma desta integração`,
+          );
+        }
+      }
+
       if (campo.installmentsMax) {
         const parcelas = Number(valor);
         if (

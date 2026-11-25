@@ -30,7 +30,11 @@ import {
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
 import { HostedCheckoutRequest } from 'src/gateways/core/gateway.types';
 import { totalCobradoEmCentavos } from 'src/gateways/core/discount';
-import { rotuloDoCheckout } from 'src/gateways/core/opcoes-de-pagamento';
+import {
+  rotuloDoCheckout,
+  taxaDeServicoEmCentavos,
+  taxasDeServico,
+} from 'src/gateways/core/opcoes-de-pagamento';
 import { conferirValorPago } from './amount-check';
 import {
   CANAL_DE_CHECKOUT,
@@ -114,6 +118,42 @@ const SELECT_ITEM_DE_PRODUTO = {
     },
   },
 } satisfies Prisma.PaymentProductItemSelect;
+
+/**
+ * O que a igreja tem a receber destes pagamentos, em centavos, pela mesma
+ * conta da cobrança: cada ingresso pelo preço da regra e cada produto por
+ * quantidade × preço gravado, os dois arredondados por item, menos o desconto
+ * (só sobre o ingresso) arredondado no total. Somar em reais e arredondar no
+ * fim dava um centavo de diferença entre o que a pergunta mostrava e o que
+ * saía cobrado.
+ */
+export function centavosACobrar(
+  pagamentos: {
+    eventUserRole?: {
+      discountPercent?: number | null;
+      role?: { price?: number | null } | null;
+    } | null;
+    productItems?: { unitPrice: number; quantity: number }[];
+  }[],
+): number {
+  let ingressos = 0;
+  let produtos = 0;
+  let desconto = 0;
+
+  for (const pagamento of pagamentos) {
+    const preco = pagamento.eventUserRole?.role?.price ?? 0;
+    if (preco > 0) ingressos += Math.round(preco * 100);
+    desconto += ((pagamento.eventUserRole?.discountPercent ?? 0) / 100) * preco;
+
+    for (const item of pagamento.productItems ?? []) {
+      if (item.unitPrice > 0) {
+        produtos += Math.round(item.unitPrice * 100) * item.quantity;
+      }
+    }
+  }
+
+  return Math.max(0, ingressos + produtos - Math.round(desconto * 100));
+}
 
 /**
  * A forma do pedido, entre as que o gateway oferece para escolher.
@@ -355,6 +395,17 @@ export class PaymentService {
               casaDaIgreja.gateway.descriptor.fields,
               casaDaIgreja.context.credentials,
             ),
+            // a taxa de serviço de cada saída, para a tela mostrar o valor de
+            // cada uma antes da escolha (nulo sem repasse)
+            serviceFee: taxasDeServico(
+              casaDaIgreja.gateway.descriptor.fields,
+              casaDaIgreja.context.credentials,
+            ),
+            // o que a igreja tem a receber (com desconto, sem a taxa): a tela
+            // calcula o valor de cada saída a partir daqui, e a inscrição e a
+            // loja, que não somam pagamentos, mostram o mesmo número que
+            // Minhas Inscrições
+            amountCents: centavosACobrar(aCobrar),
           },
         };
       }
@@ -667,6 +718,34 @@ export class PaymentService {
         ...new Set(activeCheckouts.map((c) => c.checkoutId)),
       ];
 
+      /**
+       * Taxa de serviço repassada ao inscrito: um item a mais na cobrança,
+       * calculado sobre o que a igreja tem a receber (com desconto) para que,
+       * descontada a taxa do gateway, sobre o valor cheio. O Pix na nossa tela
+       * tem a taxa do Pix; o checkout, a maior das formas que ficam lá.
+       */
+      const taxas = taxasDeServico(
+        gateway.descriptor.fields,
+        context.credentials,
+      );
+      const percentual =
+        formaEscolhida === PaymentMethod.PIX && taxas?.pix != null
+          ? taxas.pix
+          : taxas?.checkout ?? 0;
+      const taxaEmCentavos = taxaDeServicoEmCentavos(
+        totalCobradoEmCentavos(pedido.items, pedido.discountCents),
+        percentual,
+      );
+      if (taxaEmCentavos > 0) {
+        pedido.items.push({
+          referenceId: 'taxa-de-servico',
+          name: 'Taxa de serviço',
+          description: 'Taxa de serviço',
+          quantity: 1,
+          unitAmountCents: taxaEmCentavos,
+        });
+      }
+
       // ============================
       // FASE 2 — Chamada externa (fora da transaction)
       // ============================
@@ -744,6 +823,8 @@ export class PaymentService {
                 pedido.items,
                 pedido.discountCents,
               ),
+              // já somada no cobrado; à parte para as telas mostrarem
+              serviceFeeCents: taxaEmCentavos,
               // De quem é este checkout. Sem os dois, o retorno da casa e a
               // reconciliação teriam que adivinhar a quem perguntar.
               provider: config.provider,
@@ -804,6 +885,8 @@ export class PaymentService {
       providerLabel: this.registry.descriptor(checkout.provider).label,
       eventName: event?.name ?? '',
       amountCents: checkout.chargedAmountCents,
+      // quanto do valor é taxa de serviço (zero sem repasse)
+      serviceFeeCents: checkout.serviceFeeCents,
       code: checkout.pixCode,
       expiresAt: checkout.pixExpiresAt,
       status: checkout.payment.status,
@@ -1610,6 +1693,7 @@ export class PaymentService {
         // ou esconde tudo que fala de pagamento neste cartão. Sem vir daqui, a
         // tela teria que perguntar igreja por igreja para montar a lista.
         church: { select: SELECT_MODULOS },
+        churchId: true,
         // o certificado de participação: ligado, e a pessoa fez check-in
         endDate: true,
         certConfig: { select: { enabled: true } },
@@ -1626,6 +1710,9 @@ export class PaymentService {
             minorApprovalRejectionReason: true,
             rolesRegistration: {
               select: {
+                // o desconto entra no valor que a tela mostra (ver `amount`
+                // em `registeredRoles`)
+                discountPercent: true,
                 role: {
                   select: {
                     id: true,
@@ -1638,8 +1725,8 @@ export class PaymentService {
                   select: {
                     status: true,
                     method: true,
-                    // o valor cobrado de fato (ingresso + produtos, com
-                    // desconto), que Minhas Inscrições mostra
+                    // ingresso + produtos, **sem** desconto (é assim que a
+                    // cobrança grava); o desconto é aplicado na resposta
                     amount: true,
                     productItems: { select: SELECT_ITEM_DE_PRODUTO },
                   },
@@ -1691,12 +1778,28 @@ export class PaymentService {
         })
       : [];
 
+    // a taxa de serviço de cada igreja, uma consulta por igreja e não por evento
+    const taxasPorIgreja = new Map(
+      await Promise.all(
+        [...new Set(events.map((e) => e.churchId))].map(
+          async (churchId) =>
+            [
+              churchId,
+              await this.registry.taxasDeServicoDaIgreja(churchId),
+            ] as const,
+        ),
+      ),
+    );
+
     return events.map((event) => ({
       eventId: event.id,
       eventName: event.name,
       data: event.data,
       // o nome antigo, para a tela: agora sai do plano da igreja
       modulePayment: cobraOnline(event.church),
+      // a taxa de serviço repassada ao inscrito (Pix na tela / checkout), para
+      // o modal de pagamento mostrar junto do valor; nula sem repasse
+      serviceFee: taxasPorIgreja.get(event.churchId) ?? null,
       /** 🔹 Dá para baixar o certificado: ligado, presente e evento terminado */
       certificateAvailable:
         !!event.certConfig?.enabled &&
@@ -1718,7 +1821,19 @@ export class PaymentService {
           price: r.role.price,
           paymentStatus: r.payment?.status ?? 'WAITING',
           paymentMethod: r.payment?.method ?? null,
-          amount: r.payment?.amount ?? null,
+          /**
+           * O que a pessoa paga: ingresso + produtos, **com** o desconto da
+           * inscrição — o mesmo que a cobrança calcula (o desconto vale só
+           * sobre o ingresso). `Payment.amount` é sem desconto; mandar ele
+           * cru fazia Minhas Inscrições anunciar o valor cheio (e a taxa de
+           * serviço sobre ele) numa inscrição com desconto.
+           */
+          amount:
+            Math.round(
+              ((r.payment?.amount ?? r.role.price) -
+                ((r.discountPercent ?? 0) / 100) * r.role.price) *
+                100,
+            ) / 100,
           products: r.payment?.productItems ?? [],
         })),
       ),

@@ -16,6 +16,7 @@ import { PaymentGateway } from '../core/payment-gateway.interface';
 import {
   campoDeFormas,
   campoDeParcelas,
+  campoDeRepasse,
   escolhasComPixNaTela,
   formasDoCheckout,
   formasEscolhidas,
@@ -91,6 +92,7 @@ export class PagbankGateway implements PaymentGateway {
       },
       campoDeFormas(FORMAS),
       campoDeParcelas(12),
+      campoDeRepasse(FORMAS),
     ],
     docsUrl: 'https://developer.pagbank.com.br/reference/criar-checkout',
     signsWebhook: true,

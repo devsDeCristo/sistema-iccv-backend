@@ -48,6 +48,12 @@ export interface CredentialField {
   /** Teto de parcelas no cartão: a tela desenha um seletor de 1 até este número */
   installmentsMax?: number;
   /**
+   * Repasse da taxa ao inscrito: a tela desenha a chave "Repassar taxas para
+   * o cliente" e, ligada, um percentual por forma. O valor gravado é
+   * `PIX=0.99,CREDIT_CARD=4.98`; vazio é repasse desligado. Ver `taxasDeServico`.
+   */
+  fees?: PaymentMethod[];
+  /**
    * Quando o campo é uma URL de API, os únicos domínios aceitos.
    *
    * Sem isto, um admin (ou quem tomasse a conta de um) apontaria a integração

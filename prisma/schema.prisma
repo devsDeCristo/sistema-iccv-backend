@@ -673,8 +673,14 @@ model PaymentCheckout {
   /// valor enviado, e recusar o que é antigo derrubaria pagamento em curso.
   chargedAmountCents Int?
 
-  /// Pix pago na nossa tela, e não num link do gateway — hoje só o PayPal, que
-  /// devolve o copia e cola em vez de uma página. Guardado aqui porque a tela
+  /// A taxa de serviço repassada ao inscrito, em centavos, já somada em
+  /// `chargedAmountCents`. Zero quando a igreja não repassa taxa. Existe para
+  /// as telas dizerem "inclui taxa de serviço de R$ x" — o pagamento
+  /// (`Payment.amount`) continua sem ela, porque é o que a igreja recebe.
+  serviceFeeCents    Int     @default(0)
+
+  /// Pix pago na nossa tela, e não num link do gateway (PayPal, Mercado Pago,
+  /// PagBank, Ton), com QR dinâmico criado na API de pedidos. Guardado aqui porque a tela
   /// do QR só pode ler o código do servidor: um código vindo da URL ou montado
   /// no navegador é um código que alguém troca. Nulos em todo checkout por link.
   pixCode      String?
