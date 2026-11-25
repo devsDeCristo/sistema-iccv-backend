@@ -215,15 +215,21 @@ export class PaymentService {
     }
   }
 
-  private extrairDddENumero(telefone: string) {
-    // Remove tudo que não for número
-    const numeros = telefone.replace(/\D/g, '');
+  private extrairDddENumero(telefone: string | null) {
+    // Só os dígitos, sem o zero de operadora/discagem na frente
+    const numeros = (telefone ?? '').replace(/\D/g, '').replace(/^0+/, '');
 
-    // Remove código do país (55) se existir
-    const numeroLimpo = numeros.startsWith('55') ? numeros.slice(2) : numeros;
+    // O 55 só é o código do país com 12 ou 13 dígitos: com 10 ou 11 é o DDD
+    // do RS (Santa Maria, Uruguaiana...), e tirá-lo derrubava o número
+    const numeroLimpo =
+      numeros.length > 11 && numeros.startsWith('55')
+        ? numeros.slice(2)
+        : numeros;
 
-    if (numeroLimpo.length < 10) {
-      throw new Error('Número de telefone inválido');
+    if (numeroLimpo.length < 10 || numeroLimpo.length > 11) {
+      throw new BadRequestException(
+        'Celular do cadastro inválido: atualize o seu perfil com DDD e número para pagar.',
+      );
     }
 
     const ddd = numeroLimpo.slice(0, 2);

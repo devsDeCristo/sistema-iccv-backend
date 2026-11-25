@@ -537,6 +537,31 @@ pagava, em qualquer gateway, voltava para a tela de login em vez do evento.
 Corrigido em 10/11/2026. Os outros endereços do front que o backend monta
 (`/certificado/<código>` e `/admin/eventos`) foram conferidos contra as rotas.
 
+### 7. DDD 55 confundido com o código do país
+
+O celular do cadastro vira DDD + número para o gateway
+(`extrairDddENumero`). Todo número que começava com `55` perdia esses dois
+dígitos, como se fossem o código do Brasil — mas 55 também é DDD do RS: quem
+tinha `(55) 99123-4567` ficava com 9 dígitos e não conseguia pagar (500
+"Número de telefone inválido"). Agora o 55 só sai com 12 ou 13 dígitos, e
+celular ausente ou inválido responde 400 pedindo para atualizar o perfil.
+Corrigido em 25/11/2026 (`src/payment/telefone.spec.ts`).
+
+Na mesma varredura: o cadastro só confere o tamanho do CPF (11), e o gateway
+confere os dígitos verificadores. CPF digitado errado voltava como 502 "Não foi
+possível falar com o gateway", sem dizer o que corrigir. Agora
+(`src/gateways/core/cpf.ts`):
+
+- **Checkout que só preenche os dados** (preferência do Mercado Pago, checkout
+  do PagBank): CPF inválido não vai, e a pessoa digita no gateway. No PagBank
+  isso destrava `customer_modifiable`.
+- **Cobrança que não sai sem CPF** (Pix por order no Mercado Pago e no PagBank,
+  Ton): 400 "CPF do cadastro inválido: corrija o seu perfil para pagar".
+- PayPal já descartava dado inválido e tentava de novo; InfinitePay não usa CPF.
+
+O cadastro continua aceitando CPF sem conferir os dígitos de propósito:
+travar ali barraria a edição de quem já tem um gravado errado.
+
 ---
 
 ## 10. Em aberto

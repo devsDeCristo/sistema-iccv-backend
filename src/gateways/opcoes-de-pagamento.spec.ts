@@ -19,7 +19,7 @@ describe('Formas de pagamento e parcelas', () => {
     customer: {
       name: 'Ana Souza',
       email: 'ana@x.com',
-      taxId: '00000000000',
+      taxId: '12345678909',
       phone: { country: '55', area: '71', number: '999999999' },
     },
     items: [

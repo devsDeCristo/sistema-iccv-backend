@@ -18,6 +18,7 @@ import { PaymentGateway } from '../core/payment-gateway.interface';
 import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
+import { cpfValido, exigirCpf } from '../core/cpf';
 import {
   campoDeFormas,
   campoDeParcelas,
@@ -152,7 +153,13 @@ export class MercadoPagoGateway implements PaymentGateway {
         name: nome,
         surname: sobrenome.join(' ') || nome,
         email: pedido.customer.email,
-        identification: { type: 'CPF', number: pedido.customer.taxId },
+        // só preenche o checkout: com CPF inválido a pessoa digita lá
+        ...(cpfValido(pedido.customer.taxId) && {
+          identification: {
+            type: 'CPF',
+            number: pedido.customer.taxId.replace(/\D/g, ''),
+          },
+        }),
         phone: {
           area_code: pedido.customer.phone.area,
           number: pedido.customer.phone.number,
@@ -235,7 +242,7 @@ export class MercadoPagoGateway implements PaymentGateway {
             last_name: sobrenome.join(' ') || nome,
             identification: {
               type: 'CPF',
-              number: pedido.customer.taxId.replace(/\D/g, ''),
+              number: exigirCpf(pedido.customer.taxId),
             },
           },
           transactions: {

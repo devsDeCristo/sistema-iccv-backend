@@ -15,6 +15,7 @@ import { PaymentGateway } from '../core/payment-gateway.interface';
 import { metodoNaoMapeado } from '../core/gateway-http';
 import { GatewayResourceNotFoundError } from '../core/gateway.errors';
 import { aplicarDesconto, totalEmCentavos } from '../core/discount';
+import { exigirCpf } from '../core/cpf';
 import {
   campoDeFormas,
   campoDeParcelas,
@@ -142,7 +143,7 @@ export class TonGateway implements PaymentGateway {
         name: pedido.customer.name,
         email: pedido.customer.email,
         type: 'individual',
-        document: pedido.customer.taxId.replace(/\D/g, ''),
+        document: exigirCpf(pedido.customer.taxId),
         document_type: 'CPF',
         phones: {
           mobile_phone: {

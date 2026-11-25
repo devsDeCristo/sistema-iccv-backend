@@ -10,6 +10,7 @@ import {
   PaymentStatus,
 } from '@prisma/client';
 import { createHash } from 'crypto';
+import { cpfValido, exigirCpf } from '../core/cpf';
 import { PagbankClient, PagbankCredenciais } from './pagbank.client';
 import { CreatePagbankCheckoutDto } from './dto/create-checkout.dto';
 import { PaymentGateway } from '../core/payment-gateway.interface';
@@ -124,13 +125,19 @@ export class PagbankGateway implements PaymentGateway {
       notification_urls: [pedido.checkoutNotificationUrl],
       redirect_url: pedido.redirectUrl,
       return_url: pedido.redirectUrl,
-      customer_modifiable: false,
-      customer: {
-        name: pedido.customer.name,
-        email: pedido.customer.email,
-        tax_id: pedido.customer.taxId,
-        phone: pedido.customer.phone,
-      },
+      // Os dados do inscrito vão preenchidos e travados; com CPF inválido o
+      // PagBank recusaria o checkout inteiro, então a pessoa digita lá
+      ...(cpfValido(pedido.customer.taxId)
+        ? {
+            customer_modifiable: false,
+            customer: {
+              name: pedido.customer.name,
+              email: pedido.customer.email,
+              tax_id: pedido.customer.taxId.replace(/\D/g, ''),
+              phone: pedido.customer.phone,
+            },
+          }
+        : { customer_modifiable: true }),
       discount_amount: pedido.discountCents,
       items: pedido.items.map((item) => ({
         reference_id: item.referenceId,
@@ -196,7 +203,7 @@ export class PagbankGateway implements PaymentGateway {
           customer: {
             name: pedido.customer.name,
             email: pedido.customer.email,
-            tax_id: pedido.customer.taxId.replace(/\D/g, ''),
+            tax_id: exigirCpf(pedido.customer.taxId),
             phones: [
               {
                 country: pedido.customer.phone.country || '55',
