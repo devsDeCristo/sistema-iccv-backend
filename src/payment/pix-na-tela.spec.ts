@@ -56,11 +56,14 @@ describe('createCheckout — escolha da forma de pagamento', () => {
     },
     user: { findUnique: jest.fn().mockResolvedValue({ id: 'u-1' }) },
     payment: {
-      findMany: jest
-        .fn()
-        .mockResolvedValue([
-          { id: 'p-1', status: PaymentStatus.WAITING, checkouts: [] },
-        ]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'p-1',
+          status: PaymentStatus.WAITING,
+          checkouts: [],
+          eventUserRole: { role: { price: 120 }, discountPercent: null },
+        },
+      ]),
     },
     $transaction: jest.fn(),
   });
@@ -94,8 +97,7 @@ describe('createCheckout — escolha da forma de pagamento', () => {
       checkoutLabel: 'Outras formas',
       // sem repasse de taxa
       serviceFee: null,
-      // o pagamento falso não tem valor
-      amountCents: 0,
+      amountCents: 12000,
     });
     expect(createCheckout).not.toHaveBeenCalled();
     expect(banco.$transaction).not.toHaveBeenCalled();

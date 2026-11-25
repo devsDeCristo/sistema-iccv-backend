@@ -362,6 +362,16 @@ define é o modal de pagamento (`PUT /payments/:paymentId`, campo
 `discountPercent` de 0 a 100 com até duas casas; zero grava nulo, ausente não
 mexe). Teste: `src/payment/desconto.spec.ts`.
 
+**Desconto que zera a conta** (100% no ingresso, sem produto pago junto): o
+`createCheckout` não abre cobrança nem pergunta a forma. Quita os pagamentos
+como o ingresso gratuito (`PAID`, `CASH`, origem `PENDING`, então segue
+editável no painel), desativa os checkouts ativos no banco e no gateway (o
+link antigo tinha o valor de antes do desconto) e responde
+`{ paid: true }`, sem `link`. Antes, o piso de um centavo por item de
+`aplicarDesconto` abria uma cobrança de R$ 0,01, que o Ton recusa (mínimo
+R$ 10). A conta é a de `centavosACobrar`, a mesma da cobrança: produto pago
+junto não leva desconto e continua cobrado.
+
 Até nov/2026 era `discountId`, apontando para a tabela `discounts` — global,
 sem igreja, com percentual em fração (0.1). A migração
 `20261124210000_desconto_em_percentual` copiou o percentual de cada inscrição

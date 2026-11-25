@@ -16,6 +16,7 @@ import {
 import {
   CheckinStatus,
   CheckoutStatus,
+  PaymentCheckout,
   PaymentMethod,
   PaymentProvider,
   PaymentReceived,
@@ -298,6 +299,51 @@ export class PaymentService {
     return resolvido;
   }
 
+  /**
+   * Quita sem passar pelo gateway o que o desconto zerou. Pago como o
+   * ingresso gratuito (`CASH`, origem `PENDING`): a tela de detalhes segue
+   * editável, e quem deu o desconto pode desfazer.
+   */
+  private async quitarSemCobranca(
+    paymentIds: string[],
+    checkoutsAtivos: PaymentCheckout[],
+    churchId: string,
+  ) {
+    await this.prisma.$transaction([
+      this.prisma.paymentCheckout.updateMany({
+        where: {
+          paymentId: { in: paymentIds },
+          status: CheckoutStatus.ACTIVE,
+        },
+        data: { status: CheckoutStatus.INACTIVE },
+      }),
+      this.prisma.payment.updateMany({
+        where: { id: { in: paymentIds } },
+        data: { status: PaymentStatus.PAID, method: PaymentMethod.CASH },
+      }),
+    ]);
+
+    // a cobrança antiga, com o valor de antes do desconto, morre no gateway
+    // também — senão ainda daria para pagá-la pelo link guardado
+    for (const checkoutId of new Set(
+      checkoutsAtivos.map((c) => c.checkoutId),
+    )) {
+      const antigo = checkoutsAtivos.find((c) => c.checkoutId === checkoutId)!;
+      this.casaDoCheckout(antigo, churchId)
+        .then((casa) =>
+          casa.gateway.inactivateCheckout(checkoutId, casa.context),
+        )
+        .catch((err) =>
+          this.logger.error(
+            `Erro ao inativar checkout ${checkoutId} em ${antigo.provider}:`,
+            JSON.stringify(err?.message ?? err),
+          ),
+        );
+    }
+
+    return { message: 'paid by discount', paid: true };
+  }
+
   async createCheckout(dto: CreatePaymentCheckoutDto) {
     const { userId, eventId, roleRegistrationId } = dto;
     const paymentIds = dto.paymentIds ?? [];
@@ -388,7 +434,10 @@ export class PaymentService {
         casaDaIgreja.gateway.paymentMethodChoices?.(casaDaIgreja.context) ?? [];
       const formaEscolhida = formaDoPedido(formas, dto.method);
 
-      if (formas.length > 1 && !formaEscolhida) {
+      // com 100% de desconto não há forma a escolher: nada vai ao gateway
+      const nadaACobrar = centavosACobrar(aCobrar) === 0;
+
+      if (formas.length > 1 && !formaEscolhida && !nadaACobrar) {
         return {
           message: 'payment method required',
           choice: {
@@ -462,6 +511,18 @@ export class PaymentService {
       const activeCheckouts = unpaidPayments
         .flatMap((p) => p.checkouts)
         .filter((c) => c.status === CheckoutStatus.ACTIVE);
+
+      // Desconto de 100% (sem produto pago junto): nada a cobrar. Antes o piso
+      // de um centavo por item abria uma cobrança de R$ 0,01 — que o Ton
+      // recusa (mínimo R$ 10). Quita como o ingresso gratuito, e as cobranças
+      // de antes, com o valor antigo, deixam de valer aqui e no gateway.
+      if (centavosACobrar(unpaidPayments) === 0) {
+        return this.quitarSemCobranca(
+          unpaidPayments.map((p) => p.id),
+          activeCheckouts,
+          event.churchId,
+        );
+      }
 
       // se o pagamento tiver checkouts criados e ativos deve ferificar se eles estão ativos na api também
       //caso algum checkout tive status difererente de awainting na api, deve atualizar o status no banco e cancelalr a operação
