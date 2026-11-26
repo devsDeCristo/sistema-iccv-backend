@@ -13,9 +13,11 @@ import {
   crcDoBrCode,
   ehPixEstatico,
   identificadorDoPix,
+  limparBrCode,
   mesmaChave,
   pixEstaticoComValor,
   problemaNoPixEstatico,
+  repararBrCode,
 } from './core/pix-estatico';
 import { PayPalGateway } from './paypal/paypal.gateway';
 
@@ -104,6 +106,65 @@ describe('Pix estático', () => {
       ...base.slice(2),
     );
     expect(problemaNoPixEstatico(outro)).toMatch(/não é de Pix/);
+  });
+
+  it('diz o que está errado, e não só que está errado', () => {
+    expect(problemaNoPixEstatico('igreja@exemplo.org')).toMatch(
+      /é a chave Pix, não o código/,
+    );
+    expect(problemaNoPixEstatico('+55 55 99921-9342')).toMatch(/é a chave Pix/);
+    expect(problemaNoPixEstatico('br.gov.bcb.pix0114+555599')).toMatch(
+      /precisa começar com 000201, e este começa com "br.gov"/,
+    );
+    expect(problemaNoPixEstatico(CODIGO.slice(0, -6))).toMatch(
+      /final do código está faltando/,
+    );
+    expect(
+      problemaNoPixEstatico(CODIGO.replace('BRASILIA', 'BRASILA')),
+    ).toMatch(/parte faltando no meio .*"1D3D" não confere/);
+    // o final certo não é dito: daria para "consertar" um código mutilado
+    expect(
+      problemaNoPixEstatico(CODIGO.replace('BRASILIA', 'BRASILA')),
+    ).not.toMatch(/seria/);
+  });
+
+  it('copiado de PDF: tira o espaço inventado e mantém o de verdade', () => {
+    const real =
+      '00020101021126360014br.gov.bcb.pix0114+55559992193425204000053039865802BR5904CNIC6009SAO PAULO622905253vGFeh9O8CijzPhdilT12iSPc6304F071';
+    // o caso da tela: o PDF quebrava a linha entre "CNI" e "C"
+    const doPdf = real.replace('5904CNIC', '5904CNI C');
+    expect(problemaNoPixEstatico(doPdf)).toMatch(/não confere/);
+    expect(repararBrCode(doPdf)).toBe(real);
+    // dois espaços inventados, e o de "SAO PAULO" fica
+    const doisCortes = doPdf.replace('br.gov.bcb.pix', 'br.gov. bcb.pix');
+    expect(repararBrCode(doisCortes)).toBe(real);
+    // o que já fecha não muda; o que não tem conserto volta como veio
+    expect(repararBrCode(real)).toBe(real);
+    const cortado = real.slice(0, 50) + ' ' + real.slice(60);
+    expect(repararBrCode(cortado)).toBe(cortado);
+  });
+
+  it('o salvar conserta o código do PDF e grava o certo', () => {
+    const real =
+      '00020101021126360014br.gov.bcb.pix0114+55559992193425204000053039865802BR5904CNIC6009SAO PAULO622905253vGFeh9O8CijzPhdilT12iSPc6304F071';
+    const gravado = (
+      PaymentProviderService.prototype as any
+    ).validarCampos.call(
+      {},
+      paypal.descriptor.fields,
+      {
+        clientId: 'cid',
+        staticPixCode: real.replace('5904CNIC', '5904CNI C'),
+      },
+      { clientSecret: 'sec' },
+    );
+    expect(gravado.staticPixCode).toBe(real);
+  });
+
+  it('o espaço "especial" de quem copiou vira o comum', () => {
+    const copiado = CODIGO.replace('Fulano de Tal', 'Fulano\u00a0de\u00a0Tal');
+    expect(problemaNoPixEstatico(copiado)).not.toBeNull();
+    expect(problemaNoPixEstatico(limparBrCode(copiado))).toBeNull();
   });
 
   it('aceita só o BR Code inteiro, com o CRC certo', () => {

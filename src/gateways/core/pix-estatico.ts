@@ -42,7 +42,12 @@ export const pixEstatico = (credenciais?: Record<string, string>) =>
  * é parte do código ("SAO PAULO").
  */
 export const limparBrCode = (codigo: string) =>
-  codigo.replace(/[\r\n\t\u200B-\u200D\u2060\uFEFF]/g, '').trim();
+  codigo
+    .replace(/[\r\n\t\u200B-\u200D\u2060\uFEFF]/g, '')
+    // espaço "especial" que alguns apps põem no lugar do comum ao copiar: o
+    // texto parece igual, mas o CRC é do espaço comum ("SAO PAULO")
+    .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    .trim();
 
 /** CRC16-CCITT (0x1021, início 0xFFFF) do BR Code, em 4 hex maiúsculos */
 export function crcDoBrCode(corpo: string): string {
@@ -58,19 +63,49 @@ export function crcDoBrCode(corpo: string): string {
 
 /** Os campos de um nível do BR Code (id, tamanho, valor); nulo se não fecha */
 function lerCampos(texto: string): Map<string, string> | null {
+  const { campos, quebraEm } = percorrerCampos(texto);
+  return quebraEm === null ? campos : null;
+}
+
+/** Lê os campos até onde fecham; `quebraEm` é o id do campo que não fecha */
+function percorrerCampos(texto: string) {
   const campos = new Map<string, string>();
   let i = 0;
   while (i < texto.length) {
     const id = texto.slice(i, i + 2);
     const tamanho = texto.slice(i + 2, i + 4);
-    if (!/^\d{2}$/.test(id) || !/^\d{2}$/.test(tamanho)) return null;
+    if (!/^\d{2}$/.test(id) || !/^\d{2}$/.test(tamanho)) {
+      return { campos, quebraEm: id };
+    }
     const valor = texto.slice(i + 4, i + 4 + Number(tamanho));
-    if (valor.length !== Number(tamanho)) return null;
+    if (valor.length !== Number(tamanho)) return { campos, quebraEm: id };
     campos.set(id, valor);
     i += 4 + Number(tamanho);
   }
-  return campos;
+  return { campos, quebraEm: null as string | null };
 }
+
+/** O nome de cada campo do BR Code, para dizer onde está o problema */
+const NOME_DO_CAMPO: Record<string, string> = {
+  '00': 'versão',
+  '01': 'tipo do Pix',
+  '26': 'chave Pix',
+  '52': 'categoria',
+  '53': 'moeda',
+  '54': 'valor',
+  '58': 'país',
+  '59': 'nome do recebedor',
+  '60': 'cidade',
+  '61': 'CEP',
+  '62': 'informações adicionais',
+  '63': 'final do código',
+};
+
+/** Parece uma chave Pix solta (e-mail, telefone, CPF/CNPJ, aleatória), e não o código */
+const pareceChave = (texto: string) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto) ||
+  /^\+?[\d\s().-]{10,18}$/.test(texto) ||
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(texto);
 
 /**
  * O que impede o código de servir de Pix estático, ou nulo se serve.
@@ -81,15 +116,37 @@ function lerCampos(texto: string): Map<string, string> | null {
  * primeiro paga, os outros têm o código recusado pelo banco.
  */
 export function problemaNoPixEstatico(codigo: string): string | null {
-  const inteiro =
-    'cole o código Pix Copia e Cola inteiro, como o app do banco gera';
-  if (!/^000201.*6304[0-9A-Fa-f]{4}$/.test(codigo)) return inteiro;
-  if (crcDoBrCode(codigo.slice(0, -4)) !== codigo.slice(-4).toUpperCase()) {
-    return inteiro;
+  // Sem dizer qual seria o final certo: com ele, dava para "consertar" à mão
+  // um código com parte da chave faltando — e o Pix iria para outra conta
+  const deNovo = 'copie de novo direto do app do banco, sem editar';
+
+  if (!codigo.startsWith('000201')) {
+    return pareceChave(codigo)
+      ? 'isso é a chave Pix, não o código: no app do banco, gere um Pix para receber (sem valor) e copie o "Pix Copia e Cola"'
+      : `o código precisa começar com 000201, e este começa com "${codigo.slice(
+          0,
+          6,
+        )}"; ${deNovo}`;
+  }
+  if (!/6304[0-9A-Fa-f]{4}$/.test(codigo)) {
+    return `o final do código está faltando (ele termina em 6304 seguido de 4 letras ou números, e este termina em "${codigo.slice(
+      -8,
+    )}"); ${deNovo}, até o fim`;
+  }
+  const crc = crcDoBrCode(codigo.slice(0, -4));
+  if (crc !== codigo.slice(-4).toUpperCase()) {
+    return `o código foi alterado ou está com parte faltando no meio (o final "${codigo.slice(
+      -4,
+    )}" não confere com o resto); ${deNovo}`;
   }
 
-  const campos = lerCampos(codigo);
-  if (!campos) return inteiro;
+  const { campos, quebraEm } = percorrerCampos(codigo);
+  if (quebraEm !== null) {
+    const nome = NOME_DO_CAMPO[quebraEm];
+    return `o código está com o tamanho errado a partir do campo ${quebraEm}${
+      nome ? ` (${nome})` : ''
+    }; ${deNovo}`;
+  }
 
   // a conta Pix fica num dos campos 26 a 51, identificada pelo GUI
   const pix = [...campos]
@@ -175,4 +232,44 @@ export function mesmaChave(a?: string | null, b?: string | null): boolean {
   };
   const [x, y] = [base(a), base(b)];
   return x !== null && x === y;
+}
+
+/** O código fecha: começo, final, CRC e o tamanho de cada campo */
+const fecha = (codigo: string) =>
+  /^000201.*6304[0-9A-Fa-f]{4}$/.test(codigo) &&
+  crcDoBrCode(codigo.slice(0, -4)) === codigo.slice(-4).toUpperCase() &&
+  lerCampos(codigo) !== null;
+
+/**
+ * Tira o espaço que a cópia inventou. Código copiado de PDF vem com espaço
+ * onde o PDF quebrava a linha ("5904CNI C6009…"), e apagar todos os espaços
+ * não serve — "SAO PAULO" tem um de verdade. Então tenta tirar cada espaço
+ * (e depois dois, três…) e fica com a versão que fecha: CRC e tamanhos
+ * batendo juntos não acontecem por acaso. Nenhuma fechando, volta como veio,
+ * e a mensagem de `problemaNoPixEstatico` diz o que há.
+ */
+export function repararBrCode(codigo: string): string {
+  if (fecha(codigo)) return codigo;
+
+  const espacos = [...codigo].flatMap((c, i) => (c === ' ' ? [i] : []));
+  // ponytail: busca por combinações, até 10 espaços (1023 tentativas)
+  if (!espacos.length || espacos.length > 10) return codigo;
+
+  const sem = (posicoes: number[]) =>
+    [...codigo].filter((_, i) => !posicoes.includes(i)).join('');
+
+  const combinacoes = (de: number[], k: number): number[][] =>
+    k === 0
+      ? [[]]
+      : de.flatMap((p, i) =>
+          combinacoes(de.slice(i + 1), k - 1).map((resto) => [p, ...resto]),
+        );
+
+  for (let k = 1; k <= espacos.length; k++) {
+    for (const posicoes of combinacoes(espacos, k)) {
+      const candidato = sem(posicoes);
+      if (fecha(candidato)) return candidato;
+    }
+  }
+  return codigo;
 }

@@ -390,7 +390,24 @@ não é chamado; o cartão continua indo para o PayPal como sempre.
   que não é Pix; **valor fixo** (campo 54 — cobraria o mesmo de todo mundo: a
   tela diz R$ 250 e o banco pede R$ 10); e **Pix de cobrança** (dinâmico, com
   URL no lugar da chave ou `01=12`), que é de uso único — o primeiro paga, os
-  outros têm o código recusado. Antes,
+  outros têm o código recusado.
+- **Cada recusa diz o que está errado** (26/11/2026), e não só "cole o código
+  inteiro": chave Pix colada no lugar do código; começo diferente de `000201`
+  (mostra como começa); final `6304` + 4 faltando (mostra como termina); final
+  que não confere com o resto (código alterado ou com parte faltando no meio —
+  sem dizer qual seria o final certo, para ninguém "consertar" à mão um código
+  mutilado, cujo Pix iria para outra conta); e o campo onde o tamanho deixa de
+  fechar, pelo nome ("cidade", "nome do recebedor"…). `limparBrCode` também
+  troca o espaço "especial" (U+00A0 e parecidos) que alguns apps põem no lugar
+  do comum ao copiar: o texto parecia igual e o CRC não fechava.
+- **Código copiado de PDF é consertado no salvar** (`repararBrCode`). Caso
+  real (26/11/2026, 6 recusas seguidas): o PDF do banco quebrava a linha no
+  meio do nome e a cópia virou espaço — `5904CNI C6009…` no lugar de
+  `5904CNIC6009…`. Apagar todos os espaços não serve ("SAO PAULO" tem um de
+  verdade); então, quando o código não fecha, tenta tirar cada espaço (depois
+  dois, três…, até 10 espaços no código) e grava a versão em que o CRC **e**
+  o tamanho de todos os campos batem — as duas coisas juntas não acontecem
+  por acaso. Nenhuma fechando, segue para a mensagem de erro. Antes,
   `limparBrCode` tira quebras de linha, tabulação e caracteres invisíveis
   (espaço de largura zero, BOM) — o código copiado de mensagem ou PDF vem
   quebrado, e o CRC não fechava com um código válido. Espaço comum fica.

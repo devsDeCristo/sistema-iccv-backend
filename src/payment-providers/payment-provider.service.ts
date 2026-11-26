@@ -25,6 +25,7 @@ import { montarUrlDeWebhook } from 'src/gateways/core/webhook-url';
 import {
   limparBrCode,
   problemaNoPixEstatico,
+  repararBrCode,
 } from 'src/gateways/core/pix-estatico';
 import { Role } from 'src/auth/roles';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
@@ -458,7 +459,10 @@ export class PaymentProviderService {
 
       const texto = typeof bruto === 'string' ? bruto.trim() : '';
       // o Pix Copia e Cola chega com as quebras de linha de quem copiou
-      const valor = campo.staticPix ? limparBrCode(texto) : texto;
+      // (e, se veio de PDF, com espaço onde o PDF quebrava a linha)
+      const valor = campo.staticPix
+        ? repararBrCode(limparBrCode(texto))
+        : texto;
 
       // Segredo em branco = "não mexi neste campo"
       if (!valor && campo.secret && atuais[campo.key]) {
