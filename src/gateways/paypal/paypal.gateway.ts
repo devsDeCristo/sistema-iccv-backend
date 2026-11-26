@@ -23,6 +23,14 @@ import {
   formasEscolhidas,
 } from '../core/opcoes-de-pagamento';
 import {
+  campoDePixEstatico,
+  checkoutDoPixEstatico,
+  ehPixEstatico,
+  identificadorDoPix,
+  pixEstatico,
+  pixEstaticoComValor,
+} from '../core/pix-estatico';
+import {
   GatewayCharge,
   GatewayContext,
   GatewayHealth,
@@ -99,9 +107,11 @@ export class PayPalGateway implements PaymentGateway {
         // a página do PayPal junta crédito, débito e saldo: não dá para
         // oferecer um sem os outros
         methodLabels: { CREDIT_CARD: 'Cartão ou conta PayPal' },
-        help: 'Pix só depois de ativá-lo na conta PayPal (Configurações da conta › Produtos e serviços › Formas de pagamento). Sem isso, quem escolher Pix recebe erro.',
+        help: 'Pix só depois de ativá-lo na conta PayPal (Configurações da conta › Produtos e serviços › Formas de pagamento), ou com o Pix estático abaixo. Sem um dos dois, quem escolher Pix recebe erro.',
       }),
       campoDeRepasse(FORMAS),
+      // enquanto o PayPal não libera o Pix da conta
+      campoDePixEstatico(),
     ],
     docsUrl: 'https://developer.paypal.com/docs/api/orders/v2/',
     // O PayPal assina, mas a assinatura não é o que segura a baixa: ver
@@ -148,6 +158,26 @@ export class PayPalGateway implements PaymentGateway {
       formas.includes(PaymentMethod.PIX) &&
       (pedido.paymentMethod === PaymentMethod.PIX ||
         !formas.includes(PaymentMethod.CREDIT_CARD));
+    // Pix estático: o QR sai do código que a igreja colou, e o PayPal não
+    // entra. Sem pedido lá, ninguém avisa nem confere — a baixa é pela tela.
+    const codigoEstatico = pixEstatico(ctx.credentials);
+    if (querPix && codigoEstatico) {
+      return {
+        checkoutId: checkoutDoPixEstatico(pedido.referenceId),
+        payUrl: '',
+        // o código da igreja já com o valor e o identificador desta cobrança
+        pix: {
+          code: pixEstaticoComValor(
+            codigoEstatico,
+            totalEmCentavos(itens),
+            identificadorDoPix(pedido.customer.name, pedido.referenceId),
+          ),
+          expiresAt: pedido.expiresAt,
+        },
+        raw: { pixEstatico: true },
+      };
+    }
+
     const retorno = {
       return_url: pedido.redirectUrl,
       cancel_url: pedido.redirectUrl,
@@ -319,6 +349,12 @@ export class PayPalGateway implements PaymentGateway {
     ctx: GatewayContext,
     checkoutId?: string,
   ): Promise<GatewayCharge[]> {
+    // Pix estático não tem pedido no PayPal: para quem confere, é o mesmo
+    // que um pedido que o gateway não conhece — a cobrança segue aguardando
+    if (ehPixEstatico(checkoutId)) {
+      throw new GatewayResourceNotFoundError('PayPal', referenceId);
+    }
+
     const pedido = checkoutId ? await this.pedidoAtual(checkoutId, ctx) : null;
 
     // Pedido expirado some da API (404). A referência é conferida também: o

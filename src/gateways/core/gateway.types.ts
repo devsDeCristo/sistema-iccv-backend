@@ -54,6 +54,12 @@ export interface CredentialField {
    */
   fees?: PaymentMethod[];
   /**
+   * O Pix Copia e Cola fixo da igreja (etapa "Pagamento"): a tela desenha a
+   * chave "Usar Pix estático" e, ligada, o campo do código. Ver
+   * `core/pix-estatico.ts`.
+   */
+  staticPix?: boolean;
+  /**
    * Quando o campo é uma URL de API, os únicos domínios aceitos.
    *
    * Sem isto, um admin (ou quem tomasse a conta de um) apontaria a integração

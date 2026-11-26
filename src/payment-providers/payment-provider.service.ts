@@ -22,6 +22,10 @@ import {
 } from 'src/gateways/core/payment-gateway.registry';
 import { CredentialField } from 'src/gateways/core/gateway.types';
 import { montarUrlDeWebhook } from 'src/gateways/core/webhook-url';
+import {
+  limparBrCode,
+  problemaNoPixEstatico,
+} from 'src/gateways/core/pix-estatico';
 import { Role } from 'src/auth/roles';
 import { UpsertPaymentProviderDto } from './dto/upsert-payment-provider.dto';
 import { SELECT_MODULOS, cobraOnline, modulosDa } from 'src/planos/modulos';
@@ -452,7 +456,9 @@ export class PaymentProviderService {
         throw new BadRequestException(`${campo.label} precisa ser um texto`);
       }
 
-      const valor = typeof bruto === 'string' ? bruto.trim() : '';
+      const texto = typeof bruto === 'string' ? bruto.trim() : '';
+      // o Pix Copia e Cola chega com as quebras de linha de quem copiou
+      const valor = campo.staticPix ? limparBrCode(texto) : texto;
 
       // Segredo em branco = "não mexi neste campo"
       if (!valor && campo.secret && atuais[campo.key]) {
@@ -511,6 +517,11 @@ export class PaymentProviderService {
             `${campo.label}: informe de 0 a 99,99% em cada forma desta integração`,
           );
         }
+      }
+
+      const problemaNoPix = campo.staticPix && problemaNoPixEstatico(valor);
+      if (problemaNoPix) {
+        throw new BadRequestException(`${campo.label}: ${problemaNoPix}`);
       }
 
       if (campo.installmentsMax) {

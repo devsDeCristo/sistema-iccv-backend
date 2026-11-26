@@ -335,6 +335,19 @@ gerou um Pix e voltou escolhendo cartão precisa de outro pedido) e, sendo Pix,
 se ainda sobrarem 5 minutos de validade — devolver um QR prestes a expirar é
 pior que gerar outro.
 
+E só se ainda for **o que está em vigor** (26/11/2026): da integração que
+cobra hoje (`configId`); no Pix, do mesmo tipo — estático da mesma chave
+(`mesmaChave`, que ignora valor e identificador), ou do gateway sem estático
+ligado; e **cobrando o valor de agora** (`chargedAmountCents` igual ao líquido
+de `centavosACobrar` mais a taxa de serviço da forma) — vale para todos os
+gateways: desconto dado, produto que saiu por falta de estoque ou taxa trocada
+depois de aberto geram um checkout novo, em vez de devolver o link com o valor
+velho. Quem abriu o Pix estático, não
+pagou e voltou depois que a igreja desligou o estático recebe o Pix do PayPal
+(e vice-versa); trocar o código colado também gera um novo. O antigo fica
+inativo e a tela dele passa a dizer "substituído". Testes: "Pix aberto volta
+só se ainda estiver em vigor", em `src/payment/pix-na-tela.spec.ts`.
+
 ### Habilitar na conta
 
 Conta empresarial brasileira, em **Account Settings › Products & Services ›
@@ -343,6 +356,56 @@ formulário de solicitação (links em
 `developer.paypal.com/limited-release/alternative-payment-methods/pix/set-up`).
 A ativação passa por análise de elegibilidade do PayPal. Há sandbox. O saque do
 Pix é para a chave Pix cadastrada, em D+1.
+
+### Pix estático (enquanto o PayPal não libera)
+
+Decisão de 26/11/2026: o PayPal demora (ou recusa) a liberar o Pix da conta, e
+a igreja pode colar um **Pix Copia e Cola fixo** da própria conta bancária na
+etapa Pagamento (chave "Usar Pix estático", campo `staticPixCode`, declarado
+por `campoDePixEstatico()` em `src/gateways/core/pix-estatico.ts`). Com ele
+gravado, quem escolhe Pix vê um QR montado a partir desse código e o PayPal
+não é chamado; o cartão continua indo para o PayPal como sempre.
+
+- **O QR já vem com o valor e um identificador** (`pixEstaticoComValor`): o
+  código colado é o da chave, sem valor; para cada cobrança entram o valor
+  exato (campo 54, sem taxa de serviço) e o identificador (62/05, o `txid`:
+  nome do inscrito sem acento + 4 caracteres da referência, até 25 — ex.
+  `TAILANDAROSA3F9A`), e o CRC é refeito. Quem paga não digita valor, e a
+  igreja lê no extrato de quem é a inscrição (quem paga pode ser outra
+  pessoa). Alguns bancos não mostram o identificador de Pix estático, e
+  alguns apps deixam editar o valor — a baixa continua sendo conferida pela
+  igreja.
+
+- **Sem conferência nem baixa.** Nenhum gateway sabe desse pagamento. O
+  checkout nasce com `checkoutId = PIX-ESTATICO-<referência>`, e
+  `listCharges` responde "não encontrado" sem chamar a API — o mesmo caminho de
+  um pedido que o PayPal não conhece: a conferência antes de um checkout novo
+  segue em frente, e a cobrança fica **aguardando** até alguém dar baixa pela
+  tela de Pagamentos. A reconciliação (rotina e "Conferir no gateway") nem
+  pergunta por ele: só enchia o log e, em 24 h, o dava por expirado — e a tela
+  passava a dizer "substituído" de um código que não vence.
+- **O salvar confere o código** (`problemaNoPixEstatico`): começa em `000201`,
+  o CRC16 do fim (`6304` + 4 hex) bate, os campos fecham, e é **o Pix da
+  chave, sem valor**. Recusa, cada um com a sua mensagem: código cortado; o
+  que não é Pix; **valor fixo** (campo 54 — cobraria o mesmo de todo mundo: a
+  tela diz R$ 250 e o banco pede R$ 10); e **Pix de cobrança** (dinâmico, com
+  URL no lugar da chave ou `01=12`), que é de uso único — o primeiro paga, os
+  outros têm o código recusado. Antes,
+  `limparBrCode` tira quebras de linha, tabulação e caracteres invisíveis
+  (espaço de largura zero, BOM) — o código copiado de mensagem ou PDF vem
+  quebrado, e o CRC não fechava com um código válido. Espaço comum fica.
+- **Sem taxa de serviço no Pix:** o dinheiro cai direto na conta da igreja, e
+  `taxasDeServico` devolve `pix: 0` com o código gravado.
+- **A tela sabe:** a pergunta da forma manda `manualPix: true` (o texto do Pix
+  troca "a confirmação sai na hora" por "a organização confere"), e a tela do QR
+  recebe `manual: true` (o cabeçalho deixa de dizer "Processado pelo PayPal",
+  e somem a contagem, o "Aguardando pagamento" e o "Já paguei" — o código não
+  vence na tela, e quem paga não precisa saber como a baixa é feita).
+- A chave só aparece com o **Pix marcado** nas formas (é o Pix que ela
+  substitui). Desmarcar o Pix desliga a chave e apaga o código; desligar a
+  chave também apaga.
+
+Testes: `src/gateways/pix-estatico.spec.ts`.
 
 ### A documentação do Pix está errada nos nomes dos campos
 

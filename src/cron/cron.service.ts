@@ -13,6 +13,7 @@ import {
   PaymentGatewayRegistry,
 } from 'src/gateways/core/payment-gateway.registry';
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
+import { ehPixEstatico } from 'src/gateways/core/pix-estatico';
 import { conferirValorPago } from 'src/payment/amount-check';
 import { SEM_COBRANCA_ONLINE } from 'src/planos/modulos';
 
@@ -107,10 +108,16 @@ export class CronService {
       },
     });
 
-    // checkout já dado como morto não volta a ser perguntado
+    // Checkout já dado como morto não volta a ser perguntado. O Pix estático
+    // nem vai: nenhum gateway sabe dele (a baixa é manual), e perguntar só
+    // enchia o log e o dava por expirado em 24 h — um código que não vence
     const cobrancas: CobrancaPendente[] = pendentes.flatMap((pagamento) =>
       pagamento.checkouts
-        .filter((checkout) => checkout.status !== CheckoutStatus.EXPIRED)
+        .filter(
+          (checkout) =>
+            checkout.status !== CheckoutStatus.EXPIRED &&
+            !ehPixEstatico(checkout.checkoutId),
+        )
         .map((checkout) => ({
           ...checkout,
           eventId: pagamento.eventId,

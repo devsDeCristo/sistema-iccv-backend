@@ -29,6 +29,11 @@ import {
   PaymentGatewayRegistry,
 } from 'src/gateways/core/payment-gateway.registry';
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
+import {
+  ehPixEstatico,
+  mesmaChave,
+  pixEstatico,
+} from 'src/gateways/core/pix-estatico';
 import { HostedCheckoutRequest } from 'src/gateways/core/gateway.types';
 import { totalCobradoEmCentavos } from 'src/gateways/core/discount';
 import {
@@ -461,6 +466,8 @@ export class PaymentService {
             // loja, que não somam pagamentos, mostram o mesmo número que
             // Minhas Inscrições
             amountCents: centavosACobrar(aCobrar),
+            // Pix estático: quem confirma é a organização, não o gateway
+            manualPix: !!pixEstatico(casaDaIgreja.context.credentials),
           },
         };
       }
@@ -511,6 +518,24 @@ export class PaymentService {
       const activeCheckouts = unpaidPayments
         .flatMap((p) => p.checkouts)
         .filter((c) => c.status === CheckoutStatus.ACTIVE);
+
+      /**
+       * Taxa de serviço repassada ao inscrito: um item a mais na cobrança,
+       * calculado sobre o que a igreja tem a receber (com desconto) para que,
+       * descontada a taxa do gateway, sobre o valor cheio. O Pix na nossa tela
+       * tem a taxa do Pix; o checkout, a maior das formas que ficam lá.
+       *
+       * Calculada aqui, antes do reaproveitamento: é com ela que se sabe se o
+       * checkout aberto ainda cobra o valor de agora.
+       */
+      const taxas = taxasDeServico(
+        casaDaIgreja.gateway.descriptor.fields,
+        casaDaIgreja.context.credentials,
+      );
+      const percentual =
+        formaEscolhida === PaymentMethod.PIX && taxas?.pix != null
+          ? taxas.pix
+          : taxas?.checkout ?? 0;
 
       // Desconto de 100% (sem produto pago junto): nada a cobrar. Antes o piso
       // de um centavo por item abria uma cobrança de R$ 0,01 — que o Ton
@@ -627,12 +652,33 @@ export class PaymentService {
           const pixComTempo =
             !ativo.pixExpiresAt ||
             ativo.pixExpiresAt.getTime() > Date.now() + 5 * 60 * 1000;
+          // E só se ainda for o que está em vigor: da integração que cobra
+          // hoje e, no Pix, do mesmo tipo — a igreja que trocou o Pix estático
+          // pelo do gateway (ou a chave colada) não pode ver o antigo voltar.
+          // O estático leva valor e identificador, então compara-se a chave.
+          const codigoEstatico = pixEstatico(casaDaIgreja.context.credentials);
+          const emVigor =
+            ativo.configId === casaDaIgreja.config.id &&
+            (!ativo.pixCode ||
+              (ehPixEstatico(ativo.checkoutId)
+                ? mesmaChave(ativo.pixCode, codigoEstatico)
+                : !codigoEstatico));
+          // E cobrando o valor de agora: desconto dado, produto que saiu por
+          // falta de estoque ou taxa trocada depois de aberto fariam o link
+          // antigo cobrar o valor velho (o gateway recusaria a baixa, ou o
+          // Pix estático pediria o valor errado)
+          const liquido = centavosACobrar(unpaidPayments);
+          const mesmoValor =
+            ativo.chargedAmountCents ===
+            liquido + taxaDeServicoEmCentavos(liquido, percentual);
 
           if (
             usedByOthers.length === 0 &&
             checkoutCreatedAt > oneHourAgo &&
             mesmaForma &&
-            pixComTempo
+            pixComTempo &&
+            emVigor &&
+            mesmoValor
           ) {
             // Atualiza pagamentos para WAITING
             await this.prisma.payment.updateMany({
@@ -785,20 +831,7 @@ export class PaymentService {
         ...new Set(activeCheckouts.map((c) => c.checkoutId)),
       ];
 
-      /**
-       * Taxa de serviço repassada ao inscrito: um item a mais na cobrança,
-       * calculado sobre o que a igreja tem a receber (com desconto) para que,
-       * descontada a taxa do gateway, sobre o valor cheio. O Pix na nossa tela
-       * tem a taxa do Pix; o checkout, a maior das formas que ficam lá.
-       */
-      const taxas = taxasDeServico(
-        gateway.descriptor.fields,
-        context.credentials,
-      );
-      const percentual =
-        formaEscolhida === PaymentMethod.PIX && taxas?.pix != null
-          ? taxas.pix
-          : taxas?.checkout ?? 0;
+      // a taxa de serviço (ver `percentual`, lá em cima) vira item da cobrança
       const taxaEmCentavos = taxaDeServicoEmCentavos(
         totalCobradoEmCentavos(pedido.items, pedido.discountCents),
         percentual,
@@ -960,6 +993,8 @@ export class PaymentService {
       // `false` quando um checkout novo tomou o lugar deste: o código antigo
       // ainda seria aceito pelo banco, e a tela precisa parar de oferecê-lo
       active: checkout.status === CheckoutStatus.ACTIVE,
+      // Pix estático: nenhum gateway confirma, a baixa é manual
+      manual: ehPixEstatico(checkout.checkoutId),
     };
   }
 

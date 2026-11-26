@@ -7,6 +7,8 @@ import {
   PaymentStatus,
 } from '@prisma/client';
 import { PaymentService } from './payment.service';
+import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
+import { pixEstaticoComValor } from 'src/gateways/core/pix-estatico';
 
 /**
  * O Pix do PayPal é o único pagamento que acontece numa tela nossa. Três
@@ -98,6 +100,8 @@ describe('createCheckout — escolha da forma de pagamento', () => {
       // sem repasse de taxa
       serviceFee: null,
       amountCents: 12000,
+      // sem Pix estático configurado
+      manualPix: false,
     });
     expect(createCheckout).not.toHaveBeenCalled();
     expect(banco.$transaction).not.toHaveBeenCalled();
@@ -385,5 +389,185 @@ describe('forma do pedido', () => {
 
   it('gateway sem escolha não tem forma', () => {
     expect(formaDoPedido([], PaymentMethod.PIX)).toBeUndefined();
+  });
+});
+
+describe('Pix aberto volta só se ainda estiver em vigor', () => {
+  const ESTATICO =
+    '00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D';
+
+  function montar(
+    aberto: {
+      checkoutId: string;
+      pixCode: string;
+      configId?: string;
+      chargedAmountCents?: number;
+    },
+    credenciais: Record<string, string>,
+    desconto: number | null = null,
+  ) {
+    const ativo = {
+      referenceId: 'ref-antiga',
+      provider: PaymentProvider.PAYPAL,
+      configId: 'config-1',
+      status: CheckoutStatus.ACTIVE,
+      link: '/pix/antigo',
+      createdAt: new Date(Date.now() - 5 * 60 * 1000),
+      pixExpiresAt: new Date(Date.now() + 50 * 60 * 1000),
+      // o ingresso de R$ 100, sem taxa
+      chargedAmountCents: 10000,
+      ...aberto,
+    };
+    const gateway = {
+      descriptor: { label: 'PayPal', fields: [] },
+      paymentMethodChoices: () => [
+        PaymentMethod.PIX,
+        PaymentMethod.CREDIT_CARD,
+      ],
+      listCharges: jest
+        .fn()
+        .mockRejectedValue(new GatewayResourceNotFoundError('PayPal', 'x')),
+      // parar aqui basta: o que interessa é se um pedido novo foi pedido
+      createCheckout: jest.fn().mockRejectedValue(new Error('pedido novo')),
+    };
+    const casa = {
+      gateway,
+      context: { credentials: credenciais },
+      config: { id: 'config-1', provider: PaymentProvider.PAYPAL },
+      webhookSecret: 's',
+    };
+    const prisma = {
+      event: {
+        findUnique: async () => ({
+          id: 'ev-1',
+          churchId: 'ig-1',
+          name: 'Retiro',
+          church: { plan: { modules: [ChurchModule.EVENTS] } },
+        }),
+      },
+      user: {
+        findUnique: async () => ({
+          id: 'u-1',
+          fullName: 'Fulano de Tal',
+          cpf: '12345678909',
+          cellphone: '55991234567',
+        }),
+      },
+      payment: {
+        findMany: async () => [
+          {
+            id: 'p-1',
+            status: PaymentStatus.WAITING,
+            checkouts: [ativo],
+            productItems: [],
+            eventUserRole: { role: { price: 100 }, discountPercent: desconto },
+          },
+        ],
+        updateMany: async () => ({}),
+      },
+      paymentCheckout: { findMany: async () => [] },
+      $transaction: async (fn: any) =>
+        fn({
+          payment: { findMany: async () => [], updateMany: async () => ({}) },
+        }),
+    };
+    const registry = {
+      paraIgreja: async () => casa,
+      porConfigId: async () => casa,
+    };
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const service = new PaymentService(prisma as any, registry as any);
+    const pagarComPix = () =>
+      service.createCheckout({
+        userId: 'u-1',
+        eventId: 'ev-1',
+        roleRegistrationId: ['r-1'],
+        method: PaymentMethod.PIX,
+      });
+    return { gateway, pagarComPix };
+  }
+
+  const estaticoAberto = {
+    checkoutId: 'PIX-ESTATICO-ref-antiga',
+    pixCode: ESTATICO,
+  };
+
+  it('estático aberto e a igreja voltou ao Pix do PayPal: gera o do PayPal', async () => {
+    const { gateway, pagarComPix } = montar(estaticoAberto, {});
+    await expect(pagarComPix()).rejects.toThrow('pedido novo');
+    expect(gateway.createCheckout).toHaveBeenCalled();
+  });
+
+  it('estático aberto com o mesmo código em vigor: reaproveita', async () => {
+    const { gateway, pagarComPix } = montar(estaticoAberto, {
+      staticPixCode: ESTATICO,
+    });
+    expect(await pagarComPix()).toEqual({
+      message: 'Checkout already exists',
+      link: '/pix/antigo',
+    });
+    expect(gateway.createCheckout).not.toHaveBeenCalled();
+  });
+
+  it('a igreja trocou o código colado: gera com o novo', async () => {
+    const { gateway, pagarComPix } = montar(estaticoAberto, {
+      staticPixCode: ESTATICO.replace('Fulano de Tal', 'Ciclano de Ta'),
+    });
+    await expect(pagarComPix()).rejects.toThrow('pedido novo');
+    expect(gateway.createCheckout).toHaveBeenCalled();
+  });
+
+  it('Pix do PayPal aberto e a igreja ligou o estático: gera o estático', async () => {
+    const { gateway, pagarComPix } = montar(
+      { checkoutId: 'ORDER-1', pixCode: '00020101021226...' },
+      { staticPixCode: ESTATICO },
+    );
+    await expect(pagarComPix()).rejects.toThrow('pedido novo');
+    expect(gateway.createCheckout).toHaveBeenCalled();
+  });
+
+  it('estático aberto e a igreja ainda nele: reaproveita o que já tem valor', async () => {
+    const { gateway, pagarComPix } = montar(
+      {
+        ...estaticoAberto,
+        pixCode: pixEstaticoComValor(ESTATICO, 10000, 'FULANODETALREFA'),
+      },
+      { staticPixCode: ESTATICO },
+    );
+    expect((await pagarComPix()) as any).toMatchObject({
+      link: '/pix/antigo',
+    });
+    expect(gateway.createCheckout).not.toHaveBeenCalled();
+  });
+
+  it('desconto dado depois de aberto: gera com o valor de agora', async () => {
+    const { gateway, pagarComPix } = montar(
+      estaticoAberto,
+      { staticPixCode: ESTATICO },
+      50,
+    );
+    await expect(pagarComPix()).rejects.toThrow('pedido novo');
+    expect(gateway.createCheckout).toHaveBeenCalled();
+  });
+
+  it('taxa de serviço trocada depois de aberto: gera com a de agora', async () => {
+    const { gateway, pagarComPix } = montar(
+      { checkoutId: 'ORDER-1', pixCode: '000201...' },
+      { serviceFees: 'PIX=0.99', enabledMethods: 'PIX,CREDIT_CARD' },
+    );
+    gateway.descriptor.fields = new (jest.requireActual(
+      'src/gateways/paypal/paypal.gateway',
+    ).PayPalGateway)({} as any).descriptor.fields;
+    await expect(pagarComPix()).rejects.toThrow('pedido novo');
+    expect(gateway.createCheckout).toHaveBeenCalled();
+  });
+
+  it('aberto em outra integração (a igreja trocou de gateway): gera na atual', async () => {
+    const { gateway, pagarComPix } = montar(
+      { checkoutId: 'ORDER-1', pixCode: '000201...', configId: 'config-velha' },
+      {},
+    );
+    await expect(pagarComPix()).rejects.toThrow('pedido novo');
+    expect(gateway.createCheckout).toHaveBeenCalled();
   });
 });

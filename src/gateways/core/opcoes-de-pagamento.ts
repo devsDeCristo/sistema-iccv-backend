@@ -2,6 +2,7 @@ import { UnprocessableEntityException } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
 import { GatewayRequestError } from './gateway.errors';
 import { CredentialField } from './gateway.types';
+import { pixEstatico } from './pix-estatico';
 
 /**
  * O que a igreja escolhe oferecer no checkout: formas de pagamento e teto de
@@ -217,7 +218,9 @@ export function taxasDeServico(
   const doCheckout = pixNaTela ? formasDoCheckout(formas) : formas;
 
   return {
-    pix: pixNaTela ? taxas.PIX ?? 0 : null,
+    // Pix estático vai direto para a conta da igreja: o gateway não cobra
+    // nada, e repassar taxa ali seria cobrar um custo que não existe
+    pix: pixNaTela ? (pixEstatico(credenciais) ? 0 : taxas.PIX ?? 0) : null,
     checkout: Math.max(0, ...doCheckout.map((forma) => taxas[forma] ?? 0)),
   };
 }
