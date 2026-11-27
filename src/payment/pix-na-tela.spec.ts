@@ -8,7 +8,10 @@ import {
 } from '@prisma/client';
 import { PaymentService } from './payment.service';
 import { GatewayResourceNotFoundError } from 'src/gateways/core/gateway.errors';
-import { pixEstaticoComValor } from 'src/gateways/core/pix-estatico';
+import {
+  checkoutDoPixEstatico,
+  pixEstaticoComValor,
+} from 'src/gateways/core/pix-estatico';
 
 /**
  * O Pix do PayPal é o único pagamento que acontece numa tela nossa. Três
@@ -190,6 +193,80 @@ describe('tela do QR — leitura e conferência', () => {
       active: true,
       providerLabel: 'PayPal',
     });
+  });
+
+  it('Pix estático traz os tesoureiros(as) para o comprovante; sem eles, os admins do evento', async () => {
+    const estatico = {
+      ...checkoutPix(),
+      checkoutId: checkoutDoPixEstatico('ref-1'),
+    };
+    const ana = { user: { fullName: 'Ana Lima', cellphone: '84999990000' } };
+    const beto = { user: { fullName: 'Beto Reis', cellphone: '84988880000' } };
+
+    const comTesoureiro = montar(estatico);
+    (comTesoureiro.service as any).prisma.event.findUnique.mockResolvedValue({
+      name: 'Retiro',
+      treasurers: [ana],
+      admins: [beto],
+    });
+    expect(
+      await comTesoureiro.service.pixDoCheckout('ev-1', 'u-1', 'ref-1'),
+    ).toMatchObject({
+      manual: true,
+      comprovantePara: [{ nome: 'Ana Lima', celular: '84999990000' }],
+    });
+
+    const soAdmin = montar(estatico);
+    (soAdmin.service as any).prisma.event.findUnique.mockResolvedValue({
+      name: 'Retiro',
+      treasurers: [],
+      admins: [beto],
+    });
+    expect(
+      await soAdmin.service.pixDoCheckout('ev-1', 'u-1', 'ref-1'),
+    ).toMatchObject({
+      comprovantePara: [{ nome: 'Beto Reis', celular: '84988880000' }],
+    });
+
+    const doGateway = montar(checkoutPix());
+    expect(
+      await doGateway.service.pixDoCheckout('ev-1', 'u-1', 'ref-1'),
+    ).toMatchObject({ manual: false, comprovantePara: [] });
+  });
+
+  it('comprovante: só celular válido, sem repetir número, sem o próprio inscrito', async () => {
+    const estatico = {
+      ...checkoutPix(),
+      checkoutId: checkoutDoPixEstatico('ref-1'),
+    };
+    const pessoa = (fullName: string, cellphone: string) => ({
+      user: { fullName, cellphone },
+    });
+
+    // tesoureiro sem celular válido não segura a vez dos admins
+    const semCelular = montar(estatico);
+    const findUnique = (semCelular.service as any).prisma.event
+      .findUnique as jest.Mock;
+    findUnique.mockResolvedValue({
+      name: 'Retiro',
+      treasurers: [pessoa('Ana Lima', ''), pessoa('Caio Melo', '1234')],
+      admins: [
+        pessoa('Beto Reis', '(084) 98888-0000'),
+        pessoa('Dora Reis', '+55 84 98888-0000'),
+      ],
+    });
+
+    expect(
+      await semCelular.service.pixDoCheckout('ev-1', 'u-1', 'ref-1'),
+    ).toMatchObject({
+      // o zero e o 55 saem; o mesmo número de outra pessoa não repete
+      comprovantePara: [{ nome: 'Beto Reis', celular: '84988880000' }],
+    });
+
+    // quem paga não aparece como contato de si mesmo
+    const select = findUnique.mock.calls[0][0].select;
+    expect(select.treasurers.where).toEqual({ userId: { not: 'u-1' } });
+    expect(select.admins.where).toEqual({ userId: { not: 'u-1' } });
   });
 
   it('responde 404 para referência que não é deste inscrito', async () => {

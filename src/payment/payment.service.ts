@@ -85,6 +85,45 @@ function ehLancamentoManual(anterior: PaymentStatus, novo?: PaymentStatus) {
 const INTERVALO_DA_CONFERENCIA = 15 * 1000;
 const ultimaConferenciaDoPix = new Map<string, number>();
 
+/**
+ * DDD + número, só dígitos, ou `null` se não fecha um telefone brasileiro.
+ * Tira o zero de operadora/discagem da frente. O 55 só é o código do país com
+ * 12 ou 13 dígitos: com 10 ou 11 é o DDD do RS (Santa Maria, Uruguaiana...), e
+ * tirá-lo derrubava o número.
+ */
+function celularBrasileiro(telefone: string | null) {
+  const numeros = (telefone ?? '').replace(/\D/g, '').replace(/^0+/, '');
+  const semPais =
+    numeros.length > 11 && numeros.startsWith('55')
+      ? numeros.slice(2)
+      : numeros;
+
+  return semPais.length >= 10 && semPais.length <= 11 ? semPais : null;
+}
+
+/**
+ * Para quem mandar o comprovante: quem tem celular válido, um contato por
+ * número (duas pessoas com o mesmo celular viravam dois botões iguais).
+ */
+function contatosDoComprovante(
+  equipe: { user: { fullName: string; cellphone: string } }[],
+) {
+  const vistos = new Set<string>();
+
+  return equipe.flatMap(({ user }) => {
+    const celular = celularBrasileiro(user.cellphone);
+    if (!celular || vistos.has(celular)) return [];
+    vistos.add(celular);
+    return [{ nome: user.fullName, celular }];
+  });
+}
+
+/** Tesoureiro(a) ou admin do evento, como contato do comprovante do Pix estático */
+const EQUIPE_DO_COMPROVANTE = {
+  user: { select: { fullName: true, cellphone: true } },
+} as const;
+const PRIMEIRO_DADO = { createdAt: 'asc' } as const;
+
 const ACCEPTED_RECEIPT_MIME_TYPES = [
   'image/png',
   'image/jpeg',
@@ -222,17 +261,9 @@ export class PaymentService {
   }
 
   private extrairDddENumero(telefone: string | null) {
-    // Só os dígitos, sem o zero de operadora/discagem na frente
-    const numeros = (telefone ?? '').replace(/\D/g, '').replace(/^0+/, '');
+    const numeroLimpo = celularBrasileiro(telefone);
 
-    // O 55 só é o código do país com 12 ou 13 dígitos: com 10 ou 11 é o DDD
-    // do RS (Santa Maria, Uruguaiana...), e tirá-lo derrubava o número
-    const numeroLimpo =
-      numeros.length > 11 && numeros.startsWith('55')
-        ? numeros.slice(2)
-        : numeros;
-
-    if (numeroLimpo.length < 10 || numeroLimpo.length > 11) {
+    if (!numeroLimpo) {
       throw new BadRequestException(
         'Celular do cadastro inválido: atualize o seu perfil com DDD e número para pagar.',
       );
@@ -974,11 +1005,39 @@ export class PaymentService {
    */
   async pixDoCheckout(eventId: string, userId: string, referenceId: string) {
     const checkout = await this.checkoutPix(eventId, userId, referenceId);
+    const manual = ehPixEstatico(checkout.checkoutId);
 
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { name: true },
+      select: {
+        name: true,
+        // Pix estático: quem confirma é a organização, e o inscrito manda o
+        // comprovante para os tesoureiros(as) do evento — sem nenhum, para os
+        // admins dele. Só nome e celular, e só nesta tela, que já é recortada
+        // ao pagamento do próprio inscrito
+        // Quem paga não é contato de si mesmo: tesoureiro(a) inscrito no
+        // próprio evento veria o próprio WhatsApp
+        ...(manual && {
+          treasurers: {
+            where: { userId: { not: userId } },
+            select: EQUIPE_DO_COMPROVANTE,
+            orderBy: PRIMEIRO_DADO,
+          },
+          admins: {
+            where: { userId: { not: userId } },
+            select: EQUIPE_DO_COMPROVANTE,
+            orderBy: PRIMEIRO_DADO,
+          },
+        }),
+      },
     });
+
+    // Sem tesoureiro com celular, os admins: tesoureiro cadastrado sem número
+    // não pode deixar o inscrito sem ninguém a quem mandar
+    const tesoureiros = contatosDoComprovante(event?.treasurers ?? []);
+    const comprovantePara = tesoureiros.length
+      ? tesoureiros
+      : contatosDoComprovante(event?.admins ?? []);
 
     return {
       provider: checkout.provider,
@@ -994,7 +1053,9 @@ export class PaymentService {
       // ainda seria aceito pelo banco, e a tela precisa parar de oferecê-lo
       active: checkout.status === CheckoutStatus.ACTIVE,
       // Pix estático: nenhum gateway confirma, a baixa é manual
-      manual: ehPixEstatico(checkout.checkoutId),
+      manual,
+      // para quem mandar o comprovante (vazio fora do Pix estático)
+      comprovantePara,
     };
   }
 

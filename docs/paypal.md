@@ -384,6 +384,17 @@ não é chamado; o cartão continua indo para o PayPal como sempre.
   tela de Pagamentos. A reconciliação (rotina e "Conferir no gateway") nem
   pergunta por ele: só enchia o log e, em 24 h, o dava por expirado — e a tela
   passava a dizer "substituído" de um código que não vence.
+- **O comprovante vai para os tesoureiros(as) do evento.** Como ninguém fica
+  sabendo do pagamento sozinho, a tela do QR (`pixDoCheckout`) devolve
+  `comprovantePara: { nome, celular }[]` quando o checkout é estático: os
+  `EventTreasurer` do evento e, sem nenhum com celular válido, os
+  `EventAdmin`. O celular sai normalizado (DDD + número, `celularBrasileiro`,
+  a mesma regra do cadastro no gateway), cada número aparece uma vez só, e o
+  próprio inscrito não entra, mesmo sendo tesoureiro(a) ou admin do evento. Fora do estático
+  a lista vem vazia; sem ninguém, a tela manda à administração do evento em
+  texto. A tela já é recortada ao
+  pagamento do próprio inscrito, e só saem nome e celular. A tela mostra um
+  botão de WhatsApp para cada um (ic-front, `docs/pagamento-pix.md`).
 - **O salvar confere o código** (`problemaNoPixEstatico`): começa em `000201`,
   o CRC16 do fim (`6304` + 4 hex) bate, os campos fecham, e é **o Pix da
   chave, sem valor**. Recusa, cada um com a sua mensagem: código cortado; o
